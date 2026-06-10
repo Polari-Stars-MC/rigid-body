@@ -6,12 +6,12 @@ def repoRoot = layout.projectDirectory.dir('..')
 def nativeLibrary = providers.provider {
     def os = System.getProperty('os.name').toLowerCase(Locale.ROOT)
     if (os.contains('win')) {
-        return repoRoot.file('target/release/msp_rigid_body.dll').asFile.absolutePath
+        return repoRoot.file('target/release/deps/msp_rigid_body.dll').asFile.absolutePath
     }
     if (os.contains('mac') || os.contains('darwin')) {
-        return repoRoot.file('target/release/libmsp_rigid_body.dylib').asFile.absolutePath
+        return repoRoot.file('target/release/deps/libmsp_rigid_body.dylib').asFile.absolutePath
     }
-    return repoRoot.file('target/release/libmsp_rigid_body.so').asFile.absolutePath
+    return repoRoot.file('target/release/deps/libmsp_rigid_body.so').asFile.absolutePath
 }
 
 java {

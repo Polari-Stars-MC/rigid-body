@@ -222,6 +222,14 @@ public final class RigidBodyNative {
 
     public static native void worldSetGravity(long world, double gravityX, double gravityY, double gravityZ);
 
+    public static double[] worldGetGravity(long world) {
+        return new double[] {
+                worldGetGravityX(world),
+                worldGetGravityY(world),
+                worldGetGravityZ(world)
+        };
+    }
+
     public static native double worldGetGravityX(long world);
 
     public static native double worldGetGravityY(long world);
@@ -237,6 +245,14 @@ public final class RigidBodyNative {
     public static native void rigidBodyBuilderSetTranslation(long builder, double x, double y, double z);
 
     public static native long worldInsertRigidBody(long world, long builder);
+
+    public static double[] rigidBodyGetTranslation(long world, long body) {
+        return new double[] {
+                rigidBodyGetTranslationX(world, body),
+                rigidBodyGetTranslationY(world, body),
+                rigidBodyGetTranslationZ(world, body)
+        };
+    }
 
     public static native double rigidBodyGetTranslationX(long world, long body);
 
