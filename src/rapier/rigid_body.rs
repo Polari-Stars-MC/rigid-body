@@ -25,9 +25,13 @@ pub extern "C" fn rigid_body_builder_create(status: BodyStatus) -> *mut RigidBod
 
 #[unsafe(no_mangle)]
 pub extern "C" fn rigid_body_builder_build(builder: *mut RigidBodyBuilderHandle) -> *mut RigidBody {
-    let rigid_body = unsafe { Box::into_raw(Box::new((*builder).inner.build())) };
-    rigid_body_builder_destroy(builder);
-    rigid_body
+    if builder.is_null() {
+        return std::ptr::null_mut();
+    }
+
+    let builder = unsafe { Box::from_raw(builder) };
+    let RigidBodyBuilderHandle { inner } = *builder;
+    Box::into_raw(Box::new(inner.build()))
 }
 
 #[unsafe(no_mangle)]
@@ -229,6 +233,9 @@ pub extern "C" fn world_insert_rigid_body(
     let Some(world) = (unsafe { world.as_mut() }) else {
         return 0;
     };
+    if memory_handle.is_null() {
+        return 0;
+    }
 
     let built = unsafe { *Box::from_raw(memory_handle) };
     pack_rigid_body_handle(world.inner.bodies.insert(built))
@@ -260,29 +267,22 @@ pub extern "C" fn world_remove_rigid_body(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn world_extract_rigid_body(
+pub extern "C" fn world_copy_rigid_body(
     world: *mut WorldHandle,
     handle: RigidBodyHandleRaw,
-    remove_attached_colliders: Bool,
 ) -> *mut RigidBody {
     let Some(world) = (unsafe { world.as_mut() }) else {
         return std::ptr::null_mut();
     };
-    let rbwh = unpack_rigid_body_handle(handle);
-    let rbs = &mut world.inner.bodies;
 
-    let Some(rb) = rbs.get(rbwh).cloned() else {
+    let Some(rb) = world
+        .inner
+        .bodies
+        .get(unpack_rigid_body_handle(handle))
+        .cloned()
+    else {
         return std::ptr::null_mut();
     };
-
-    rbs.remove(
-        rbwh,
-        &mut world.inner.islands,
-        &mut world.inner.colliders,
-        &mut world.inner.impulse_joints,
-        &mut world.inner.multibody_joints,
-        remove_attached_colliders.0 != 0,
-    );
 
     Box::into_raw(Box::new(rb))
 }

@@ -48,7 +48,6 @@ public final class RigidBodyNative {
     public static native int abiVersion();
     public static native boolean abiSupportsFfm();
     public static native boolean abiSupportsJni();
-    public static native void rustMemoryFree(long handle);
 
     public static native long worldCreate(double gravityX, double gravityY, double gravityZ);
     public static native void worldDestroy(long world);
@@ -63,11 +62,11 @@ public final class RigidBodyNative {
 
     public static native long worldInsertRigidBody(long world, long memoryHandle);
     public static native boolean worldRemoveRigidBody(long world, long handle, int removeAttachedColliders);
-    public static native long worldExtractRigidBody(long world, long handle, int removeAttachedColliders);
+    public static native long worldCopyRigidBody(long world, long handle);
     public static native long worldInsertCollider(long world, long memoryHandle);
     public static native long worldInsertColliderWithParent(long world, long memoryHandle, long parent);
     public static native boolean worldRemoveCollider(long world, long handle, int wakeUp);
-    public static native long worldExtractCollider(long world, long memoryHandle);
+    public static native long worldCopyCollider(long world, long handle);
 
     public static native long colliderBuilderCreate(int shapeType, double a, double b, double c);
     public static native long colliderBuilderCreateHeightmap(

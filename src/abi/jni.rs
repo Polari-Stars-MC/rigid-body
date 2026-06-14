@@ -266,15 +266,17 @@ jni!(int worldDynamicBodySnapshot(long world, long out_handles, long out_values,
 //世界插入
 jni!(long worldInsertRigidBody(long world, long memory_handle) { rb::world_insert_rigid_body(m::<WH>(world), m::<RB>(memory_handle)) as jlong });
 jni!(boolean worldRemoveRigidBody(long world, long handle, int remove_attached_colliders) { rb::world_remove_rigid_body(m::<WH>(world), handle as RRaw, jb(remove_attached_colliders)).0 as jbyte });
-jni!(long worldExtractRigidBody(long world, long handle, int remove_attached_colliders) { rb::world_extract_rigid_body(m::<WH>(world), handle as RRaw, jb(remove_attached_colliders)) as jlong });
+jni!(long worldCopyRigidBody(long world, long handle) { rb::world_copy_rigid_body(m::<WH>(world), handle as RRaw) as jlong });
 jni!(long worldInsertCollider(long world, long memory_handle) { col::world_insert_collider(m::<WH>(world), m::<CB>(memory_handle)) as jlong });
 jni!(long worldInsertColliderWithParent(long world, long memory_handle, long parent) { col::world_insert_collider_with_parent(m::<WH>(world), m::<CB>(memory_handle), parent as RRaw) as jlong });
 jni!(boolean worldRemoveCollider(long world, long handle, int wake_up) { col::world_remove_collider(m::<WH>(world), handle as CRaw, jb(wake_up)).0 as jbyte });
-jni!(long worldExtractCollider(long world, long memory_handle) { rb::world_insert_rigid_body(m::<WH>(world), m::<RB>(memory_handle)) as jlong });
+jni!(long worldCopyCollider(long world, long handle)  { col::world_copy_collider(m::<WH>(world), handle as CRaw) as jlong });
 
 jni!(long colliderBuilderCreate(int shape_type, double a, double b, double c) { to_jlong(col::collider_builder_create(self::shape_type(shape_type), v3(a, b, c))) });
 jni_e_c!(long colliderBuilderCreateHeightmap(env _env, class _class, double_array data, int data_x, int data_y, double scale_x, double scale_y, double scale_z) {
-    let values = jdoublearray_to_array(&_env, data);
+    let Some(values) = jdoublearray_to_array(&_env, data) else {
+        return 0;
+    };
     to_jlong(col::collider_builder_create_heightmap(values.as_ptr(), data_x as u32, data_y as u32, Vec3 { x: scale_x, y: scale_y, z: scale_z }))
 });
 jni!(long colliderBuilderCreateEx(int shape_type, double a, double b, double c, double d) { to_jlong(col::collider_builder_create_ex(sd(shape_type, a, b, c, d))) });
@@ -519,31 +521,3 @@ jni!(boolean crbTreeUpdate(long tree, long id, double min_x, double min_y, doubl
 jni!(boolean crbTreeRemove(long tree, long id) { crt::crb_tree_remove(m::<CRTH>(tree), id as u64).0 as jbyte });
 jni!(int crbTreeQueryAabbCount(long tree, double min_x, double min_y, double min_z, double max_x, double max_y, double max_z) { crt::crb_tree_query_aabb_count(cp::<CRTH>(tree), aa(min_x,min_y,min_z,max_x,max_y,max_z)) as jint });
 jni!(int crbTreeQueryAabb(long tree, double min_x, double min_y, double min_z, double max_x, double max_y, double max_z, long out_ids, int capacity) { crt::crb_tree_query_aabb(cp::<CRTH>(tree), aa(min_x,min_y,min_z,max_x,max_y,max_z), pm::<u64>(out_ids), capacity as u32) as jint });
-
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_org_polaris2023_mps_rapier_RapierConnect_RustMemoryFree(
-    _env: JNIEnv,
-    _class: jclass,
-    handle: jlong,
-) {
-    let ptr = handle as *mut ();
-    if !ptr.is_null() {
-        unsafe {
-            drop(Box::from_raw(ptr));
-        }
-    }
-}
-
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_org_polaris2023_msp_1rigid_1body_RigidBodyNative_rustMemoryFree(
-    _env: JNIEnv,
-    _class: jclass,
-    handle: jlong,
-) {
-    let ptr = handle as *mut ();
-    if !ptr.is_null() {
-        unsafe {
-            drop(Box::from_raw(ptr));
-        }
-    }
-}

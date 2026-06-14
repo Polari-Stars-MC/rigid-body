@@ -444,9 +444,13 @@ pub extern "C" fn collider_builder_create_medial_spheres(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn collider_builder_build(builder: *mut ColliderBuilderHandle) -> *mut Collider {
-    let collider = unsafe { Box::into_raw(Box::new((*builder).inner.build())) };
-    collider_builder_destroy(builder);
-    collider
+    if builder.is_null() {
+        return std::ptr::null_mut();
+    }
+
+    let builder = unsafe { Box::from_raw(builder) };
+    let ColliderBuilderHandle { inner } = *builder;
+    Box::into_raw(Box::new(inner.build()))
 }
 
 #[unsafe(no_mangle)]
@@ -619,6 +623,9 @@ pub extern "C" fn world_insert_collider(
     let Some(world) = (unsafe { world.as_mut() }) else {
         return 0;
     };
+    if memory_handle.is_null() {
+        return 0;
+    }
 
     let built = unsafe { *Box::from_raw(memory_handle) };
     pack_collider_handle(world.inner.colliders.insert(built))
@@ -633,6 +640,9 @@ pub extern "C" fn world_insert_collider_with_parent(
     let Some(world) = (unsafe { world.as_mut() }) else {
         return 0;
     };
+    if memory_handle.is_null() {
+        return 0;
+    }
 
     let built = unsafe { *Box::from_raw(memory_handle) };
     pack_collider_handle(world.inner.colliders.insert_with_parent(
@@ -663,6 +673,27 @@ pub extern "C" fn world_remove_collider(
         )
         .is_some()
         .into()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn world_copy_collider(
+    world: *mut WorldHandle,
+    handle: ColliderHandleRaw,
+) -> *mut Collider {
+    let Some(world) = (unsafe { world.as_mut() }) else {
+        return std::ptr::null_mut();
+    };
+
+    let Some(collider) = world
+        .inner
+        .colliders
+        .get(unpack_collider_handle(handle))
+        .cloned()
+    else {
+        return std::ptr::null_mut();
+    };
+
+    Box::into_raw(Box::new(collider))
 }
 
 #[unsafe(no_mangle)]

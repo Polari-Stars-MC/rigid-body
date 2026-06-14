@@ -507,6 +507,8 @@ struct Bool world_remove_collider(struct WorldHandle *world,
                                   ColliderHandleRaw handle,
                                   struct Bool wake_up);
 
+Collider *world_copy_collider(struct WorldHandle *world, ColliderHandleRaw handle);
+
 uint8_t world_remove_collider_flag(struct WorldHandle *world,
                                    ColliderHandleRaw handle,
                                    struct Bool wake_up);
@@ -895,9 +897,7 @@ struct Bool world_remove_rigid_body(struct WorldHandle *world,
                                     RigidBodyHandleRaw handle,
                                     struct Bool remove_attached_colliders);
 
-RigidBody *world_extract_rigid_body(struct WorldHandle *world,
-                                    RigidBodyHandleRaw handle,
-                                    struct Bool remove_attached_colliders);
+RigidBody *world_copy_rigid_body(struct WorldHandle *world, RigidBodyHandleRaw handle);
 
 uint8_t world_remove_rigid_body_flag(struct WorldHandle *world,
                                      RigidBodyHandleRaw handle,
