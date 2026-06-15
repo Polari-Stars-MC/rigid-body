@@ -6,6 +6,9 @@ plugins {
 def repoRoot = layout.projectDirectory.dir('..')
 def nativeLibraryDir = repoRoot.dir('target/release')
 def nativeLibraryName = System.mapLibraryName('mps_rigid_body')
+def nativeOs = org.gradle.internal.os.OperatingSystem.current().isWindows() ? 'windows' :
+        (org.gradle.internal.os.OperatingSystem.current().isMacOsX() ? 'macos' : 'linux')
+def nativeArch = System.getProperty('os.arch').toLowerCase(Locale.ROOT).contains('64') ? 'x86_64' : System.getProperty('os.arch').toLowerCase(Locale.ROOT)
 def modId = findProperty('mod_id') ?: 'mps_rigid_body'
 def modVersion = findProperty('mod_version') ?: '0.1.0'
 def modGroup = findProperty('mod_group') ?: 'org.polaris2023'
@@ -118,10 +121,28 @@ tasks.register('syncNativeLibraryToRelease') {
         }
 
         java.nio.file.Files.copy(
-                dependencyLibrary.toPath(),
-                releaseLibrary.toPath(),
-                java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+            dependencyLibrary.toPath(),
+            releaseLibrary.toPath(),
+            java.nio.file.StandardCopyOption.REPLACE_EXISTING)
     }
+}
+
+def generatedNativeResources = layout.buildDirectory.dir('generated/resources/native')
+
+tasks.register('copyNativeLibraryToResources', Copy) {
+    dependsOn tasks.named('syncNativeLibraryToRelease')
+    from(nativeLibraryDir.file(nativeLibraryName))
+    into(generatedNativeResources.map { it.dir("native/${nativeOs}/${nativeArch}") })
+}
+
+sourceSets {
+    main {
+        resources.srcDir(generatedNativeResources)
+    }
+}
+
+tasks.named('processResources') {
+    dependsOn tasks.named('copyNativeLibraryToResources')
 }
 
 tasks.register('runJniTest', JavaExec) {

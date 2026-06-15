@@ -1,0 +1,8 @@
+{
+  "type": "cylinder",
+  "radius": 0.6,
+  "half_height": 0.5,
+  "friction": 0.65,
+  "restitution": 0.15,
+  "density": 1.0
+}

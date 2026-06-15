@@ -1,0 +1,15 @@
+{
+  "kind": "material",
+  "friction": 0.8,
+  "restitution": 0.0,
+  "density": 1.0,
+  "damage_scale": 0.0,
+  "break_threshold": 1000000.0,
+  "linear_damping": 0.2,
+  "angular_damping": 0.2,
+  "gravity_scale": 1.0,
+  "sound": "minecraft:block.anvil.land",
+  "particle": "minecraft:crit",
+  "blocks": [],
+  "tags": []
+}

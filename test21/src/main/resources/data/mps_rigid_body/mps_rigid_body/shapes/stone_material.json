@@ -1,0 +1,15 @@
+{
+  "kind": "material",
+  "friction": 0.9,
+  "restitution": 0.0,
+  "density": 1.5,
+  "damage_scale": 0.05,
+  "break_threshold": 500.0,
+  "linear_damping": 0.25,
+  "angular_damping": 0.25,
+  "gravity_scale": 1.0,
+  "sound": "minecraft:block.stone.hit",
+  "particle": "minecraft:block",
+  "blocks": ["minecraft:stone", "minecraft:deepslate"],
+  "tags": ["#minecraft:mineable/pickaxe"]
+}

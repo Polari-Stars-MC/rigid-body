@@ -1,0 +1,8 @@
+{
+  "type": "capsule",
+  "radius": 0.35,
+  "half_height": 0.9,
+  "friction": 0.6,
+  "restitution": 0.1,
+  "density": 1.0
+}

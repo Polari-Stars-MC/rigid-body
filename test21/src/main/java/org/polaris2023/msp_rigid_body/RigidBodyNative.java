@@ -2,6 +2,7 @@ package org.polaris2023.msp_rigid_body;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 
 public final class RigidBodyNative {
     static {
@@ -36,13 +37,71 @@ public final class RigidBodyNative {
                 }
             }
 
+            if (loadBundledLibrary(mappedName)) {
+                return;
+            }
+
             UnsatisfiedLinkError error = new UnsatisfiedLinkError(
                     loadLibraryError.getMessage()
-                            + "; also tried -Drigidbody.native.path and target/release/"
+                            + "; also tried -Drigidbody.native.path, target/release/, and bundled native/"
                             + mappedName);
             error.initCause(loadLibraryError);
             throw error;
         }
+    }
+
+    private static boolean loadBundledLibrary(String mappedName) {
+        String[] resourcePaths = {
+                "/native/" + nativeOs() + "/" + nativeArch() + "/" + mappedName,
+                "/native/" + mappedName
+        };
+        for (String resourcePath : resourcePaths) {
+            if (loadBundledLibrary(resourcePath, mappedName)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean loadBundledLibrary(String resourcePath, String mappedName) {
+        try (var input = RigidBodyNative.class.getResourceAsStream(resourcePath)) {
+            if (input == null) {
+                return false;
+            }
+            Path directory = Files.createTempDirectory("mps_rigid_body_native_");
+            Path library = directory.resolve(mappedName);
+            Files.copy(input, library, StandardCopyOption.REPLACE_EXISTING);
+            library.toFile().deleteOnExit();
+            directory.toFile().deleteOnExit();
+            System.load(library.toAbsolutePath().normalize().toString());
+            return true;
+        } catch (Exception exception) {
+            UnsatisfiedLinkError error = new UnsatisfiedLinkError("failed to load bundled native library " + resourcePath);
+            error.initCause(exception);
+            throw error;
+        }
+    }
+
+    private static String nativeOs() {
+        String os = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT);
+        if (os.contains("win")) {
+            return "windows";
+        }
+        if (os.contains("mac") || os.contains("darwin")) {
+            return "macos";
+        }
+        return "linux";
+    }
+
+    private static String nativeArch() {
+        String arch = System.getProperty("os.arch", "").toLowerCase(java.util.Locale.ROOT);
+        if (arch.equals("amd64") || arch.equals("x86_64")) {
+            return "x86_64";
+        }
+        if (arch.equals("aarch64") || arch.equals("arm64")) {
+            return "aarch64";
+        }
+        return arch;
     }
 
     public static native int abiVersion();

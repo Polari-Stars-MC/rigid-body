@@ -1,0 +1,6 @@
+{
+  "type": "box",
+  "friction": 0.7,
+  "restitution": 0.05,
+  "density": 1.0
+}

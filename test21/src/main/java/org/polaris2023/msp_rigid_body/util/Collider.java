@@ -327,6 +327,15 @@ public final class Collider {
             }
         }
 
+        public Collider insert(RigidBody body) {
+            if (body == null || body.isEmpty()) {
+                throw new IllegalArgumentException("rigid body is empty");
+            }
+            try (Raw raw = buildRaw()) {
+                return parent.insert(raw, body);
+            }
+        }
+
         @Override
         public void close() {
             if (handle != 0L) {
