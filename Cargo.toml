@@ -9,6 +9,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 rapier3d = { package = "rapier3d-f64", version = "0.33.0", features = ["parallel"] }
 ljni = { version = "0.21.0", package = "jni" }
+rayon = "1.10"
 
 
 [build-dependencies]

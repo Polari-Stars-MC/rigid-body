@@ -1,5 +1,7 @@
 use std::slice;
 
+use rayon::prelude::*;
+
 use rapier3d::math::{Pose, Rotation, Vector};
 use rapier3d::prelude::{ColliderBuilder, SharedShape};
 
@@ -105,65 +107,90 @@ fn build_cuboids(grid: &VoxelGrid<'_>) -> Option<ColliderBuilder> {
 }
 
 fn build_greedy_cuboids(grid: &VoxelGrid<'_>) -> Option<ColliderBuilder> {
-    let mut visited = vec![false; grid.voxels.len()];
-    let mut parts = Vec::new();
+    let chunk_size = 32;
+    let starts: Vec<_> = (0..grid.size_y).step_by(chunk_size).collect();
 
-    for z in 0..grid.size_z {
-        for y in 0..grid.size_y {
-            for x in 0..grid.size_x {
-                let start = grid.index(x, y, z);
-                if visited[start] || !grid.is_solid(x, y, z) {
-                    continue;
-                }
+    let parts: Vec<_> = starts
+        .into_par_iter()
+        .map(|y_start| {
+            let mut local_parts = Vec::new();
+            let mut local_visited = vec![0u64; (grid.size_x * grid.size_z + 63) / 64];
 
-                let mut max_x = x + 1;
-                while max_x < grid.size_x {
-                    let i = grid.index(max_x, y, z);
-                    if visited[i] || !grid.is_solid(max_x, y, z) {
-                        break;
-                    }
-                    max_x += 1;
-                }
-
-                let mut max_y = y + 1;
-                'expand_y: while max_y < grid.size_y {
-                    for xx in x..max_x {
-                        let i = grid.index(xx, max_y, z);
-                        if visited[i] || !grid.is_solid(xx, max_y, z) {
-                            break 'expand_y;
+            let y_end = (y_start + chunk_size).min(grid.size_y);
+            for y in y_start..y_end {
+                for z in 0..grid.size_z {
+                    for x in 0..grid.size_x {
+                        let idx = grid.index(x, y, z);
+                        if is_visited(&local_visited, idx) || !grid.is_solid(x, y, z) {
+                            continue;
                         }
-                    }
-                    max_y += 1;
-                }
 
-                let mut max_z = z + 1;
-                'expand_z: while max_z < grid.size_z {
-                    for yy in y..max_y {
-                        for xx in x..max_x {
-                            let i = grid.index(xx, yy, max_z);
-                            if visited[i] || !grid.is_solid(xx, yy, max_z) {
-                                break 'expand_z;
+                        let mut max_x = x + 1;
+                        while max_x < grid.size_x {
+                            let i = grid.index(max_x, y, z);
+                            if is_visited(&local_visited, i) || !grid.is_solid(max_x, y, z) {
+                                break;
+                            }
+                            max_x += 1;
+                        }
+
+                        let mut max_z = z + 1;
+                        'expand_z: while max_z < grid.size_z {
+                            for xx in x..max_x {
+                                let i = grid.index(xx, y, max_z);
+                                if is_visited(&local_visited, i) || !grid.is_solid(xx, y, max_z) {
+                                    break 'expand_z;
+                                }
+                            }
+                            max_z += 1;
+                        }
+
+                        // 沿 Y 拉伸
+                        let mut max_y = y + 1;
+                        'expand_y: while max_y < grid.size_y {
+                            for zz in z..max_z {
+                                for xx in x..max_x {
+                                    let i = grid.index(xx, max_y, zz);
+                                    if !grid.is_solid(xx, max_y, zz) {
+                                        break 'expand_y;
+                                    }
+                                }
+                            }
+                            max_y += 1;
+                        }
+
+                        // 标记 visited（局部位掩码）
+                        for yy in y..max_y {
+                            for zz in z..max_z {
+                                for xx in x..max_x {
+                                    set_visited(&mut local_visited, grid.index(xx, yy, zz));
+                                }
                             }
                         }
-                    }
-                    max_z += 1;
-                }
 
-                for zz in z..max_z {
-                    for yy in y..max_y {
-                        for xx in x..max_x {
-                            let i = grid.index(xx, yy, zz);
-                            visited[i] = true;
-                        }
+                        // 推入 cuboid
+                        push_cuboid(grid, &mut local_parts, x, y, z, max_x, max_y, max_z);
                     }
                 }
-
-                push_cuboid(grid, &mut parts, x, y, z, max_x, max_y, max_z);
             }
-        }
-    }
+
+            local_parts
+        })
+        .flatten()
+        .collect();
 
     (!parts.is_empty()).then(|| ColliderBuilder::compound(parts))
+}
+//位掩码
+fn is_visited(visited: &[u64], idx: usize) -> bool {
+    let word = idx / 64;
+    let bit = idx % 64;
+    (visited[word] >> bit) & 1 == 1
+}
+fn set_visited(visited: &mut [u64], idx: usize) {
+    let word = idx / 64;
+    let bit = idx % 64;
+    visited[word] |= 1 << bit;
 }
 
 fn push_face(

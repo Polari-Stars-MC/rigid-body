@@ -1,4 +1,3 @@
-use std::ffi::c_void;
 use ljni::JNIEnv;
 use ljni::sys::{jbyte, jclass, jdouble, jint, jlong, jdoubleArray, jlongArray, jbooleanArray};
 use rapier3d::prelude::{
@@ -21,7 +20,7 @@ use crate::rapier::{
     voxel as vx, world as wo,
 };
 use ev::{ContactPairFilterCallback, IntersectionPairFilterCallback};
-use crate::helper::helper::{array_to_array2, jdoublearray_to_array};
+use crate::helper::helper::{array_to_array2};
 
 fn to_jlong<T>(value: *mut T) -> jlong {
     value as isize as jlong
@@ -267,7 +266,7 @@ jni!(long worldCopyCollider(long world, long handle)  { col::world_copy_collider
 
 
 jni!(long colliderBuilderCreate(int shape_type, double a, double b, double c) { to_jlong(col::collider_builder_create(self::shape_type(shape_type), v3(a, b, c))) });
-jni_e_c!(long colliderBuilderCreateHeightmap(env _env, class _class, double_array data, int data_x, int data_y, double scale_x, double scale_y, double scale_z) { to_jlong(col::collider_builder_create_heightmap(array_to_array2(jdoublearray_to_array(&_env, data), data_x as u32, data_y as u32), Vec3 { x: scale_x, y: scale_y, z: scale_z })) });
+jni!(long colliderBuilderCreateHeightmap(long height_map, int data_x, int data_y, double scale_x, double scale_y, double scale_z) { to_jlong(col::collider_builder_create_heightmap(array_to_array2(p::<f64>(height_map), data_x as u32, data_y as u32), Vec3 { x: scale_x, y: scale_y, z: scale_z })) });
 jni!(long colliderBuilderCreateEx(int shape_type, double a, double b, double c, double d) { to_jlong(col::collider_builder_create_ex(sd(shape_type, a, b, c, d))) });
 jni!(long colliderBuilderCreateSphere(double x, double y, double z, double radius) { to_jlong(col::collider_builder_create_sphere(Sphere { center: v3(x, y, z), radius })) });
 jni!(long colliderBuilderCreateObb(double cx, double cy, double cz, double hx, double hy, double hz, double qi, double qj, double qk, double qw) { to_jlong(col::collider_builder_create_obb(Obb {center: v3(cx, cy, cz),half_extents: v3(hx, hy, hz),rotation: qt(qi, qj, qk, qw),})) });
@@ -288,7 +287,7 @@ jni!(long colliderBuilderCreateSphericalShell(double cx, double cy, double cz, d
 jni!(long colliderBuilderCreateKdop(long points_xyz, int point_count, int preset) { to_jlong(dop::collider_builder_create_kdop(p::<f64>(points_xyz), point_count as u32, kdop_preset(preset))) });
 jni!(long colliderBuilderCreateFdh(long points_xyz, int point_count, long directions_xyz, int direction_count) { to_jlong(dop::collider_builder_create_fdh(p::<f64>(points_xyz), point_count as u32, p::<f64>(directions_xyz), direction_count as u32)) });
 jni!(long colliderBuilderCreateNeuralBounds(double cx, double cy, double cz, double hx, double hy, double hz, double qi, double qj, double qk, double qw, int sample_resolution, int hidden_width, int hidden_layers, int activation, double output_scale, double padding, long weights, int weight_count) { to_jlong(neu::collider_builder_create_neural_bounds(NeuralBoundsDesc { center: v3(cx,cy,cz), half_extents: v3(hx,hy,hz), rotation: qt(qi,qj,qk,qw), sample_resolution: sample_resolution as u32, hidden_width: hidden_width as u32, hidden_layers: hidden_layers as u32, activation: neural_activation(activation), output_scale, padding,}, p::<f64>(weights), weight_count as u32)) });
-jni_e_c!(long colliderBuilderCreateVoxels(env _env, class _class, long voxels, int size_x, int size_y, int size_z, double voxel_size, double origin_x, double origin_y, double origin_z, int mode, int dynamic_body, int small_voxel_limit, int mesh_voxel_limit) { to_jlong(vx::collider_builder_create_voxels(p::<u8>(voxels), size_x as u32, size_y as u32, size_z as u32, voxel_size, v3(origin_x, origin_y, origin_z), VoxelColliderOptions { mode: voxel_mode(mode), dynamic_body: jb(dynamic_body), small_voxel_limit: small_voxel_limit as u32, mesh_voxel_limit: mesh_voxel_limit as u32 })) });
+jni!(long colliderBuilderCreateVoxels(long voxels, int size_x, int size_y, int size_z, double voxel_size, double origin_x, double origin_y, double origin_z, int mode, int dynamic_body, int small_voxel_limit, int mesh_voxel_limit) { to_jlong(vx::collider_builder_create_voxels(p::<u8>(voxels), size_x as u32, size_y as u32, size_z as u32, voxel_size, v3(origin_x, origin_y, origin_z), VoxelColliderOptions { mode: voxel_mode(mode), dynamic_body: jb(dynamic_body), small_voxel_limit: small_voxel_limit as u32, mesh_voxel_limit: mesh_voxel_limit as u32 })) });
 
 jni!(void colliderBuilderSetTranslation(long builder, double x, double y, double z) { col::collider_builder_set_translation(m::<CBH>(builder), v3(x, y, z)); });
 jni!(void colliderBuilderSetRotation(long builder, double x, double y, double z) { col::collider_builder_set_rotation(m::<CBH>(builder), v3(x, y, z)); });

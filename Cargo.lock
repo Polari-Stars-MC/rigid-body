@@ -498,6 +498,7 @@ dependencies = [
  "cbindgen",
  "jni",
  "rapier3d-f64",
+ "rayon",
 ]
 
 [[package]]
