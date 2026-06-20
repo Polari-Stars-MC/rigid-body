@@ -31,21 +31,27 @@ src/
     helper.rs
     mod.rs
   rapier/
+    acoustics.rs
     bounds.rs
     collider.rs
     compat.rs
+    control_theory.rs
     controller.rs
     crbtree.rs
     dop.rs
+    electromagnetism.rs
     error.rs
     events.rs
     ffi.rs
     joints.rs
     mod.rs
     neural.rs
+    spaceflight.rs
+    trajectory.rs
     query.rs
     rigid_body.rs
     rtree.rs
+    thermodynamics.rs
     voxel.rs
     world.rs
 
@@ -77,6 +83,13 @@ Important ABI structs:
 - `CollisionEventRecord`, `ContactForceEventRecord`: event records.
 - `VoxelColliderOptions`, `VoxelBuildStats`: voxel build configuration and statistics.
 - `NeuralBoundsDesc`: neural bounds configuration.
+- `TrajectoryState`, `TrajectoryEnvironment`, `TrajectoryForceReport`: point-mass trajectory force model.
+- `TrajectoryGlideState`, `TrajectoryGlideEnvironment`, `TrajectoryGlideReport`: boost-glide / skip-glide style trajectory model.
+- `OrbitalElements`, `StateVector`: orbital element and Cartesian state conversion.
+- `ScalarKalman`, `LeastSquaresAttitude`, `GnssObservation`: estimation and navigation formula results.
+- `HohmannTransfer`, `FriisLink`, `SolarPanelPower`, `ThermalBalance`, `RadiatorPower`: mission engineering formula results.
+- `CmgExchange`, `CmgRobustInverse`, `RigidBodyEulerDerivative`, `QuaternionDerivative`: attitude dynamics/control result records.
+- `MassProperties`, `ContactForceModel`, `BatteryEquivalentCircuit`, `HallThrusterPerformance`: subsystem engineering result records.
 
 The project intentionally does not expose Rapier internal Rust types directly.
 External callers use stable C-compatible types.
@@ -497,6 +510,13 @@ Java 21 JNI smoke test: passed
 Java 25 FFM smoke test: passed
 ```
 
+Recent local verification for the formula and spaceflight additions:
+
+```text
+cargo check: passed
+cargo test: passed, 39 tests
+```
+
 ## 15. Current Java 25 FFM Coverage
 
 Java 25 FFM currently covers:
@@ -522,6 +542,12 @@ Java 25 FFM currently covers:
 - Voxel-shaped AABB/OBB queries.
 - Collision event and contact-force event bulk reads.
 - Event clearing.
+
+The generated C header also exposes the `space_*`, `trajectory_*`, and other
+formula symbols, but the Java 25 sample helper does not yet wrap the full
+formula surface. Java 25 callers can still bind these functions manually with
+FFM downcall handles if they mirror the `repr(C)` layouts from
+`include/rigid_body.h`.
 
 ## 16. Recommended Next Steps
 
@@ -642,7 +668,138 @@ module. It is intended as a quick map for future development.
   - Includes dynamic cuboid batch insertion and static trimesh insertion.
   - Includes AABB rigid body query helpers.
 
-### 17.5 Spatial Indexes and Support
+### 17.5 Aerospace, Controls, and Engineering Formula Layer
+
+The project now includes a broad formula layer in addition to Rapier collision
+and dynamics wrappers. This layer has two categories:
+
+1. Pure ABI formulas that return derived values through scalar returns or
+   out-pointer result structs.
+2. Rapier-integrated formulas that compute forces/torques and apply them
+   directly to a `RigidBodyHandleRaw` inside a `WorldHandle`.
+
+- `src/rapier/trajectory.rs`
+  - Point-mass trajectory force model with gravity, drag, lift, and optional body force application.
+  - Boost-glide / skip-glide style trajectory state equations using velocity,
+    flight-path angle, altitude, downrange, exponential atmosphere,
+    ballistic coefficient, lift-to-drag ratio, and bank angle.
+  - `trajectory_apply_forces_to_body` applies the point-mass force report to a
+    Rapier rigid body.
+
+- `src/rapier/spaceflight.rs`
+  - Orbital mechanics:
+    Kepler third law, orbital elements to/from Cartesian state, J2 perturbation,
+    Clohessy-Wiltshire relative motion, Lambert elliptic transfer time,
+    Hohmann transfer, semi-major-axis drag decay, SGP4-style J2 secular rates.
+  - Attitude dynamics and control:
+    quaternion kinematics, Euler rigid-body angular acceleration, CMG angular
+    momentum exchange, CMG robust damped pseudo-inverse, gravity-gradient
+    torque, magnetic torquer dipole, Bang-Off-Bang attitude profile, solar
+    array PD torque.
+  - Navigation and estimation:
+    TRIAD attitude determination, two-vector least-squares attitude wrapper,
+    scalar EKF predict/gain/update, GNSS pseudorange, double-difference carrier phase,
+    Sagnac phase/rate helper, radar range/range-rate.
+  - Space environment and spacecraft subsystem formulas:
+    scale-height atmosphere, atmospheric drag acceleration, solar radiation
+    pressure, radiation absorbed dose, atomic oxygen erosion, surface charging
+    current balance, Whipple shield critical projectile estimate.
+  - Thermal, ECLSS, power, and propulsion:
+    heat-pipe thermal resistance, radiator power, thermal equilibrium,
+    single-phase fluid loop heat transfer, CO2 mass balance, Sabatier methane
+    rate, SPE oxygen rate, solar-panel power, battery equivalent circuit,
+    Hall thruster performance, Tsiolkovsky rocket equation.
+  - Robotics and docking:
+    D-H transform, six-axis first joint inverse, third joint angle, simplified
+    diagonal manipulator dynamics, artificial potential guidance, docking
+    glideslope command, docking buffer energy absorption, airlock depressurization.
+  - Structure and flexible dynamics:
+    structural natural frequency, flexible mode derivative, slosh pendulum derivative,
+    Hunt-Crossley contact force, two-body mass properties.
+
+Rapier-integrated `spaceflight` entry points:
+
+- `space_apply_j2_force_to_body`
+- `space_apply_atmospheric_drag_to_body`
+- `space_apply_solar_radiation_pressure_to_body`
+- `space_apply_gravity_gradient_torque_to_body`
+- `space_apply_magnetic_torquer_to_body`
+- `space_apply_cmg_torque_to_body`
+
+These functions locate a rigid body inside `WorldHandle`, compute the requested
+spaceflight acceleration/torque, and call Rapier `add_force` or `add_torque`.
+The matching `_flag` variants return `u8` for FFM-friendly success/failure.
+
+- `src/rapier/control_theory.rs`
+  - Control-oriented formulas and stepping utilities, including state-space
+    stepping.
+  - Useful as the natural home for future generic controller primitives before
+    they are bound to a Rapier body or AnvilKit entity.
+
+Other domain formula modules are present for specialized pure ABI formulas:
+
+- `acoustics.rs`
+- `astrophysics.rs`
+- `biomechanics.rs`
+- `continuum.rs`
+- `electromagnetism.rs`
+- `fracture.rs`
+- `molecular.rs`
+- `physchem.rs`
+- `quantum.rs`
+- `softbody.rs`
+- `thermodynamics.rs`
+- `topology.rs`
+- `transmission.rs`
+
+These modules should remain pure and ABI-oriented unless a formula clearly
+maps to a Rapier force, torque, collider, query, or world-step operation.
+
+### 17.6 AnvilKit Integration Layer
+
+- `src/rapier/anvilkit.rs`
+  - Owns an AnvilKit ECS app state and maps entities to Rapier rigid bodies,
+    colliders, and constraints.
+  - Supports spawning bodies/colliders, setting transforms/materials, syncing
+    entities to a Rapier world, and resolving entity-to-body/collider handles.
+  - Already includes domain-force application helpers:
+    `anvilkit_app_apply_aero_surfaces`,
+    `anvilkit_app_apply_aero_voxel_grid`,
+    `anvilkit_app_apply_fluid_aabb_forces`,
+    `anvilkit_app_apply_trajectory_forces`.
+
+Current AnvilKit integration pattern:
+
+```text
+entity_bits
+  -> anvilkit_app_entity_to_body
+  -> RigidBodyHandleRaw
+  -> trajectory/spaceflight/aerodynamics/fluid function applies force or torque
+```
+
+The existing AnvilKit functions use this pattern for aerodynamics, fluid
+forces, and trajectory forces. Spaceflight formulas can be integrated in the
+same style by adding `anvilkit_app_apply_space_*` wrappers that resolve the
+entity body handle and delegate to `space_apply_*_to_body`.
+
+Recommended AnvilKit wrappers to add next:
+
+- `anvilkit_app_apply_space_j2_force`
+- `anvilkit_app_apply_space_atmospheric_drag`
+- `anvilkit_app_apply_space_solar_radiation_pressure`
+- `anvilkit_app_apply_space_gravity_gradient_torque`
+- `anvilkit_app_apply_space_magnetic_torquer`
+- `anvilkit_app_apply_space_cmg_torque`
+
+This keeps formulas reusable at three levels:
+
+```text
+Pure formula ABI
+  -> Rapier WorldHandle/body apply function
+    -> AnvilKit entity wrapper
+```
+
+### 17.7 Spatial Indexes and Support
 
 - `src/rapier/crbtree.rs`
   - Compact RbTree spatial index.
@@ -678,7 +835,29 @@ to improve Java 25 FFM parity and then add higher-level ergonomics.
 
 ### 18.1 High Priority
 
-1. Java 25 FFM character controller
+1. Spaceflight Rapier and AnvilKit wrappers
+
+   The pure formula ABI is broad, and several formulas already apply directly
+   to Rapier bodies. The next integration step is to expose matching AnvilKit
+   entity helpers.
+
+   Add AnvilKit wrappers for:
+
+   - J2 force
+   - atmospheric drag
+   - solar radiation pressure
+   - gravity-gradient torque
+   - magnetic torquer torque
+   - CMG torque
+
+   Reason: this completes the path from mission/space formulas to actual
+   simulation behavior:
+
+   ```text
+   formula -> Rapier body force/torque -> AnvilKit entity-level API
+   ```
+
+2. Java 25 FFM character controller
 
    Add FFM bindings for:
 
@@ -696,7 +875,7 @@ to improve Java 25 FFM parity and then add higher-level ergonomics.
    Reason: character movement is a complete gameplay-facing feature, and JNI
    already proves the API shape.
 
-2. Java 25 FFM joints
+3. Java 25 FFM joints
 
    Add FFM bindings for:
 
@@ -712,7 +891,7 @@ to improve Java 25 FFM parity and then add higher-level ergonomics.
 
 ### 18.2 Medium Priority
 
-3. Java 25 FFM advanced collider builders
+4. Java 25 FFM advanced collider builders
 
    Add FFM coverage for:
 
@@ -731,7 +910,7 @@ to improve Java 25 FFM parity and then add higher-level ergonomics.
    Reason: the Rust and JNI APIs already expose these builders, but FFM cannot
    use most of them yet.
 
-4. Java 25 high-level helper layer
+5. Java 25 high-level helper layer
 
    Build a safer utility package for Java 25 similar to `test21/util`.
 
@@ -747,7 +926,7 @@ to improve Java 25 FFM parity and then add higher-level ergonomics.
    Reason: `RigidBodyFfm` is intentionally low-level. A helper layer would hide
    repetitive `MemorySegment` allocation and native ownership details.
 
-5. Bulk query APIs
+6. Bulk query APIs
 
    Add batch query support beyond ray batches:
 
@@ -759,7 +938,7 @@ to improve Java 25 FFM parity and then add higher-level ergonomics.
    Reason: games and simulations often need many queries per tick. Batch calls
    reduce Java/native call overhead.
 
-6. Air-drag / lift helper layer
+7. Air-drag / lift helper layer
 
    Add higher-level wrappers that can turn geometry samples into
    `AeroSurface` batches and feed them into `aero_apply_surfaces`.
