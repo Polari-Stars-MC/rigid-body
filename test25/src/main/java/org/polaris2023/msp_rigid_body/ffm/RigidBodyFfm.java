@@ -114,6 +114,19 @@ public final class RigidBodyFfm {
             VEC3.withName("total_torque"),
             ValueLayout.JAVA_INT.withName("surface_count"),
             ValueLayout.JAVA_INT.withName("active_surface_count"));
+    public static final MemoryLayout HOHMANN_TRANSFER = MemoryLayout.structLayout(
+            ValueLayout.JAVA_DOUBLE.withName("delta_v1"),
+            ValueLayout.JAVA_DOUBLE.withName("delta_v2"),
+            ValueLayout.JAVA_DOUBLE.withName("total_delta_v"),
+            ValueLayout.JAVA_DOUBLE.withName("transfer_time"));
+    public static final MemoryLayout QUATERNION_DERIVATIVE = MemoryLayout.structLayout(
+            ValueLayout.JAVA_DOUBLE.withName("i_dot"),
+            ValueLayout.JAVA_DOUBLE.withName("j_dot"),
+            ValueLayout.JAVA_DOUBLE.withName("k_dot"),
+            ValueLayout.JAVA_DOUBLE.withName("w_dot"));
+    public static final MemoryLayout SCALAR_KALMAN = MemoryLayout.structLayout(
+            ValueLayout.JAVA_DOUBLE.withName("value"),
+            ValueLayout.JAVA_DOUBLE.withName("covariance"));
 
     public static final long VEC3_X = VEC3.byteOffset(MemoryLayout.PathElement.groupElement("x"));
     public static final long VEC3_Y = VEC3.byteOffset(MemoryLayout.PathElement.groupElement("y"));
@@ -138,6 +151,10 @@ public final class RigidBodyFfm {
     public static final long AERO_REPORT_TOTAL_FORCE = AERO_REPORT.byteOffset(MemoryLayout.PathElement.groupElement("total_force"));
     public static final long AERO_REPORT_SURFACE_COUNT = AERO_REPORT.byteOffset(MemoryLayout.PathElement.groupElement("surface_count"));
     public static final long AERO_REPORT_ACTIVE_SURFACE_COUNT = AERO_REPORT.byteOffset(MemoryLayout.PathElement.groupElement("active_surface_count"));
+    public static final long HOHMANN_TOTAL_DELTA_V = HOHMANN_TRANSFER.byteOffset(MemoryLayout.PathElement.groupElement("total_delta_v"));
+    public static final long HOHMANN_TRANSFER_TIME = HOHMANN_TRANSFER.byteOffset(MemoryLayout.PathElement.groupElement("transfer_time"));
+    public static final long SCALAR_KALMAN_VALUE = SCALAR_KALMAN.byteOffset(MemoryLayout.PathElement.groupElement("value"));
+    public static final long SCALAR_KALMAN_COVARIANCE = SCALAR_KALMAN.byteOffset(MemoryLayout.PathElement.groupElement("covariance"));
 
     private static final Linker LINKER = Linker.nativeLinker();
 
@@ -178,6 +195,16 @@ public final class RigidBodyFfm {
     private final MethodHandle rigidBodyWakeUpFlag;
     private final MethodHandle rigidBodyIsSleepingFlag;
     private final MethodHandle aeroApplyVoxelGrid;
+    private final MethodHandle spaceKeplerPeriod;
+    private final MethodHandle spaceKeplerSemiMajorAxis;
+    private final MethodHandle spaceHohmannTransfer;
+    private final MethodHandle spaceAtmosphericDragAcceleration;
+    private final MethodHandle spaceApplyAtmosphericDragToBodyFlag;
+    private final MethodHandle spaceTriadAttitude;
+    private final MethodHandle spaceQuaternionDerivative;
+    private final MethodHandle spaceEkfPredictScalar;
+    private final MethodHandle spaceEkfGainScalar;
+    private final MethodHandle spaceEkfUpdateScalar;
     private final MethodHandle crbTreeCreate;
     private final MethodHandle crbTreeDestroy;
     private final MethodHandle crbTreeInsertFlag;
@@ -285,6 +312,49 @@ public final class RigidBodyFfm {
                 ValueLayout.JAVA_DOUBLE,
                 ValueLayout.JAVA_DOUBLE,
                 BOOL,
+                ValueLayout.ADDRESS));
+        spaceKeplerPeriod = downcall("space_kepler_period", FunctionDescriptor.of(ValueLayout.JAVA_DOUBLE, ValueLayout.JAVA_DOUBLE, ValueLayout.JAVA_DOUBLE));
+        spaceKeplerSemiMajorAxis = downcall("space_kepler_semi_major_axis", FunctionDescriptor.of(ValueLayout.JAVA_DOUBLE, ValueLayout.JAVA_DOUBLE, ValueLayout.JAVA_DOUBLE));
+        spaceHohmannTransfer = downcall("space_hohmann_transfer", FunctionDescriptor.of(BOOL, ValueLayout.JAVA_DOUBLE, ValueLayout.JAVA_DOUBLE, ValueLayout.JAVA_DOUBLE, ValueLayout.ADDRESS));
+        spaceAtmosphericDragAcceleration = downcall("space_atmospheric_drag_acceleration", FunctionDescriptor.of(
+                BOOL,
+                VEC3,
+                VEC3,
+                ValueLayout.JAVA_DOUBLE,
+                ValueLayout.JAVA_DOUBLE,
+                ValueLayout.JAVA_DOUBLE,
+                ValueLayout.JAVA_DOUBLE,
+                ValueLayout.ADDRESS));
+        spaceApplyAtmosphericDragToBodyFlag = downcall("space_apply_atmospheric_drag_to_body_flag", FunctionDescriptor.of(
+                ValueLayout.JAVA_BYTE,
+                ValueLayout.ADDRESS,
+                ValueLayout.JAVA_LONG,
+                VEC3,
+                ValueLayout.JAVA_DOUBLE,
+                ValueLayout.JAVA_DOUBLE,
+                ValueLayout.JAVA_DOUBLE,
+                ValueLayout.JAVA_DOUBLE,
+                BOOL,
+                ValueLayout.ADDRESS));
+        spaceTriadAttitude = downcall("space_triad_attitude", FunctionDescriptor.of(BOOL, VEC3, VEC3, VEC3, VEC3, ValueLayout.ADDRESS));
+        spaceQuaternionDerivative = downcall("space_quaternion_derivative", FunctionDescriptor.of(BOOL, QUAT, VEC3, ValueLayout.ADDRESS));
+        spaceEkfPredictScalar = downcall("space_ekf_predict_scalar", FunctionDescriptor.of(
+                BOOL,
+                ValueLayout.JAVA_DOUBLE,
+                ValueLayout.JAVA_DOUBLE,
+                ValueLayout.JAVA_DOUBLE,
+                ValueLayout.JAVA_DOUBLE,
+                ValueLayout.JAVA_DOUBLE,
+                ValueLayout.ADDRESS));
+        spaceEkfGainScalar = downcall("space_ekf_gain_scalar", FunctionDescriptor.of(ValueLayout.JAVA_DOUBLE, ValueLayout.JAVA_DOUBLE, ValueLayout.JAVA_DOUBLE, ValueLayout.JAVA_DOUBLE));
+        spaceEkfUpdateScalar = downcall("space_ekf_update_scalar", FunctionDescriptor.of(
+                BOOL,
+                ValueLayout.JAVA_DOUBLE,
+                ValueLayout.JAVA_DOUBLE,
+                ValueLayout.JAVA_DOUBLE,
+                ValueLayout.JAVA_DOUBLE,
+                ValueLayout.JAVA_DOUBLE,
+                ValueLayout.JAVA_DOUBLE,
                 ValueLayout.ADDRESS));
         crbTreeCreate = downcall("crb_tree_create", FunctionDescriptor.of(ValueLayout.ADDRESS));
         crbTreeDestroy = downcall("crb_tree_destroy", FunctionDescriptor.ofVoid(ValueLayout.ADDRESS));
@@ -682,6 +752,186 @@ public final class RigidBodyFfm {
             return report;
         } catch (Throwable throwable) {
             throw callFailed("aero_apply_voxel_grid", throwable);
+        }
+    }
+
+    public double spaceKeplerPeriod(double mu, double semiMajorAxis) {
+        try {
+            return (double) spaceKeplerPeriod.invokeExact(mu, semiMajorAxis);
+        } catch (Throwable throwable) {
+            throw callFailed("space_kepler_period", throwable);
+        }
+    }
+
+    public double spaceKeplerSemiMajorAxis(double mu, double period) {
+        try {
+            return (double) spaceKeplerSemiMajorAxis.invokeExact(mu, period);
+        } catch (Throwable throwable) {
+            throw callFailed("space_kepler_semi_major_axis", throwable);
+        }
+    }
+
+    public MemorySegment spaceHohmannTransfer(double mu, double radius1, double radius2) {
+        MemorySegment out = arena.allocate(HOHMANN_TRANSFER);
+        try {
+            SegmentAllocator allocator = arena;
+            boolean ok = boolValue((MemorySegment) spaceHohmannTransfer.invokeExact(allocator, mu, radius1, radius2, out));
+            if (!ok) {
+                throw new IllegalStateException("space_hohmann_transfer returned false");
+            }
+            return out;
+        } catch (Throwable throwable) {
+            throw callFailed("space_hohmann_transfer", throwable);
+        }
+    }
+
+    public MemorySegment spaceAtmosphericDragAcceleration(
+            double vx, double vy, double vz,
+            double atmosphereVx, double atmosphereVy, double atmosphereVz,
+            double density, double dragCoefficient, double area, double mass) {
+        MemorySegment out = arena.allocate(VEC3);
+        try {
+            SegmentAllocator allocator = arena;
+            boolean ok = boolValue((MemorySegment) spaceAtmosphericDragAcceleration.invokeExact(
+                    allocator,
+                    vec3(vx, vy, vz),
+                    vec3(atmosphereVx, atmosphereVy, atmosphereVz),
+                    density,
+                    dragCoefficient,
+                    area,
+                    mass,
+                    out));
+            if (!ok) {
+                throw new IllegalStateException("space_atmospheric_drag_acceleration returned false");
+            }
+            return out;
+        } catch (Throwable throwable) {
+            throw callFailed("space_atmospheric_drag_acceleration", throwable);
+        }
+    }
+
+    public MemorySegment spaceApplyAtmosphericDragToBody(
+            MemorySegment world,
+            long body,
+            double atmosphereVx, double atmosphereVy, double atmosphereVz,
+            double density, double dragCoefficient, double area, double mass,
+            boolean wakeUp) {
+        MemorySegment out = arena.allocate(VEC3);
+        try {
+            byte ok = (byte) spaceApplyAtmosphericDragToBodyFlag.invokeExact(
+                    world,
+                    body,
+                    vec3(atmosphereVx, atmosphereVy, atmosphereVz),
+                    density,
+                    dragCoefficient,
+                    area,
+                    mass,
+                    bool(wakeUp),
+                    out);
+            if (ok == 0) {
+                throw new IllegalStateException("space_apply_atmospheric_drag_to_body returned false");
+            }
+            return out;
+        } catch (Throwable throwable) {
+            throw callFailed("space_apply_atmospheric_drag_to_body", throwable);
+        }
+    }
+
+    public MemorySegment spaceTriadAttitude(
+            double bodyPrimaryX, double bodyPrimaryY, double bodyPrimaryZ,
+            double bodySecondaryX, double bodySecondaryY, double bodySecondaryZ,
+            double referencePrimaryX, double referencePrimaryY, double referencePrimaryZ,
+            double referenceSecondaryX, double referenceSecondaryY, double referenceSecondaryZ) {
+        MemorySegment out = arena.allocate(QUAT);
+        try {
+            SegmentAllocator allocator = arena;
+            boolean ok = boolValue((MemorySegment) spaceTriadAttitude.invokeExact(
+                    allocator,
+                    vec3(bodyPrimaryX, bodyPrimaryY, bodyPrimaryZ),
+                    vec3(bodySecondaryX, bodySecondaryY, bodySecondaryZ),
+                    vec3(referencePrimaryX, referencePrimaryY, referencePrimaryZ),
+                    vec3(referenceSecondaryX, referenceSecondaryY, referenceSecondaryZ),
+                    out));
+            if (!ok) {
+                throw new IllegalStateException("space_triad_attitude returned false");
+            }
+            return out;
+        } catch (Throwable throwable) {
+            throw callFailed("space_triad_attitude", throwable);
+        }
+    }
+
+    public MemorySegment spaceQuaternionDerivative(
+            double qi, double qj, double qk, double qw,
+            double wx, double wy, double wz) {
+        MemorySegment out = arena.allocate(QUATERNION_DERIVATIVE);
+        try {
+            SegmentAllocator allocator = arena;
+            boolean ok = boolValue((MemorySegment) spaceQuaternionDerivative.invokeExact(
+                    allocator,
+                    quat(qi, qj, qk, qw),
+                    vec3(wx, wy, wz),
+                    out));
+            if (!ok) {
+                throw new IllegalStateException("space_quaternion_derivative returned false");
+            }
+            return out;
+        } catch (Throwable throwable) {
+            throw callFailed("space_quaternion_derivative", throwable);
+        }
+    }
+
+    public MemorySegment spaceEkfPredictScalar(double state, double covariance, double nonlinearDelta, double jacobian, double processNoise) {
+        MemorySegment out = arena.allocate(SCALAR_KALMAN);
+        try {
+            SegmentAllocator allocator = arena;
+            boolean ok = boolValue((MemorySegment) spaceEkfPredictScalar.invokeExact(
+                    allocator,
+                    state,
+                    covariance,
+                    nonlinearDelta,
+                    jacobian,
+                    processNoise,
+                    out));
+            if (!ok) {
+                throw new IllegalStateException("space_ekf_predict_scalar returned false");
+            }
+            return out;
+        } catch (Throwable throwable) {
+            throw callFailed("space_ekf_predict_scalar", throwable);
+        }
+    }
+
+    public double spaceEkfGainScalar(double covariance, double measurementJacobian, double measurementNoise) {
+        try {
+            return (double) spaceEkfGainScalar.invokeExact(covariance, measurementJacobian, measurementNoise);
+        } catch (Throwable throwable) {
+            throw callFailed("space_ekf_gain_scalar", throwable);
+        }
+    }
+
+    public MemorySegment spaceEkfUpdateScalar(
+            double predictedState, double predictedCovariance,
+            double measurement, double predictedMeasurement,
+            double kalmanGain, double measurementJacobian) {
+        MemorySegment out = arena.allocate(SCALAR_KALMAN);
+        try {
+            SegmentAllocator allocator = arena;
+            boolean ok = boolValue((MemorySegment) spaceEkfUpdateScalar.invokeExact(
+                    allocator,
+                    predictedState,
+                    predictedCovariance,
+                    measurement,
+                    predictedMeasurement,
+                    kalmanGain,
+                    measurementJacobian,
+                    out));
+            if (!ok) {
+                throw new IllegalStateException("space_ekf_update_scalar returned false");
+            }
+            return out;
+        } catch (Throwable throwable) {
+            throw callFailed("space_ekf_update_scalar", throwable);
         }
     }
 
@@ -1328,6 +1578,22 @@ public final class RigidBodyFfm {
 
     public static int aeroReportActiveSurfaceCount(MemorySegment report) {
         return report.get(ValueLayout.JAVA_INT, AERO_REPORT_ACTIVE_SURFACE_COUNT);
+    }
+
+    public static double hohmannTotalDeltaV(MemorySegment transfer) {
+        return transfer.get(ValueLayout.JAVA_DOUBLE, HOHMANN_TOTAL_DELTA_V);
+    }
+
+    public static double hohmannTransferTime(MemorySegment transfer) {
+        return transfer.get(ValueLayout.JAVA_DOUBLE, HOHMANN_TRANSFER_TIME);
+    }
+
+    public static double scalarKalmanValue(MemorySegment state) {
+        return state.get(ValueLayout.JAVA_DOUBLE, SCALAR_KALMAN_VALUE);
+    }
+
+    public static double scalarKalmanCovariance(MemorySegment state) {
+        return state.get(ValueLayout.JAVA_DOUBLE, SCALAR_KALMAN_COVARIANCE);
     }
 
     public static double x(MemorySegment vec3) {

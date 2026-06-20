@@ -12,7 +12,7 @@ mod rapier;
 pub use rapier::ffi::{
     AabbDesc, AcousticContactDesc, AcousticExcitationReport, AcousticMaterial,
     AcousticResonanceReport, AcousticWaveReport, AeroForceReport, AeroSurface, AirDragLaw,
-    AirlockDepressurization, AnvilKitAppHandle, AtomicOxygenErosion, BangOffBangProfile,
+    AirlockDepressurization, AtomicOxygenErosion, BangOffBangProfile,
     BatteryEquivalentCircuit, BernoulliReport, BodyStatus, Bool, CRbTreeHandle, CamConstraintDesc,
     CamConstraintReport, Capsule, CatalystEffect, CatalystReport, CharacterCollision,
     CharacterControllerHandle, ChemicalReactionRate, CmgExchange, CmgRobustInverse, Co2MassBalance,
@@ -50,3 +50,6 @@ pub use rapier::ffi::{
     TrajectoryGlideEnvironment, TrajectoryGlideReport, TrajectoryGlideState, TrajectoryState,
     VariationalState, Vec3, VoxelBuildStats, VoxelColliderMode, VoxelColliderOptions, WorldHandle,
 };
+
+#[cfg(feature = "anvilkit-bridge")]
+pub use rapier::ffi::AnvilKitAppHandle;

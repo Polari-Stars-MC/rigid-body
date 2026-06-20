@@ -415,6 +415,39 @@ public final class RigidBodyNative {
     public static native void worldClearContactPairFilterCallback(long world);
     public static native void worldClearIntersectionPairFilterCallback(long world);
 
+    public static native double spaceKeplerPeriod(double mu, double semiMajorAxis);
+    public static native double spaceKeplerSemiMajorAxis(double mu, double period);
+    public static native boolean spaceHohmannTransfer(double mu, double radius1, double radius2, long outTransfer);
+    public static native boolean spaceAtmosphericDragAcceleration(
+            double vx, double vy, double vz,
+            double atmosphereVx, double atmosphereVy, double atmosphereVz,
+            double density, double dragCoefficient, double area, double mass,
+            long outAcceleration);
+    public static native boolean spaceApplyAtmosphericDragToBody(
+            long world, long body,
+            double atmosphereVx, double atmosphereVy, double atmosphereVz,
+            double density, double dragCoefficient, double area, double mass,
+            int wakeUp, long outAcceleration);
+    public static native boolean spaceTriadAttitude(
+            double bodyPrimaryX, double bodyPrimaryY, double bodyPrimaryZ,
+            double bodySecondaryX, double bodySecondaryY, double bodySecondaryZ,
+            double referencePrimaryX, double referencePrimaryY, double referencePrimaryZ,
+            double referenceSecondaryX, double referenceSecondaryY, double referenceSecondaryZ,
+            long outAttitude);
+    public static native boolean spaceQuaternionDerivative(
+            double qi, double qj, double qk, double qw,
+            double wx, double wy, double wz,
+            long outDerivative);
+    public static native boolean spaceEkfPredictScalar(
+            double state, double covariance, double nonlinearDelta, double jacobian, double processNoise,
+            long outPrediction);
+    public static native double spaceEkfGainScalar(double covariance, double measurementJacobian, double measurementNoise);
+    public static native boolean spaceEkfUpdateScalar(
+            double predictedState, double predictedCovariance,
+            double measurement, double predictedMeasurement,
+            double kalmanGain, double measurementJacobian,
+            long outUpdate);
+
     public static native long rtreeCreate();
     public static native void rtreeDestroy(long tree);
     public static native void rtreeClear(long tree);

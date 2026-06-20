@@ -1690,6 +1690,7 @@ pub struct WorldHandle {
     pub(crate) inner: crate::rapier::world::PhysicsWorld,
 }
 
+#[cfg(feature = "anvilkit-bridge")]
 pub struct AnvilKitAppHandle {
     pub(crate) inner: crate::rapier::anvilkit::AnvilKitAppState,
 }

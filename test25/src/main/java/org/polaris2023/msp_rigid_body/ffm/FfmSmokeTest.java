@@ -28,6 +28,8 @@ public final class FfmSmokeTest {
                 throw new AssertionError("invalid ABI version");
             }
 
+            assertSpaceFormulaWrappers(api);
+
             MemorySegment world = api.worldCreate(0.0, -9.81, 0.0);
             try {
                 MemorySegment gravity = api.worldGetGravity(world);
@@ -89,6 +91,21 @@ public final class FfmSmokeTest {
                         || !api.rigidBodyApplyTorqueImpulse(world, body, 0.0, 0.5, 0.0, true)
                         || !api.rigidBodyEnableCcd(world, body, true)) {
                     throw new AssertionError("rigid body force/impulse/ccd calls failed");
+                }
+                if (!api.rigidBodySetLinvel(world, body, 10.0, 0.0, 0.0, true)) {
+                    throw new AssertionError("rigid_body_set_linvel for drag test failed");
+                }
+                MemorySegment dragAcceleration = api.spaceApplyAtmosphericDragToBody(
+                        world,
+                        body,
+                        0.0, 0.0, 0.0,
+                        1.225,
+                        2.2,
+                        1.0,
+                        10.0,
+                        true);
+                if (RigidBodyFfm.x(dragAcceleration) >= 0.0) {
+                    throw new AssertionError("space atmospheric drag should oppose positive x velocity");
                 }
                 if (!api.rigidBodySleep(world, body)) {
                     throw new AssertionError("rigid_body_sleep failed");
@@ -324,6 +341,51 @@ public final class FfmSmokeTest {
     private static void assertClose(double expected, double actual, String label) {
         if (Math.abs(expected - actual) > EPSILON) {
             throw new AssertionError(label + ": expected " + expected + ", got " + actual);
+        }
+    }
+
+    private static void assertSpaceFormulaWrappers(RigidBodyFfm api) {
+        double mu = 3.986004418e14;
+        double semiMajorAxis = 7_000_000.0;
+        double period = api.spaceKeplerPeriod(mu, semiMajorAxis);
+        if (!Double.isFinite(period) || period <= 0.0) {
+            throw new AssertionError("space_kepler_period returned invalid value");
+        }
+        assertClose(semiMajorAxis, api.spaceKeplerSemiMajorAxis(mu, period), "space Kepler round trip");
+
+        MemorySegment hohmann = api.spaceHohmannTransfer(mu, 7_000_000.0, 42_164_000.0);
+        if (RigidBodyFfm.hohmannTotalDeltaV(hohmann) <= 0.0 || RigidBodyFfm.hohmannTransferTime(hohmann) <= 0.0) {
+            throw new AssertionError("space_hohmann_transfer returned invalid transfer");
+        }
+
+        MemorySegment drag = api.spaceAtmosphericDragAcceleration(
+                10.0, 0.0, 0.0,
+                0.0, 0.0, 0.0,
+                1.225,
+                2.2,
+                1.0,
+                100.0);
+        if (RigidBodyFfm.x(drag) >= 0.0) {
+            throw new AssertionError("space_atmospheric_drag_acceleration should oppose velocity");
+        }
+
+        MemorySegment attitude = api.spaceTriadAttitude(
+                1.0, 0.0, 0.0,
+                0.0, 1.0, 0.0,
+                1.0, 0.0, 0.0,
+                0.0, 1.0, 0.0);
+        assertClose(1.0, attitude.get(java.lang.foreign.ValueLayout.JAVA_DOUBLE, RigidBodyFfm.QUAT.byteOffset(java.lang.foreign.MemoryLayout.PathElement.groupElement("w"))), "TRIAD identity quaternion w");
+
+        MemorySegment qdot = api.spaceQuaternionDerivative(0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 2.0);
+        if (qdot.get(java.lang.foreign.ValueLayout.JAVA_DOUBLE, RigidBodyFfm.QUATERNION_DERIVATIVE.byteOffset(java.lang.foreign.MemoryLayout.PathElement.groupElement("k_dot"))) <= 0.0) {
+            throw new AssertionError("space_quaternion_derivative returned invalid derivative");
+        }
+
+        MemorySegment prediction = api.spaceEkfPredictScalar(1.0, 2.0, 0.5, 1.0, 0.1);
+        double gain = api.spaceEkfGainScalar(RigidBodyFfm.scalarKalmanCovariance(prediction), 1.0, 0.5);
+        MemorySegment update = api.spaceEkfUpdateScalar(RigidBodyFfm.scalarKalmanValue(prediction), RigidBodyFfm.scalarKalmanCovariance(prediction), 2.0, 1.5, gain, 1.0);
+        if (!Double.isFinite(RigidBodyFfm.scalarKalmanValue(update)) || RigidBodyFfm.scalarKalmanCovariance(update) < 0.0) {
+            throw new AssertionError("space EKF scalar wrappers returned invalid state");
         }
     }
 

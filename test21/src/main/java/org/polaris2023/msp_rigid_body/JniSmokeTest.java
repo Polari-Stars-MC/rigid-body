@@ -1,14 +1,25 @@
 package org.polaris2023.msp_rigid_body;
 
+import java.lang.reflect.Field;
 import org.polaris2023.msp_rigid_body.util.PhysicsWorld;
 import org.polaris2023.msp_rigid_body.util.Query;
 import org.polaris2023.msp_rigid_body.util.RigidBody;
+import org.polaris2023.msp_rigid_body.util.SpaceFormulas;
 import org.polaris2023.msp_rigid_body.util.SpatialIndex;
 import org.polaris2023.msp_rigid_body.util.VoxelGrid;
 import org.polaris2023.msp_rigid_body.util.VoxelBuildStats;
+import sun.misc.Unsafe;
 
 public final class JniSmokeTest {
     private static final double EPSILON = 1.0e-9;
+    private static final Unsafe UNSAFE = unsafe();
+    private static final long VEC3_BYTES = 24L;
+    private static final long QUAT_BYTES = 32L;
+    private static final long HOHMANN_TRANSFER_BYTES = 32L;
+    private static final long QUATERNION_DERIVATIVE_BYTES = 32L;
+    private static final long VEC3_X = 0L;
+    private static final long QUAT_W = 24L;
+    private static final long QUATERNION_DERIVATIVE_K_DOT = 16L;
 
     private JniSmokeTest() {
     }
@@ -54,6 +65,7 @@ public final class JniSmokeTest {
 
         assertVoxelColliderCanBeCreatedAndInserted();
         assertSafeWrappersCoverCommonJniFeatures();
+        assertSpaceFormulaWrappers();
         assertInvalidInputsAreRejected();
 
         System.out.println("JNI smoke test passed on Java " + javaVersion);
@@ -335,6 +347,85 @@ public final class JniSmokeTest {
         }
     }
 
+    private static void assertSpaceFormulaWrappers() {
+        double mu = 3.986004418e14;
+        double semiMajorAxis = 7_000_000.0;
+        double period = SpaceFormulas.keplerPeriod(mu, semiMajorAxis);
+        if (!Double.isFinite(period) || period <= 0.0) {
+            throw new AssertionError("spaceKeplerPeriod returned invalid value");
+        }
+        assertClose(semiMajorAxis, SpaceFormulas.keplerSemiMajorAxis(mu, period), "space Kepler round trip");
+
+        SpaceFormulas.HohmannTransfer hohmann = SpaceFormulas.hohmannTransfer(mu, 7_000_000.0, 42_164_000.0);
+        if (hohmann.totalDeltaV() <= 0.0 || hohmann.transferTime() <= 0.0) {
+            throw new AssertionError("spaceHohmannTransfer returned invalid transfer");
+        }
+
+        double[] drag = SpaceFormulas.atmosphericDragAcceleration(
+                10.0, 0.0, 0.0,
+                0.0, 0.0, 0.0,
+                1.225,
+                2.2,
+                1.0,
+                100.0);
+        if (drag[0] >= 0.0) {
+            throw new AssertionError("spaceAtmosphericDragAcceleration should oppose velocity");
+        }
+
+        SpaceFormulas.QuaternionDerivative derivative =
+                SpaceFormulas.quaternionDerivative(0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 2.0);
+        if (derivative.kDot() <= 0.0) {
+            throw new AssertionError("spaceQuaternionDerivative returned invalid derivative");
+        }
+
+        SpaceFormulas.ScalarKalman prediction = SpaceFormulas.ekfPredictScalar(1.0, 2.0, 0.5, 1.0, 0.1);
+        double gain = SpaceFormulas.ekfGainScalar(prediction.covariance(), 1.0, 0.5);
+        SpaceFormulas.ScalarKalman update =
+                SpaceFormulas.ekfUpdateScalar(prediction.value(), prediction.covariance(), 2.0, 1.5, gain, 1.0);
+        if (!Double.isFinite(update.value()) || update.covariance() < 0.0) {
+            throw new AssertionError("space EKF scalar wrappers returned invalid state");
+        }
+
+        long attitude = allocate(QUAT_BYTES);
+        long qdot = allocate(QUATERNION_DERIVATIVE_BYTES);
+        try {
+            if (!RigidBodyNative.spaceTriadAttitude(
+                    1.0, 0.0, 0.0,
+                    0.0, 1.0, 0.0,
+                    1.0, 0.0, 0.0,
+                    0.0, 1.0, 0.0,
+                    attitude)) {
+                throw new AssertionError("spaceTriadAttitude failed");
+            }
+            assertClose(1.0, getDouble(attitude, QUAT_W), "TRIAD identity quaternion w");
+
+            if (!RigidBodyNative.spaceQuaternionDerivative(0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 2.0, qdot)
+                    || getDouble(qdot, QUATERNION_DERIVATIVE_K_DOT) <= 0.0) {
+                throw new AssertionError("spaceQuaternionDerivative returned invalid derivative");
+            }
+        } finally {
+            free(qdot);
+            free(attitude);
+        }
+
+        try (PhysicsWorld world = new PhysicsWorld(0.0, 0.0, 0.0);
+             RigidBody.Builder builder = RigidBody.Builder.builder(world).status(0).build()) {
+            RigidBody body = world.insert(builder).linvel(world, 10.0, 0.0, 0.0, true);
+            double[] bodyDrag = SpaceFormulas.applyAtmosphericDragToBody(
+                    world,
+                    body,
+                    0.0, 0.0, 0.0,
+                    1.225,
+                    2.2,
+                    1.0,
+                    10.0,
+                    true);
+            if (bodyDrag[0] >= 0.0) {
+                throw new AssertionError("spaceApplyAtmosphericDragToBody should oppose positive x velocity");
+            }
+        }
+    }
+
     private static void assertInvalidInputsAreRejected() {
         long world = RigidBodyNative.worldCreate(0.0, -9.81, 0.0);
         if (world == 0L) {
@@ -371,6 +462,32 @@ public final class JniSmokeTest {
             }
         } finally {
             RigidBodyNative.worldDestroy(world);
+        }
+    }
+
+    private static long allocate(long bytes) {
+        long address = UNSAFE.allocateMemory(bytes);
+        UNSAFE.setMemory(address, bytes, (byte) 0);
+        return address;
+    }
+
+    private static void free(long address) {
+        if (address != 0L) {
+            UNSAFE.freeMemory(address);
+        }
+    }
+
+    private static double getDouble(long address, long offset) {
+        return UNSAFE.getDouble(address + offset);
+    }
+
+    private static Unsafe unsafe() {
+        try {
+            Field field = Unsafe.class.getDeclaredField("theUnsafe");
+            field.setAccessible(true);
+            return (Unsafe) field.get(null);
+        } catch (ReflectiveOperationException exception) {
+            throw new ExceptionInInitializerError(exception);
         }
     }
 

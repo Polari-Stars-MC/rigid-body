@@ -13,9 +13,13 @@ parking_lot = "0.12.5"
 hashbrown = "0.17.1"
 smallvec = "1.15.2"
 mimalloc = "0.1.52"
-anvilkit = { version = "0.1", features = ["rapier"] }
-bevy_ecs = "0.14"
-rayon = "1.10"
+anvilkit = { version = "0.1", features = ["rapier"], optional = true }
+bevy_ecs = { version = "0.19.0", optional = true }
+rayon = "1.12"
+
+[features]
+default = []
+anvilkit-bridge = ["dep:anvilkit", "dep:bevy_ecs"]
 
 
 [build-dependencies]

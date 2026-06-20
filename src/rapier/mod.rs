@@ -1,5 +1,6 @@
 pub(crate) mod acoustics;
 pub(crate) mod aerodynamics;
+#[cfg(feature = "anvilkit-bridge")]
 pub(crate) mod anvilkit;
 pub(crate) mod astrophysics;
 pub(crate) mod biomechanics;
