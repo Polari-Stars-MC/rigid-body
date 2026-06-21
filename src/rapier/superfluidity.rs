@@ -14,7 +14,7 @@ use crate::rapier::error::{
 use crate::rapier::ffi::{
     BiotSavartVelocity, Bool, GpEnergyDensity, GpGridPoint, GpOrderParameter,
     GpTimeEvolutionParams, QuantisedCirculation, Vec3, VortexReconnectionReport, VortexRing,
-    VortexSegment, VortexTangleStats, vec3_finite,
+    VortexSegment, VortexTangleStats, finite_non_negative, finite_positive, vec3_finite,
 };
 
 const EPSILON: f64 = 1.0e-14;
@@ -31,14 +31,6 @@ const HELIUM_SCATTERING_LENGTH: f64 = 2.2e-10;
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-fn finite_positive(value: f64) -> bool {
-    value.is_finite() && value > 0.0
-}
-
-fn finite_non_negative(value: f64) -> bool {
-    value.is_finite() && value >= 0.0
-}
 
 fn write_out<T: Copy>(out: *mut T, value: T) -> Bool {
     let Some(out) = (unsafe { out.as_mut() }) else {

@@ -6,25 +6,13 @@ use crate::rapier::error::{
 use crate::rapier::ffi::{
     AcousticContactDesc, AcousticExcitationReport, AcousticMaterial, AcousticResonanceReport,
     AcousticWaveReport, Bool, ModalAnalysisReport, ModalSynthesisReport, SpatializedSample,
-    StructuralModeReport, Vec3,
+    StructuralModeReport, Vec3, clamp01, finite_non_negative, finite_positive,
 };
 
 const EPSILON: f64 = 1.0e-12;
 const MAX_MODAL_DOF: u32 = 128;
 const MAX_WAVE_CELLS: u32 = 2_000_000;
 const MAX_AUDIO_MODES: u32 = 512;
-
-fn finite_non_negative(value: f64) -> bool {
-    value.is_finite() && value >= 0.0
-}
-
-fn finite_positive(value: f64) -> bool {
-    value.is_finite() && value > 0.0
-}
-
-fn clamp01(value: f64) -> f64 {
-    value.clamp(0.0, 1.0)
-}
 
 fn finite_vec3(value: Vec3) -> bool {
     value.x.is_finite() && value.y.is_finite() && value.z.is_finite()
