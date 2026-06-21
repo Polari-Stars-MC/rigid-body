@@ -410,16 +410,29 @@ pub extern "C" fn chaos_lyapunov_rosenstein(
         return Bool::FALSE;
     }
 
-    // Build embedded vectors
-    let mut vectors: Vec<Vec<f64>> = Vec::with_capacity(n_vectors);
-    for i in 0..n_vectors {
-        let mut v = Vec::with_capacity(m);
-        for j in 0..m {
-            v.push(samples[i + j * tau]);
+    // Build embedded vectors as a flat array: flat[i*m + j] = vector[i][j]
+    let flat = {
+        let mut f = vec![0.0_f64; n_vectors * m];
+        for i in 0..n_vectors {
+            for j in 0..m {
+                f[i * m + j] = samples[i + j * tau];
+            }
         }
-        vectors.push(v);
-    }
+        f
+    };
 
+    // Helper to access vector i, component j in the flat array
+    let v = |i: usize, j: usize| flat[i * m + j];
+
+    // Helper for Euclidean distance between vectors i and k in flat array
+    let euclid = |i: usize, k: usize| -> f64 {
+        let mut sum = 0.0_f64;
+        for j in 0..m {
+            let d = v(i, j) - v(k, j);
+            sum += d * d;
+        }
+        sum.sqrt()
+    };
     // For each vector, find nearest neighbour (excluding temporally close ones)
     let mut sum_log_div = 0.0;
     let mut count = 0u32;
@@ -432,7 +445,7 @@ pub extern "C" fn chaos_lyapunov_rosenstein(
             if (i as isize - j as isize).unsigned_abs() < min_separation {
                 continue;
             }
-            let dist = euclidean_dist(&vectors[i], &vectors[j]);
+            let dist = euclid(i, j);
             if dist > DIST_EPSILON && dist < min_dist {
                 min_dist = dist;
             }
@@ -445,7 +458,7 @@ pub extern "C" fn chaos_lyapunov_rosenstein(
                 if (i as isize - j as isize).unsigned_abs() < min_separation {
                     continue;
                 }
-                let dist = euclidean_dist(&vectors[i + 1], &vectors[j + 1]);
+                let dist = euclid(i + 1, j + 1);
                 if dist > 0.0 && dist < next_dist {
                     next_dist = dist;
                 }
@@ -474,17 +487,6 @@ pub extern "C" fn chaos_lyapunov_rosenstein(
             positive: Bool::from(lyapunov > 0.0),
         },
     )
-}
-
-fn euclidean_dist(a: &[f64], b: &[f64]) -> f64 {
-    a.iter()
-        .zip(b)
-        .map(|(x, y)| {
-            let d = x - y;
-            d * d
-        })
-        .sum::<f64>()
-        .sqrt()
 }
 
 // ===========================================================================
@@ -1015,14 +1017,25 @@ pub extern "C" fn chaos_detect(
 
     let corr_dim = if n_vectors >= 4 {
         let radius = params.neighbourhood_radius;
-        let mut vectors: Vec<Vec<f64>> = Vec::with_capacity(n_vectors);
-        for i in 0..n_vectors {
-            let mut v = Vec::with_capacity(m);
-            for j in 0..m {
-                v.push(data_slice[i + j * tau]);
+        // Flat array: flat[i*m + j] = vector[i][j]
+        let flat = {
+            let mut f = vec![0.0_f64; n_vectors * m];
+            for i in 0..n_vectors {
+                for j in 0..m {
+                    f[i * m + j] = data_slice[i + j * tau];
+                }
             }
-            vectors.push(v);
-        }
+            f
+        };
+        let v = |i: usize, j: usize| flat[i * m + j];
+        let euclid = |i: usize, k: usize| -> f64 {
+            let mut sum = 0.0_f64;
+            for j in 0..m {
+                let d = v(i, j) - v(k, j);
+                sum += d * d;
+            }
+            sum.sqrt()
+        };
 
         // Count neighbours within radius for a subset
         let subset_size = n_vectors.min(200); // cap to avoid O(n²)
@@ -1036,7 +1049,7 @@ pub extern "C" fn chaos_detect(
                 if i == j {
                     continue;
                 }
-                let d = euclidean_dist(&vectors[i], &vectors[j]);
+                let d = euclid(i, j);
                 if d < radius {
                     count_in_radius += 1;
                 }
@@ -1062,7 +1075,7 @@ pub extern "C" fn chaos_detect(
                         if i == j {
                             continue;
                         }
-                        if euclidean_dist(&vectors[i], &vectors[j]) < r {
+                        if euclid(i, j) < r {
                             count_pr += 1;
                         }
                     }

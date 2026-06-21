@@ -109,13 +109,14 @@ pub extern "C" fn softbody_predict_positions(
     let positions = unsafe { slice::from_raw_parts(positions, count) };
     let velocities = unsafe { slice::from_raw_parts(velocities, count) };
     let inverse_masses = unsafe { slice::from_raw_parts(inverse_masses, count) };
+    let write_count = count.min(capacity as usize);
     let out_positions =
-        unsafe { slice::from_raw_parts_mut(out_predicted_positions, capacity as usize) };
+        unsafe { slice::from_raw_parts_mut(out_predicted_positions, write_count) };
     let gravity = vec3_to_rapier(gravity);
     let velocity_scale = (1.0 - damping * dt).max(0.0);
     let mut active_particles = 0;
     let mut max_displacement = 0.0;
-    for i in 0..count {
+    for i in 0..write_count {
         if !vec3_finite(positions[i])
             || !vec3_finite(velocities[i])
             || !finite_non_negative(inverse_masses[i])
@@ -179,8 +180,9 @@ pub extern "C" fn softbody_mass_spring_forces(
     let positions = unsafe { slice::from_raw_parts(positions, count) };
     let velocities = unsafe { slice::from_raw_parts(velocities, count) };
     let springs = unsafe { slice::from_raw_parts(springs, spring_count as usize) };
-    let out_forces = unsafe { slice::from_raw_parts_mut(out_forces, force_capacity as usize) };
-    out_forces[..count].fill(Vec3::default());
+    let write_count = count.min(force_capacity as usize);
+    let out_forces = unsafe { slice::from_raw_parts_mut(out_forces, write_count) };
+    out_forces[..write_count].fill(Vec3::default());
 
     let mut total_error = 0.0;
     let mut max_force = 0.0;
@@ -556,9 +558,10 @@ pub extern "C" fn softbody_update_velocities(
     let count = particle_count as usize;
     let previous = unsafe { slice::from_raw_parts(previous_positions, count) };
     let current = unsafe { slice::from_raw_parts(current_positions, count) };
-    let velocities = unsafe { slice::from_raw_parts_mut(out_velocities, capacity as usize) };
+    let write_count = count.min(capacity as usize);
+    let velocities = unsafe { slice::from_raw_parts_mut(out_velocities, write_count) };
     let mut max_speed = 0.0;
-    for i in 0..count {
+    for i in 0..write_count {
         if !vec3_finite(previous[i]) || !vec3_finite(current[i]) {
             set_error(ERR_INVALID_ARGUMENT, "invalid soft velocity position data");
             return Bool::FALSE;

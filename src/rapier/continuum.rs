@@ -78,8 +78,7 @@ fn barycentric_weights(tetra: FemTetrahedron, point: Vec3) -> Option<([f64; 4], 
     ))
 }
 
-fn dense_mat_vec(matrix: &[f64], vector: &[f64], n: usize) -> Vec<f64> {
-    let mut out = vec![0.0; n];
+fn dense_mat_vec_out(matrix: &[f64], vector: &[f64], n: usize, out: &mut [f64]) {
     for row in 0..n {
         let mut sum = 0.0;
         for col in 0..n {
@@ -87,10 +86,9 @@ fn dense_mat_vec(matrix: &[f64], vector: &[f64], n: usize) -> Vec<f64> {
         }
         out[row] = sum;
     }
-    out
 }
 
-fn solve_dense_system(mut matrix: Vec<f64>, mut rhs: Vec<f64>, n: usize) -> Option<Vec<f64>> {
+fn solve_dense_system_in_place(matrix: &mut [f64], rhs: &mut [f64], x: &mut [f64], n: usize) -> bool {
     for pivot in 0..n {
         let mut pivot_row = pivot;
         let mut pivot_abs = matrix[pivot * n + pivot].abs();
@@ -102,7 +100,7 @@ fn solve_dense_system(mut matrix: Vec<f64>, mut rhs: Vec<f64>, n: usize) -> Opti
             }
         }
         if pivot_abs <= EPSILON {
-            return None;
+            return false;
         }
         if pivot_row != pivot {
             for col in 0..n {
@@ -121,7 +119,6 @@ fn solve_dense_system(mut matrix: Vec<f64>, mut rhs: Vec<f64>, n: usize) -> Opti
         }
     }
 
-    let mut x = vec![0.0; n];
     for row in (0..n).rev() {
         let mut sum = rhs[row];
         for col in row + 1..n {
@@ -129,7 +126,7 @@ fn solve_dense_system(mut matrix: Vec<f64>, mut rhs: Vec<f64>, n: usize) -> Opti
         }
         x[row] = sum / matrix[row * n + row];
     }
-    Some(x)
+    true
 }
 
 #[unsafe(no_mangle)]
@@ -348,15 +345,19 @@ pub extern "C" fn continuum_newmark_beta_solve(
         u_pred[i] = u[i] + params.dt * v[i] + params.dt * params.dt * (0.5 - params.beta) * a[i];
         v_pred[i] = v[i] + params.dt * (1.0 - params.gamma) * a[i];
     }
-    let k_u_pred = dense_mat_vec(stiffness, &u_pred, n);
-    let c_v_pred = dense_mat_vec(damping, &v_pred, n);
+    // Compute k_u_pred and c_v_pred into reusable buffers,
+    // then fold into effective_force in-place.
     let mut effective_force = vec![0.0; n];
+    dense_mat_vec_out(stiffness, &u_pred, n, &mut effective_force);
+    dense_mat_vec_out(damping, &v_pred, n, &mut u_pred);
     for i in 0..n {
-        effective_force[i] = force[i] - k_u_pred[i] - c_v_pred[i];
+        effective_force[i] = force[i] - effective_force[i] - u_pred[i];
     }
 
-    let Some(delta) = solve_dense_system(effective_stiffness.clone(), effective_force.clone(), n)
-    else {
+    // Solve in-place to avoid the clone() / second allocation for `delta`.
+    // effective_stiffness is consumed (modified in-place), effective_force too.
+    let mut delta = vec![0.0; n];
+    if !solve_dense_system_in_place(&mut effective_stiffness, &mut effective_force, &mut delta, n) {
         set_error(
             ERR_INVALID_ARGUMENT,
             "Newmark-beta effective stiffness is singular",
@@ -378,7 +379,9 @@ pub extern "C" fn continuum_newmark_beta_solve(
         max_delta = f64::max(max_delta, delta[i].abs());
     }
 
-    let solved_force = dense_mat_vec(&effective_stiffness, &delta, n);
+    // Reuse u_pred as scratch for residual computation
+    let mut solved_force = u_pred; // was u_pred, now reused
+    dense_mat_vec_out(&effective_stiffness, &delta, n, &mut solved_force);
     let residual_norm = solved_force
         .iter()
         .zip(effective_force.iter())

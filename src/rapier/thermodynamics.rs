@@ -243,7 +243,11 @@ pub extern "C" fn thermal_fem_diffusion_step(
     let edges = unsafe { slice::from_raw_parts(edges, edge_count as usize) };
     let out_temperatures =
         unsafe { slice::from_raw_parts_mut(out_temperatures, capacity as usize) };
-    let mut heat_rates = vec![0.0; node_count as usize];
+    // Use out_temperatures as temporary scratch before writing final values:
+    // first pass accumulates heat_rates into out_temperatures directly,
+    // second pass converts to temperature deltas in-place.
+    let heat_rates = &mut out_temperatures[..node_count as usize];
+    heat_rates.fill(0.0);
 
     for (index, node) in nodes.iter().enumerate() {
         if !node.temperature.is_finite()
@@ -275,7 +279,7 @@ pub extern "C" fn thermal_fem_diffusion_step(
     let mut total_heat_rate = 0.0;
     for (index, node) in nodes.iter().enumerate() {
         let delta = heat_rates[index] * dt / node.heat_capacity;
-        out_temperatures[index] = node.temperature + delta;
+        heat_rates[index] = node.temperature + delta;
         max_temperature_delta = f64::max(max_temperature_delta, delta.abs());
         total_heat_rate += heat_rates[index];
     }

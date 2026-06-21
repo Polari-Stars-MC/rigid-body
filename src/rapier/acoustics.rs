@@ -1,30 +1,18 @@
 use std::slice;
 
 use crate::rapier::error::{
-    ERR_CAPACITY, ERR_INVALID_ARGUMENT, ERR_NULL_POINTER, clear_error, set_error,
+    ERR_CAPACITY, ERR_INVALID_ARGUMENT, ERR_NULL_POINTER, ERR_UNSUPPORTED, clear_error, set_error,
 };
 use crate::rapier::ffi::{
     AcousticContactDesc, AcousticExcitationReport, AcousticMaterial, AcousticResonanceReport,
     AcousticWaveReport, Bool, ModalAnalysisReport, ModalSynthesisReport, SpatializedSample,
-    StructuralModeReport, Vec3,
+    StructuralModeReport, Vec3, clamp01, finite_non_negative, finite_positive,
 };
 
 const EPSILON: f64 = 1.0e-12;
 const MAX_MODAL_DOF: u32 = 128;
 const MAX_WAVE_CELLS: u32 = 2_000_000;
 const MAX_AUDIO_MODES: u32 = 512;
-
-fn finite_non_negative(value: f64) -> bool {
-    value.is_finite() && value >= 0.0
-}
-
-fn finite_positive(value: f64) -> bool {
-    value.is_finite() && value > 0.0
-}
-
-fn clamp01(value: f64) -> f64 {
-    value.clamp(0.0, 1.0)
-}
 
 fn finite_vec3(value: Vec3) -> bool {
     value.x.is_finite() && value.y.is_finite() && value.z.is_finite()
@@ -151,7 +139,12 @@ fn transform_generalized(stiffness: &[f64], mass_lower: &[f64], n: usize) -> Vec
     transformed
 }
 
-fn jacobi_eigen_symmetric(mut matrix: Vec<f64>, n: usize) -> (Vec<f64>, Vec<f64>) {
+fn jacobi_eigen_symmetric(mut matrix: Vec<f64>, n: usize) -> Option<(Vec<f64>, Vec<f64>)> {
+    if n > 200 {
+        // Jacobi O(n⁴) becomes prohibitive beyond 200 DOF.
+        // Caller should handle this fallback (e.g. use a different solver).
+        return None;
+    }
     let mut vectors = vec![0.0; n * n];
     for i in 0..n {
         vectors[matrix_index(i, i, n)] = 1.0;
@@ -217,7 +210,7 @@ fn jacobi_eigen_symmetric(mut matrix: Vec<f64>, n: usize) -> (Vec<f64>, Vec<f64>
     let values = (0..n)
         .map(|i| matrix[matrix_index(i, i, n)])
         .collect::<Vec<_>>();
-    (values, vectors)
+    Some((values, vectors))
 }
 
 #[unsafe(no_mangle)]
@@ -270,7 +263,12 @@ pub extern "C" fn acoustic_generalized_modal_analysis(
         return Bool::FALSE;
     };
     let transformed = transform_generalized(stiffness, &mass_lower, n);
-    let (eigenvalues, modal_vectors) = jacobi_eigen_symmetric(transformed, n);
+    let Some((eigenvalues, modal_vectors)) = jacobi_eigen_symmetric(transformed, n) else {
+        set_error(
+            ERR_UNSUPPORTED,
+            "Jacobi solver does not support n > 200; use a different eigensolver");
+        return Bool::FALSE;
+    };
     let mut order = (0..n).collect::<Vec<_>>();
     order.sort_by(|&a, &b| eigenvalues[a].total_cmp(&eigenvalues[b]));
 

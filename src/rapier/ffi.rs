@@ -2437,6 +2437,24 @@ pub(crate) fn vec3_from_rapier(value: Vector) -> Vec3 {
     }
 }
 
+/// Returns true when `value` is finite and >= 0.
+#[inline]
+pub(crate) fn finite_non_negative(value: f64) -> bool {
+    value.is_finite() && value >= 0.0
+}
+
+/// Returns true when `value` is finite and > 0.
+#[inline]
+pub(crate) fn finite_positive(value: f64) -> bool {
+    value.is_finite() && value > 0.0
+}
+
+/// Clamp `value` to the closed interval [0, 1].
+#[inline]
+pub(crate) fn clamp01(value: f64) -> f64 {
+    value.clamp(0.0, 1.0)
+}
+
 pub(crate) fn quat_to_rapier(value: Quat) -> Rotation {
     Rotation::from_xyzw(value.i, value.j, value.k, value.w)
 }
