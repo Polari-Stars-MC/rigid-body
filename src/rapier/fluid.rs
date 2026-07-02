@@ -9,7 +9,7 @@ use crate::rapier::ffi::{
     vec3_from_rapier, vec3_to_rapier,
 };
 
-use crate::rapier::math::{finite_non_negative, finite_positive};
+use crate::rapier::math::{KahanSum, KahanVec3, finite_non_negative, finite_positive, mul_add};
 
 const EPSILON: f64 = 1.0e-12;
 const PI: f64 = std::f64::consts::PI;
@@ -258,7 +258,12 @@ pub extern "C" fn fluid_sph_poly6_kernel(distance: f64, smoothing_radius: f64) -
     }
     let h2 = smoothing_radius * smoothing_radius;
     let r2 = distance * distance;
-    315.0 / (64.0 * PI * smoothing_radius.powi(9)) * (h2 - r2).powi(3)
+    // Use mul_add to preserve precision for h² - r² when r ≈ h
+    let diff = -mul_add(r2, 1.0_f64, -h2); // -(r² - h²) = h² - r²
+    if diff <= 0.0 {
+        return 0.0;
+    }
+    315.0 / (64.0 * PI * smoothing_radius.powi(9)) * diff.powi(3)
 }
 
 #[unsafe(no_mangle)]
@@ -279,8 +284,9 @@ pub extern "C" fn fluid_sph_spiky_gradient(
     let gradient = if distance <= EPSILON || distance >= smoothing_radius {
         Vector::ZERO
     } else {
-        -r / distance
-            * (45.0 / (PI * smoothing_radius.powi(6)) * (smoothing_radius - distance).powi(2))
+        // mul_add to preserve (smoothing_radius - distance)² when distance ≈ smoothing_radius
+        let diff = mul_add(-1.0_f64, distance, smoothing_radius); // h - r
+        -r / distance * (45.0 / (PI * smoothing_radius.powi(6)) * diff * diff)
     };
     let Some(out_gradient) = (unsafe { out_gradient.as_mut() }) else {
         set_error(ERR_NULL_POINTER, "SPH gradient output is null");
@@ -320,23 +326,25 @@ pub extern "C" fn fluid_sph_estimate_density(
     }
     let particles = unsafe { std::slice::from_raw_parts(particles, particle_count as usize) };
     let p = vec3_to_rapier(position);
-    let mut density = 0.0;
+    let mut density = KahanSum::default();
     for particle in particles {
         if !vec3_finite(particle.position) || !particle.mass.is_finite() || particle.mass < 0.0 {
             set_error(ERR_INVALID_ARGUMENT, "invalid SPH particle");
             return Bool::FALSE;
         }
-        density += particle.mass
-            * fluid_sph_poly6_kernel(
-                (p - vec3_to_rapier(particle.position)).length(),
-                smoothing_radius,
-            );
+        density.add(
+            particle.mass
+                * fluid_sph_poly6_kernel(
+                    (p - vec3_to_rapier(particle.position)).length(),
+                    smoothing_radius,
+                ),
+        );
     }
     let Some(out_density) = (unsafe { out_density.as_mut() }) else {
         set_error(ERR_NULL_POINTER, "SPH density output is null");
         return Bool::FALSE;
     };
-    *out_density = density;
+    *out_density = density.value();
     clear_error();
     Bool::TRUE
 }
@@ -375,24 +383,26 @@ pub extern "C" fn fluid_sph_estimate_forces(
     let density = if particle.density > EPSILON {
         particle.density
     } else {
-        let mut density = 0.0;
+        let mut density = KahanSum::default();
         for neighbor in particles {
-            density += neighbor.mass
-                * fluid_sph_poly6_kernel(
-                    (p - vec3_to_rapier(neighbor.position)).length(),
-                    smoothing_radius,
-                );
+            density.add(
+                neighbor.mass
+                    * fluid_sph_poly6_kernel(
+                        (p - vec3_to_rapier(neighbor.position)).length(),
+                        smoothing_radius,
+                    ),
+            );
         }
-        density.max(rest_density)
+        density.value().max(rest_density)
     };
     let pressure = if particle.pressure.is_finite() {
         particle.pressure
     } else {
         gas_constant * (density - rest_density)
     };
-    let mut pressure_force = Vector::ZERO;
-    let mut viscosity_force = Vector::ZERO;
-    let mut color_gradient = Vector::ZERO;
+    let mut pressure_force = KahanVec3::default();
+    let mut viscosity_force = KahanVec3::default();
+    let mut color_gradient = KahanVec3::default();
 
     for neighbor in particles {
         if !vec3_finite(neighbor.position)
@@ -414,22 +424,30 @@ pub extern "C" fn fluid_sph_estimate_forces(
         } else {
             gas_constant * (neighbor_density - rest_density)
         };
-        let gradient = -offset / distance
-            * (45.0 / (PI * smoothing_radius.powi(6)) * (smoothing_radius - distance).powi(2));
-        pressure_force +=
-            -neighbor.mass * ((pressure + neighbor_pressure) / (2.0 * neighbor_density)) * gradient;
-        viscosity_force += viscosity * neighbor.mass * (vec3_to_rapier(neighbor.velocity) - v)
-            / neighbor_density
-            * fluid_sph_viscosity_laplacian(distance, smoothing_radius);
-        color_gradient += neighbor.mass / neighbor_density * gradient;
+        let diff = mul_add(-1.0_f64, distance, smoothing_radius); // h - r
+        let gradient = -offset / distance * (45.0 / (PI * smoothing_radius.powi(6)) * diff * diff);
+        pressure_force.add(vec3_from_rapier(
+            -neighbor.mass * ((pressure + neighbor_pressure) / (2.0 * neighbor_density)) * gradient,
+        ));
+        viscosity_force.add(vec3_from_rapier(
+            viscosity * neighbor.mass * (vec3_to_rapier(neighbor.velocity) - v)
+                / neighbor_density
+                * fluid_sph_viscosity_laplacian(distance, smoothing_radius),
+        ));
+        color_gradient.add(vec3_from_rapier(neighbor.mass / neighbor_density * gradient));
     }
 
-    let surface_tension_force = if color_gradient.length() > EPSILON {
-        -color_gradient / color_gradient.length() * surface_tension * color_gradient.length()
+    let color_gradient_vec = vec3_to_rapier(color_gradient.value());
+    let surface_tension_force = if color_gradient_vec.length() > EPSILON {
+        -color_gradient_vec / color_gradient_vec.length()
+            * surface_tension
+            * color_gradient_vec.length()
     } else {
         Vector::ZERO
     };
-    let total_force = pressure_force + viscosity_force + surface_tension_force;
+    let total_force = vec3_to_rapier(pressure_force.value())
+        + vec3_to_rapier(viscosity_force.value())
+        + surface_tension_force;
     let Some(out_report) = (unsafe { out_report.as_mut() }) else {
         set_error(ERR_NULL_POINTER, "SPH force output is null");
         return Bool::FALSE;
@@ -437,8 +455,8 @@ pub extern "C" fn fluid_sph_estimate_forces(
     *out_report = SphForceReport {
         density,
         pressure,
-        pressure_force: vec3_from_rapier(pressure_force),
-        viscosity_force: vec3_from_rapier(viscosity_force),
+        pressure_force: pressure_force.value(),
+        viscosity_force: viscosity_force.value(),
         surface_tension_force: vec3_from_rapier(surface_tension_force),
         total_force: vec3_from_rapier(total_force),
     };

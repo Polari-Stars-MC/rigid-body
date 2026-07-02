@@ -8,7 +8,7 @@ use crate::rapier::ffi::{
     TopologyOptimizationReport,
 };
 
-use crate::rapier::math::{finite_non_negative, finite_positive};
+use crate::rapier::math::{KahanSum, finite_non_negative, finite_positive};
 
 const MAX_DENSITY_CELLS: u32 = 2_000_000;
 const EPSILON: f64 = 1.0e-12;
@@ -38,8 +38,9 @@ fn density_stats(densities: &[f64], threshold: f64) -> DensityFieldStats {
         min_density: f64::INFINITY,
         ..DensityFieldStats::default()
     };
+    let mut avg_acc = KahanSum::default();
     for density in densities {
-        stats.average_density += *density;
+        avg_acc.add(*density);
         stats.min_density = f64::min(stats.min_density, *density);
         stats.max_density = f64::max(stats.max_density, *density);
         if *density >= threshold {
@@ -47,7 +48,7 @@ fn density_stats(densities: &[f64], threshold: f64) -> DensityFieldStats {
         }
     }
     if !densities.is_empty() {
-        stats.average_density /= densities.len() as f64;
+        stats.average_density = avg_acc.value() / densities.len() as f64;
     } else {
         stats.min_density = 0.0;
     }
@@ -196,15 +197,16 @@ pub extern "C" fn topology_oc_update(
         min_density: f64::INFINITY,
         ..TopologyOptimizationReport::default()
     };
+    let mut avg_acc = KahanSum::default();
     for (index, (density, sensitivity)) in densities.iter().zip(sensitivities).enumerate() {
         let next = apply_oc_update(*density, *sensitivity, lambda, params);
         out[index] = next;
-        report.average_density += next;
+        avg_acc.add(next);
         report.min_density = f64::min(report.min_density, next);
         report.max_density = f64::max(report.max_density, next);
         report.max_density_change = f64::max(report.max_density_change, (next - density).abs());
     }
-    report.average_density /= cell_count as f64;
+    report.average_density = avg_acc.value() / cell_count as f64;
     if let Some(out_report) = unsafe { out_report.as_mut() } {
         *out_report = report;
     }
@@ -375,18 +377,18 @@ pub extern "C" fn topology_runtime_shape_density_step(
         return Bool::FALSE;
     }
     if let Some(report) = unsafe { out_report.as_mut() } {
-        report.total_compliance = densities_slice
-            .iter()
-            .zip(energies)
-            .map(|(density, energy)| {
+        let mut compliance_acc = KahanSum::default();
+        for (density, energy) in densities_slice.iter().zip(energies) {
+            compliance_acc.add(
                 topology_simp_stiffness(
                     density.max(params.min_density),
                     params.penalization,
                     params.stiffness_min,
                     params.stiffness_solid,
-                ) * energy
-            })
-            .sum();
+                ) * *energy,
+            );
+        }
+        report.total_compliance = compliance_acc.value();
     }
     clear_error();
     Bool::TRUE

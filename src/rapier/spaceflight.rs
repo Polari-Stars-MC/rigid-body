@@ -1514,7 +1514,8 @@ pub extern "C" fn space_variational_two_body(
         out_derivative,
         VariationalState {
             position_dot: velocity,
-            velocity_dot: vec3_from_rapier(-r * (mu / rn.powi(3))),
+            // Compute mu/r³ as mu/(r² * |r|) to avoid powi(3) overflow
+            velocity_dot: vec3_from_rapier(-r * (mu / (rn * rn.sqrt()))),
         },
     )
 }
@@ -1808,7 +1809,7 @@ pub extern "C" fn space_gravity_gradient_torque(
     );
     write_out(
         out_torque,
-        vec3_from_rapier(cross(n, in_vec) * (3.0 * mu / rn.powi(3))),
+        vec3_from_rapier(cross(n, in_vec) * (3.0 * mu / (rn * rn.sqrt()))),
     )
 }
 

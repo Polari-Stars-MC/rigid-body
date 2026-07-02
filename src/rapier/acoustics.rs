@@ -8,6 +8,7 @@ use crate::rapier::ffi::{
     AcousticWaveReport, Bool, ModalAnalysisReport, ModalSynthesisReport, SpatializedSample,
     StructuralModeReport, Vec3, clamp01, finite_non_negative, finite_positive,
 };
+use crate::rapier::math::KahanSum;
 
 const EPSILON: f64 = 1.0e-12;
 const MAX_MODAL_DOF: u32 = 128;
@@ -391,7 +392,7 @@ pub extern "C" fn acoustic_wave_equation_step(
     let laplacian = unsafe { slice::from_raw_parts(laplacian_pressure, count) };
     let next = unsafe { slice::from_raw_parts_mut(out_next_pressure, capacity as usize) };
     let mut max_pressure = 0.0;
-    let mut acoustic_energy = 0.0;
+    let mut acoustic_energy_acc = KahanSum::default();
     for index in 0..count {
         if !previous[index].is_finite()
             || !current[index].is_finite()
@@ -407,14 +408,14 @@ pub extern "C" fn acoustic_wave_equation_step(
         next[index] =
             current[index] + velocity_term + sound_speed * sound_speed * dt * dt * laplacian[index];
         max_pressure = f64::max(max_pressure, next[index].abs());
-        acoustic_energy += 0.5 * next[index] * next[index];
+        acoustic_energy_acc.add(0.5 * next[index] * next[index]);
     }
 
     if let Some(out_report) = unsafe { out_report.as_mut() } {
         *out_report = AcousticWaveReport {
             cell_count,
             max_pressure,
-            acoustic_energy,
+            acoustic_energy: acoustic_energy_acc.value(),
         };
     }
     clear_error();
@@ -599,9 +600,9 @@ pub extern "C" fn acoustic_modal_synthesis_step(
     let displacements = unsafe { slice::from_raw_parts_mut(mode_displacements, count) };
     let velocities = unsafe { slice::from_raw_parts_mut(mode_velocities, count) };
 
-    let mut sample = 0.0;
+    let mut sample_acc = KahanSum::default();
     let mut peak_modal_displacement: f64 = 0.0;
-    let mut modal_energy = 0.0;
+    let mut modal_energy_acc = KahanSum::default();
     for index in 0..count {
         let frequency = frequencies[index];
         let gain = gains[index];
@@ -632,11 +633,12 @@ pub extern "C" fn acoustic_modal_synthesis_step(
             velocities[index] *= (1.0 - zeta * dt).max(0.0);
         }
 
-        sample += gain * displacements[index];
+        sample_acc.add(gain * displacements[index]);
         peak_modal_displacement = peak_modal_displacement.max(displacements[index].abs());
-        modal_energy += 0.5
-            * (velocities[index] * velocities[index]
-                + omega * omega * displacements[index] * displacements[index]);
+        modal_energy_acc.add(
+            0.5 * (velocities[index] * velocities[index]
+                + omega * omega * displacements[index] * displacements[index]),
+        );
     }
 
     let Some(out_report) = (unsafe { out_report.as_mut() }) else {
@@ -645,9 +647,9 @@ pub extern "C" fn acoustic_modal_synthesis_step(
     };
     *out_report = ModalSynthesisReport {
         mode_count,
-        sample: sample * output_gain,
+        sample: sample_acc.value() * output_gain,
         peak_modal_displacement,
-        modal_energy,
+        modal_energy: modal_energy_acc.value(),
     };
     clear_error();
     Bool::TRUE

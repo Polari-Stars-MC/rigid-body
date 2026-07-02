@@ -12,6 +12,7 @@ use crate::rapier::ffi::{
     CustomPhysicsReport, ExternalForceLaw, MAX_OUTPUT_CAPACITY, WorldHandle, pack_collider_handle,
     vec3_finite, vec3_from_rapier, vec3_to_rapier,
 };
+use crate::rapier::math::KahanVec3;
 
 const MAX_EVENT_RECORDS: usize = 16_384;
 
@@ -267,8 +268,8 @@ pub(crate) fn apply_custom_external_forces(world: &mut crate::rapier::world::Phy
     }
 
     let mut report = CustomPhysicsReport::default();
-    let mut total_drag = Vector::ZERO;
-    let mut total_external = Vector::ZERO;
+    let mut total_drag = KahanVec3::default();
+    let mut total_external = KahanVec3::default();
     for (_, body) in world.bodies.iter_mut() {
         report.body_count += 1;
         if !body.is_dynamic() {
@@ -293,7 +294,7 @@ pub(crate) fn apply_custom_external_forces(world: &mut crate::rapier::world::Phy
                 };
                 let force = -relative_velocity / speed * drag_magnitude;
                 body.add_force(force, true);
-                total_drag += force;
+                total_drag.add(vec3_from_rapier(force));
                 report.drag_body_count += 1;
             }
         }
@@ -327,14 +328,14 @@ pub(crate) fn apply_custom_external_forces(world: &mut crate::rapier::world::Phy
             }
             if force != Vector::ZERO {
                 body.add_force(force, true);
-                total_external += force;
+                total_external.add(vec3_from_rapier(force));
                 report.external_force_body_count += 1;
             }
         }
     }
 
-    report.total_drag_force = vec3_from_rapier(total_drag);
-    report.total_external_force = vec3_from_rapier(total_external);
+    report.total_drag_force = total_drag.value();
+    report.total_external_force = total_external.value();
     world.events.set_last_custom_physics_report(report);
 }
 

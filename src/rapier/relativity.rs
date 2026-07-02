@@ -13,6 +13,7 @@ use crate::rapier::ffi::{
     Bool, GravitationalTimeDilation, LengthContraction, LorentzBoost, LorentzTransformedFrame,
     RelativisticParticle, SchwarzschildMetric, Vec3, vec3_finite, vec3_from_rapier, vec3_to_rapier,
 };
+use crate::rapier::math::mul_add;
 
 use crate::rapier::math::{finite_non_negative, finite_positive};
 
@@ -45,7 +46,10 @@ pub extern "C" fn rel_lorentz_factor(speed: f64, out_gamma: *mut f64) -> Bool {
         return Bool::FALSE;
     }
     let beta = speed / SPEED_OF_LIGHT;
-    let gamma = 1.0 / (1.0 - beta * beta).sqrt();
+    // Use mul_add to avoid catastrophic cancellation when beta ≈ 1:
+    // 1.0 - beta*beta = -(beta*beta - 1.0), computed with single rounding.
+    let one_minus_beta_sq = -mul_add(beta, beta, -1.0);
+    let gamma = 1.0 / one_minus_beta_sq.max(0.0).sqrt();
     write_out(out_gamma, gamma)
 }
 
@@ -82,10 +86,20 @@ pub extern "C" fn rel_lorentz_boost(velocity: Vec3, out_boost: *mut LorentzBoost
     let beta_x = velocity.x / SPEED_OF_LIGHT;
     let beta_y = velocity.y / SPEED_OF_LIGHT;
     let beta_z = velocity.z / SPEED_OF_LIGHT;
-    let beta_sq = beta_x * beta_x + beta_y * beta_y + beta_z * beta_z;
-    let gamma = 1.0 / (1.0 - beta_sq).sqrt();
+    // Sum beta components with mul_add for better precision near c
+    let beta_sq = mul_add(beta_x, beta_x, mul_add(beta_y, beta_y, beta_z * beta_z));
+    let one_minus_beta_sq = -mul_add(beta_sq, 1.0_f64, -1.0_f64); // -(β² - 1) = 1 - β²
+    let gamma = if one_minus_beta_sq > 0.0 {
+        1.0 / one_minus_beta_sq.sqrt()
+    } else {
+        f64::INFINITY
+    };
     let g = gamma;
-    let gm1_over_b2 = (gamma - 1.0) / beta_sq;
+    let gm1_over_b2 = if beta_sq > 0.0 {
+        (gamma - 1.0) / beta_sq
+    } else {
+        0.5 // limit as beta→0: (γ-1)/β² → 0.5
+    };
 
     write_out(
         out_boost,
@@ -176,7 +190,8 @@ pub extern "C" fn rel_velocity_addition(
         let u_hat = u_vec / u_len;
         let v_parallel = u_hat * u_hat.dot(v_vec);
         let v_perp = v_vec - v_parallel;
-        let gamma_u = 1.0 / (1.0 - u_len_sq / c2).sqrt();
+        let one_minus_u = -mul_add(u_len_sq / c2, 1.0_f64, -1.0_f64);
+        let gamma_u = 1.0 / one_minus_u.max(0.0).sqrt();
         (u_vec + v_parallel + v_perp / gamma_u) / denom
     };
     write_out(out_result, vec3_from_rapier(result))
@@ -253,7 +268,8 @@ pub extern "C" fn rel_schwarzschild_metric(
         );
         return Bool::FALSE;
     }
-    let factor = 1.0 - rs / radius;
+    // mul_add to avoid cancellation when radius ≈ rs (near horizon)
+    let factor = -mul_add(rs / radius, 1.0_f64, -1.0_f64); // -(rs/r - 1) = 1 - rs/r
     let g_tt = -factor;
     let g_rr = 1.0 / factor;
     write_out(
@@ -444,7 +460,8 @@ pub extern "C" fn rel_length_contraction(
         return Bool::FALSE;
     }
     let beta = speed / SPEED_OF_LIGHT;
-    let gamma = 1.0 / (1.0 - beta * beta).sqrt();
+    let one_minus_beta_sq = -mul_add(beta, beta, -1.0);
+    let gamma = 1.0 / one_minus_beta_sq.max(0.0).sqrt();
     let contracted = proper_length / gamma;
     write_out(
         out_contraction,
@@ -522,7 +539,8 @@ pub extern "C" fn rel_particle_properties(
     }
     let speed = speed_sq.sqrt();
     let beta = speed / SPEED_OF_LIGHT;
-    let gamma = 1.0 / (1.0 - beta * beta).sqrt();
+    let one_minus_beta_sq = -mul_add(beta, beta, -1.0);
+    let gamma = 1.0 / one_minus_beta_sq.max(0.0).sqrt();
     let mc2 = mass * c2;
     let total_energy = gamma * mc2;
     let kinetic_energy = (gamma - 1.0) * mc2;

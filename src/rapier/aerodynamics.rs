@@ -7,6 +7,7 @@ use crate::rapier::ffi::{
     AeroForceReport, AeroSurface, Bool, MAX_OUTPUT_CAPACITY, RigidBodyHandleRaw, Vec3, WorldHandle,
     unpack_rigid_body_handle, vec3_finite, vec3_from_rapier, vec3_to_rapier,
 };
+use crate::rapier::math::KahanVec3;
 
 fn aero_surface_valid(surface: AeroSurface) -> bool {
     vec3_finite(surface.point)
@@ -153,8 +154,8 @@ pub extern "C" fn aero_apply_surfaces(
     let body_angvel = body.angvel();
     let body_center = body.center_of_mass();
     let wind_velocity = vec3_to_rapier(wind_velocity);
-    let mut total_force = Vector::ZERO;
-    let mut total_torque = Vector::ZERO;
+    let mut total_force = KahanVec3::default();
+    let mut total_torque = KahanVec3::default();
     let mut active_surface_count = 0u32;
 
     for surface in surfaces {
@@ -170,15 +171,15 @@ pub extern "C" fn aero_apply_surfaces(
         };
 
         body.add_force_at_point(force, vec3_to_rapier(surface.point), wake_up.0 != 0);
-        total_force += force;
-        total_torque += torque;
+        total_force.add(vec3_from_rapier(force));
+        total_torque.add(vec3_from_rapier(torque));
         active_surface_count += 1;
     }
 
     if let Some(out_report) = unsafe { out_report.as_mut() } {
         *out_report = make_report(
-            total_force,
-            total_torque,
+            vec3_to_rapier(total_force.value()),
+            vec3_to_rapier(total_torque.value()),
             surface_count,
             active_surface_count,
         );
@@ -276,8 +277,8 @@ pub extern "C" fn aero_apply_voxel_grid(
         (0, 0, -1, Vector::NEG_Z, Vector::new(0.5, 0.5, 0.0)),
         (0, 0, 1, Vector::Z, Vector::new(0.5, 0.5, 1.0)),
     ];
-    let mut total_force = Vector::ZERO;
-    let mut total_torque = Vector::ZERO;
+    let mut total_force = KahanVec3::default();
+    let mut total_torque = KahanVec3::default();
     let mut surface_count = 0u32;
     let mut active_surface_count = 0u32;
 
@@ -333,8 +334,8 @@ pub extern "C" fn aero_apply_voxel_grid(
                     };
 
                     body.add_force_at_point(force, world_point, wake_up.0 != 0);
-                    total_force += force;
-                    total_torque += torque;
+                    total_force.add(vec3_from_rapier(force));
+                    total_torque.add(vec3_from_rapier(torque));
                     active_surface_count += 1;
                 }
             }
@@ -343,8 +344,8 @@ pub extern "C" fn aero_apply_voxel_grid(
 
     if let Some(out_report) = unsafe { out_report.as_mut() } {
         *out_report = make_report(
-            total_force,
-            total_torque,
+            vec3_to_rapier(total_force.value()),
+            vec3_to_rapier(total_torque.value()),
             surface_count,
             active_surface_count,
         );

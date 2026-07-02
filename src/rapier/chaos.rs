@@ -20,7 +20,7 @@ use crate::rapier::ffi::{
     LorenzStepReport, LyapunovReport,
 };
 
-use crate::rapier::math::{finite, finite_positive};
+use crate::rapier::math::{KahanSum, finite, finite_positive};
 
 const EPSILON: f64 = 1.0e-14;
 const DIST_EPSILON: f64 = 1.0e-16;
@@ -256,7 +256,7 @@ pub extern "C" fn chaos_lyapunov_lorenz(
         z: initial.z,
     };
 
-    let mut sum_log = 0.0;
+    let mut sum_log = KahanSum::default();
     let mut norm_count: u32 = 0;
 
     for step in 0..total_steps {
@@ -320,7 +320,7 @@ pub extern "C" fn chaos_lyapunov_lorenz(
             let dist = (dx * dx + dy * dy + dz * dz).sqrt();
 
             if dist > EPSILON {
-                sum_log += (dist / perturbation).ln();
+                sum_log.add((dist / perturbation).ln());
                 norm_count += 1;
 
                 // Re-normalise: scale back to initial perturbation size
@@ -343,7 +343,7 @@ pub extern "C" fn chaos_lyapunov_lorenz(
     }
 
     let total_time = (total_steps as f64) * dt;
-    let lyapunov = sum_log / (total_time);
+    let lyapunov = sum_log.value() / total_time;
 
     write_out(
         out_report,
@@ -424,7 +424,7 @@ pub extern "C" fn chaos_lyapunov_rosenstein(
         sum.sqrt()
     };
     // For each vector, find nearest neighbour (excluding temporally close ones)
-    let mut sum_log_div = 0.0;
+    let mut sum_log_div = KahanSum::default();
     let mut count = 0u32;
 
     for i in 0..n_vectors {
@@ -456,7 +456,7 @@ pub extern "C" fn chaos_lyapunov_rosenstein(
             if next_dist.is_finite() && next_dist < f64::MAX && next_dist > 0.0 {
                 let ratio = next_dist / min_dist;
                 if ratio > DIST_EPSILON && ratio.is_finite() {
-                    sum_log_div += ratio.ln();
+                    sum_log_div.add(ratio.ln());
                     count += 1;
                 }
             }
@@ -468,7 +468,7 @@ pub extern "C" fn chaos_lyapunov_rosenstein(
         return Bool::FALSE;
     }
 
-    let lyapunov = sum_log_div / (count as f64);
+    let lyapunov = sum_log_div.value() / (count as f64);
     write_out(
         out_report,
         LyapunovReport {
