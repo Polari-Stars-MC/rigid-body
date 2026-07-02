@@ -9,7 +9,7 @@ use crate::rapier::ffi::{
     vec3_to_rapier,
 };
 
-use crate::rapier::math::{finite_non_negative, finite_positive};
+use crate::rapier::math::{KahanSum, finite_non_negative, finite_positive};
 
 const MAX_GRID_CELLS: u32 = 2_000_000;
 
@@ -180,6 +180,8 @@ pub extern "C" fn physchem_gray_scott_step_2d(
         cell_count,
         ..ReactionDiffusionReport::default()
     };
+    let mut total_u_acc = KahanSum::default();
+    let mut total_v_acc = KahanSum::default();
     for y in 0..height_usize {
         for x in 0..width_usize {
             let index = y * width_usize + x;
@@ -202,11 +204,13 @@ pub extern "C" fn physchem_gray_scott_step_2d(
             out_v[index] = next_v;
             report.max_delta_u = f64::max(report.max_delta_u, (next_u - u).abs());
             report.max_delta_v = f64::max(report.max_delta_v, (next_v - v).abs());
-            report.total_u += next_u;
-            report.total_v += next_v;
+            total_u_acc.add(next_u);
+            total_v_acc.add(next_v);
             report.max_reaction_rate = f64::max(report.max_reaction_rate, reaction_rate.abs());
         }
     }
+    report.total_u = total_u_acc.value();
+    report.total_v = total_v_acc.value();
     if let Some(out_report) = unsafe { out_report.as_mut() } {
         *out_report = report;
     }

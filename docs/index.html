@@ -179,6 +179,7 @@ blockquote { border-left: 3px solid var(--accent); padding: 8px 16px; margin: 16
   <a href="#mc-perf">性能优化</a>
 
   <h2>参考</h2>
+  <a href="#precision">精度优化</a>
   <a href="#error-codes">错误码</a>
   <a href="#verification">验证命令</a>
   <a href="#build">构建与部署</a>
@@ -190,7 +191,8 @@ blockquote { border-left: 3px solid var(--accent); padding: 8px 16px; margin: 16
 <h1>mps_rigid_body</h1>
 <p>
   基于 <code>rapier3d-f64</code> 的 Rust 原生物理运行时。为 Java Minecraft (NeoForge) 提供
-  刚体动力学、空间查询、体素碰撞、航天工程、混沌理论等 564 个 C ABI 函数。
+  刚体动力学、空间查询、体素碰撞、航天工程、混沌理论等 567 个 C ABI 函数。
+	  采用 Kahan 补偿求和与 mul_add 融合乘加以确保双精度数值稳定性。
 </p>
 <div class="btns">
   <a href="#quickstart" class="btn btn-primary">快速开始</a>
@@ -204,7 +206,7 @@ blockquote { border-left: 3px solid var(--accent); padding: 8px 16px; margin: 16
 
 <pre><code class="language-text">Java 21 JNI / Java 25 FFM
   └── Rust C ABI / JNI wrappers
-        └── src/rapier 功能模块 (39 个)
+        └── src/rapier 功能模块 (41 个)
               ├── rapier3d-f64 (双精度物理引擎)
               ├── 工程公式层 (航天、弹道、气动、流体...)
               └── AnvilKit ECS 桥接</code></pre>
@@ -265,10 +267,10 @@ blockquote { border-left: 3px solid var(--accent); padding: 8px 16px; margin: 16
 
 <h3>统计</h3>
 <div class="card-grid">
-  <div class="card"><h3>564</h3><p><code>pub extern "C" fn</code> 函数</p></div>
-  <div class="card"><h3>39</h3><p>Rust 源模块</p></div>
+  <div class="card"><h3>567</h3><p><code>pub extern "C" fn</code> 函数</p></div>
+  <div class="card"><h3>41</h3><p>Rust 源模块</p></div>
   <div class="card"><h3>~2400</h3><p>行 FFI 类型定义</p></div>
-  <div class="card"><h3>172</h3><p>Rust 单元测试</p></div>
+  <div class="card"><h3>178</h3><p>Rust 单元测试</p></div>
   <div class="card"><h3>2</h3><p>Java 访问层 (JNI + FFM)</p></div>
   <div class="card"><h3>0.1.4</h3><p>当前版本</p></div>
 </div>
@@ -290,7 +292,7 @@ cargo build --release
 
 # 运行 Rust 测试
 cargo test
-# 输出: test result: ok. 172 passed</code></pre>
+# 输出: test result: ok. 178 passed</code></pre>
 
 <h3>Java 21 JNI (Minecraft 1.21.1)</h3>
 <pre><code class="language-shell">cd test21
@@ -1435,6 +1437,89 @@ MemorySegment world = (MemorySegment) worldCreate.invokeExact(
 </section>
 
 <!-- ====== REFERENCE ====== -->
+<section id="precision">
+<h2>精度优化 — 双精度数值稳定性</h2>
+<p>
+  项目全程使用 <code>rapier3d-f64</code> 双精度物理引擎，并在公式层实施了多层精度保障措施，
+  确保从纳米级量子效应到天文尺度轨道力学的高精度计算。
+</p>
+
+<h3>Kahan 补偿求和</h3>
+<p>
+  当大量小值累加到已累积的大值时，普通 <code>x += y</code> 会丢失低位有效数字。
+  Kahan 算法通过追踪舍入误差补偿项，将累积精度从 ~15 位提升到 ~30 位有效数字。
+</p>
+<pre><code class="language-rust">// math.rs — Kahan 补偿累加器
+pub(crate) struct KahanSum {
+    sum: f64,          // 当前和
+    compensation: f64, // 被丢弃的低位误差
+}
+impl KahanSum {
+    pub fn add(&mut self, value: f64) {
+        let y = value - self.compensation;
+        let t = self.sum + y;
+        self.compensation = (t - self.sum) - y;  // 恢复丢失的低位
+        self.sum = t;
+    }
+}</code></pre>
+<p>已应用于以下累加热点（12 个模块）：</p>
+<table>
+<tr><th>模块</th><th>累加变量</th><th>场景</th></tr>
+<tr><td><code>aerodynamics.rs</code></td><td><code>total_force</code>, <code>total_torque</code></td><td>气动面 / 体素网格表面积分（上限 1M 面）</td></tr>
+<tr><td><code>events.rs</code></td><td><code>total_drag</code>, <code>total_external</code></td><td>自定义力回调累加</td></tr>
+<tr><td><code>fluid.rs</code></td><td>SPH 密度 / 压力 / 黏性 / 颜色梯度</td><td>粒子邻居遍历</td></tr>
+<tr><td><code>chaos.rs</code></td><td><code>sum_log</code>, <code>sum_log_div</code></td><td>Lyapunov 指数估计（数万步轨道积分）</td></tr>
+<tr><td><code>softbody.rs</code></td><td><code>total_error</code> (4 处), <code>denominator</code></td><td>XPBD 距离/弯曲/体积约束求解</td></tr>
+<tr><td><code>superfluidity.rs</code></td><td>环量 / 涡旋绳长度 / 曲率 / 动能</td><td>Biot-Savart 积分 & 缠结统计</td></tr>
+<tr><td><code>topology.rs</code></td><td>密度均值 / 柔度和</td><td>SIMP 拓扑优化（上限 2M 单元）</td></tr>
+<tr><td><code>thermodynamics.rs</code></td><td>总热率</td><td>FEM 热扩散（上限 1M 节点）</td></tr>
+<tr><td><code>electromagnetism.rs</code></td><td>总电磁能密度</td><td>FDTD Yee 网格</td></tr>
+<tr><td><code>physchem.rs</code></td><td><code>total_u</code>, <code>total_v</code></td><td>Gray-Scott 反应扩散（上限 2M 网格）</td></tr>
+<tr><td><code>plasma.rs</code></td><td>动能 / 场能量</td><td>PIC 模拟</td></tr>
+<tr><td><code>acoustics.rs</code></td><td>声能 / 模态合成累加</td><td>波动方程 & 模态分析（上限 2M 单元）</td></tr>
+</table>
+
+<h3>mul_add 融合乘加 — 消除灾难性抵消</h3>
+<p>
+  <code>a * b + c</code> 使用 CPU 硬件指令 <code>mul_add</code> 一次舍入完成，
+  而 <code>a * b + c</code> 需要两次舍入。这在以下关键场景中至关重要：
+</p>
+<table>
+<tr><th>位置</th><th>原公式</th><th>精度问题</th></tr>
+<tr><td>Lorentz 因子 ×5</td><td><code>1.0/sqrt(1.0 - β²)</code></td><td>β ≈ 1 时 1−β² 灾难性抵消</td></tr>
+<tr><td>轨道积分</td><td><code>position + velocity * dt</code></td><td>天文尺度位置吞掉微小位移</td></tr>
+<tr><td>SPH Poly6 kernel</td><td><code>(h² − r²)³</code></td><td>r ≈ h 时边界附近抵消</td></tr>
+<tr><td>SPH 梯度</td><td><code>(smoothing_radius − distance)²</code></td><td>邻近核边缘抵消</td></tr>
+<tr><td>Schwarzschild 度规</td><td><code>1 − rs/r</code></td><td>r ≈ rs 时视界附近抵消</td></tr>
+<tr><td>N 体引力</td><td><code>r² + ε²</code></td><td>软化参数 ε 远小于距离时被吞</td></tr>
+<tr><td>RK4 助推滑翔</td><td><code>state + dt * sum / 6</code></td><td>大海拔吃小增量</td></tr>
+</table>
+
+<h3>r³ 溢出防护</h3>
+<p>
+  在轨道力学和库仑力计算中，直接使用 <code>r.powi(3)</code> 当 r 跨越纳米到天文单位时
+  会溢出或丢失精度。改用 <code>r² * r</code> 或 <code>r² * r.sqrt()</code> 分解计算：
+</p>
+<table>
+<tr><th>模块</th><th>原计算</th><th>优化</th></tr>
+<tr><td><code>spaceflight.rs</code></td><td><code>mu / rn.powi(3)</code></td><td><code>mu / (rn * rn.sqrt())</code></td></tr>
+<tr><td><code>astrophysics.rs</code></td><td><code>GM / (c² * r³)</code></td><td><code>GM / (c² * r² * r)</code></td></tr>
+<tr><td><code>molecular.rs</code></td><td><code>k / distance.powi(3)</code></td><td><code>k / (d² * d)</code></td></tr>
+</table>
+
+<h3>统一 EPSILON 体系</h3>
+<p>项目定义了4级 epsilon 常量，配合 <code>approx_eq()</code> 使用相对容差比较：</p>
+<table>
+<tr><th>常量</th><th>值</th><th>适用场景</th></tr>
+<tr><td><code>EPS_GENERAL</code></td><td>1.0e-12</td><td>通用值比较</td></tr>
+<tr><td><code>EPS_TIGHT</code></td><td>1.0e-14</td><td>导数 / 接近零的比较</td></tr>
+<tr><td><code>EPS_GEOMETRIC</code></td><td>1.0e-9</td><td>几何 / 网格容差</td></tr>
+<tr><td><code>EPS_DIST_SQ</code></td><td>1.0e-18</td><td>速度动量距离平方</td></tr>
+</table>
+<p>相对比较 <code>approx_eq(a, b, eps_abs, eps_rel)</code> 自动适应数值量级——对
+从 <code>1e-30</code>（电子质量）到 <code>1e30</code>（天体质量）跨度 60+ 数量级的值都能正确比较。</p>
+</section>
+
 <section id="error-codes">
 <h2>错误码</h2>
 <table>
@@ -1458,7 +1543,7 @@ let msg_ptr = last_error_message();</code></pre>
 
 <section id="verification">
 <h2>验证命令</h2>
-<pre><code class="language-shell"># Rust 测试 (172 个)
+<pre><code class="language-shell"># Rust 测试 (178 个)
 cargo test
 
 # Rust 类型检查

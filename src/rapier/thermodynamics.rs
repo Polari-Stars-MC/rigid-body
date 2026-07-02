@@ -9,7 +9,7 @@ use crate::rapier::ffi::{
     ThermoelasticReport,
 };
 
-use crate::rapier::math::{finite_non_negative, finite_positive};
+use crate::rapier::math::{KahanSum, finite_non_negative, finite_positive};
 
 const STEFAN_BOLTZMANN: f64 = 5.670_374_419e-8;
 const MAX_FEM_NODES: u32 = 1_000_000;
@@ -270,19 +270,19 @@ pub extern "C" fn thermal_fem_diffusion_step(
     }
 
     let mut max_temperature_delta = 0.0;
-    let mut total_heat_rate = 0.0;
+    let mut total_heat_rate_acc = KahanSum::default();
     for (index, node) in nodes.iter().enumerate() {
         let delta = heat_rates[index] * dt / node.heat_capacity;
         heat_rates[index] = node.temperature + delta;
         max_temperature_delta = f64::max(max_temperature_delta, delta.abs());
-        total_heat_rate += heat_rates[index];
+        total_heat_rate_acc.add(heat_rates[index]);
     }
 
     if let Some(out_report) = unsafe { out_report.as_mut() } {
         *out_report = FemHeatDiffusionReport {
             node_count,
             edge_count,
-            total_heat_rate,
+            total_heat_rate: total_heat_rate_acc.value(),
             max_temperature_delta,
         };
     }

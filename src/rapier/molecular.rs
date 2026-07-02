@@ -85,7 +85,9 @@ fn coulomb_pair(
     }
     let coefficient = law.coulomb_constant * charge_a * charge_b / law.relative_permittivity;
     let potential = coefficient / distance;
-    let force = displacement * (coefficient / distance.powi(3));
+    // Compute 1/r³ as 1/(r² * r) to avoid powi(3) intermediate overflow
+    let inv_r3 = 1.0 / (distance * distance * distance);
+    let force = displacement * (coefficient * inv_r3);
     (potential, force)
 }
 

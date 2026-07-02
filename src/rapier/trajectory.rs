@@ -8,6 +8,7 @@ use crate::rapier::ffi::{
     TrajectoryGlideEnvironment, TrajectoryGlideReport, TrajectoryGlideState, TrajectoryState,
     WorldHandle, unpack_rigid_body_handle, vec3_finite, vec3_from_rapier, vec3_to_rapier,
 };
+use crate::rapier::math::mul_add;
 
 const MAX_STEP_SECONDS: f64 = 10.0;
 const MIN_GLIDE_SPEED: f64 = 1.0e-6;
@@ -114,8 +115,17 @@ pub extern "C" fn trajectory_integrate_step(
     };
 
     let acceleration = vec3_to_rapier(report.acceleration);
-    let velocity = vec3_to_rapier(state.velocity) + acceleration * dt;
-    let position = vec3_to_rapier(state.position) + velocity * dt;
+    // Use mul_add for single-rounding precision when position >> velocity*dt
+    let velocity = rapier3d::prelude::Vector::new(
+        mul_add(acceleration.x, dt, vec3_to_rapier(state.velocity).x),
+        mul_add(acceleration.y, dt, vec3_to_rapier(state.velocity).y),
+        mul_add(acceleration.z, dt, vec3_to_rapier(state.velocity).z),
+    );
+    let position = rapier3d::prelude::Vector::new(
+        mul_add(velocity.x, dt, vec3_to_rapier(state.position).x),
+        mul_add(velocity.y, dt, vec3_to_rapier(state.position).y),
+        mul_add(velocity.z, dt, vec3_to_rapier(state.position).z),
+    );
 
     if let Some(out_state) = unsafe { out_state.as_mut() } {
         *out_state = TrajectoryState {
@@ -328,27 +338,30 @@ pub extern "C" fn trajectory_glide_integrate_step(
     };
 
     let out = TrajectoryGlideState {
-        speed: (state.speed
-            + dt * (k1.speed_dot + 2.0 * k2.speed_dot + 2.0 * k3.speed_dot + k4.speed_dot) / 6.0)
-            .max(0.0),
-        flight_path_angle: state.flight_path_angle
-            + dt * (k1.flight_path_angle_dot
+        speed: mul_add(
+            dt / 6.0,
+            k1.speed_dot + 2.0 * k2.speed_dot + 2.0 * k3.speed_dot + k4.speed_dot,
+            state.speed,
+        )
+        .max(0.0),
+        flight_path_angle: mul_add(
+            dt / 6.0,
+            k1.flight_path_angle_dot
                 + 2.0 * k2.flight_path_angle_dot
                 + 2.0 * k3.flight_path_angle_dot
-                + k4.flight_path_angle_dot)
-                / 6.0,
-        altitude: state.altitude
-            + dt * (k1.altitude_dot
-                + 2.0 * k2.altitude_dot
-                + 2.0 * k3.altitude_dot
-                + k4.altitude_dot)
-                / 6.0,
-        downrange: state.downrange
-            + dt * (k1.downrange_dot
-                + 2.0 * k2.downrange_dot
-                + 2.0 * k3.downrange_dot
-                + k4.downrange_dot)
-                / 6.0,
+                + k4.flight_path_angle_dot,
+            state.flight_path_angle,
+        ),
+        altitude: mul_add(
+            dt / 6.0,
+            k1.altitude_dot + 2.0 * k2.altitude_dot + 2.0 * k3.altitude_dot + k4.altitude_dot,
+            state.altitude,
+        ),
+        downrange: mul_add(
+            dt / 6.0,
+            k1.downrange_dot + 2.0 * k2.downrange_dot + 2.0 * k3.downrange_dot + k4.downrange_dot,
+            state.downrange,
+        ),
     };
 
     if let Some(out_state) = unsafe { out_state.as_mut() } {

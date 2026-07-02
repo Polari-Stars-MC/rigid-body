@@ -10,7 +10,7 @@ use crate::rapier::ffi::{
     MagneticFluxReport, MaxwellPointReport, Vec3, vec3_finite, vec3_from_rapier, vec3_to_rapier,
 };
 
-use crate::rapier::math::{finite_non_negative, finite_positive};
+use crate::rapier::math::{KahanSum, finite_non_negative, finite_positive};
 
 const EPSILON: f64 = 1.0e-12;
 const VACUUM_PERMITTIVITY: f64 = 8.854_187_812_8e-12;
@@ -239,7 +239,7 @@ pub extern "C" fn em_fdtd_yee_update(
 
     let mut max_electric_delta = 0.0;
     let mut max_magnetic_delta = 0.0;
-    let mut total_energy_density = 0.0;
+    let mut total_energy_acc = KahanSum::default();
     for index in 0..cell_count as usize {
         if !vec3_finite(electric_fields[index])
             || !vec3_finite(magnetic_fields[index])
@@ -261,8 +261,10 @@ pub extern "C" fn em_fdtd_yee_update(
         out_magnetic[index] = vec3_from_rapier(next_b);
         max_electric_delta = f64::max(max_electric_delta, e_delta.length());
         max_magnetic_delta = f64::max(max_magnetic_delta, b_delta.length());
-        total_energy_density += 0.5 * permittivity * next_e.length_squared()
-            + 0.5 * next_b.length_squared() / permeability;
+        total_energy_acc.add(
+            0.5 * permittivity * next_e.length_squared()
+                + 0.5 * next_b.length_squared() / permeability,
+        );
     }
 
     if let Some(out_report) = unsafe { out_report.as_mut() } {
@@ -270,7 +272,7 @@ pub extern "C" fn em_fdtd_yee_update(
             cell_count,
             max_electric_delta,
             max_magnetic_delta,
-            total_energy_density,
+            total_energy_density: total_energy_acc.value(),
             courant_number: dt / (permittivity * permeability).sqrt(),
         };
     }

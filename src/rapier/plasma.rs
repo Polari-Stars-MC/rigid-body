@@ -15,7 +15,7 @@ use crate::rapier::ffi::{
     PicStepReport, PlasmaParamsReport, VlasovMomentReport,
 };
 
-use crate::rapier::math::{finite, finite_non_negative, finite_positive};
+use crate::rapier::math::{KahanSum, finite, finite_non_negative, finite_positive};
 
 const EPSILON: f64 = 1.0e-14;
 const MASS_EPSILON: f64 = 1.0e-30;
@@ -866,14 +866,14 @@ pub extern "C" fn pl_pic_step_report(
     let parts = unsafe { std::slice::from_raw_parts(particles, particle_count as usize) };
     let cells = unsafe { std::slice::from_raw_parts(grid, grid_cells as usize) };
 
-    let mut total_ke = 0.0_f64;
+    let mut total_ke_acc = KahanSum::default();
     let mut max_e = 0.0_f64;
     let mut max_b = 0.0_f64;
 
     for p in parts {
         if pic_particle_valid(p) {
             let v2 = p.vx * p.vx + p.vy * p.vy + p.vz * p.vz;
-            total_ke += 0.5 * p.mass * p.weight * v2;
+            total_ke_acc.add(0.5 * p.mass * p.weight * v2);
         }
     }
 
@@ -890,11 +890,11 @@ pub extern "C" fn pl_pic_step_report(
 
     // Field energy density: (ε₀ E² + B²/μ₀) / 2 per cell
     // Report the total as approximate
-    let mut field_energy = 0.0_f64;
+    let mut field_energy_acc = KahanSum::default();
     for c in cells {
         let e2 = c.ex * c.ex + c.ey * c.ey + c.ez * c.ez;
         let b2 = c.bx * c.bx + c.by * c.by + c.bz * c.bz;
-        field_energy += 0.5 * VACUUM_PERMITTIVITY * e2 + 0.5 * b2 / VACUUM_PERMEABILITY;
+        field_energy_acc.add(0.5 * VACUUM_PERMITTIVITY * e2 + 0.5 * b2 / VACUUM_PERMEABILITY);
     }
 
     write_out(
@@ -904,8 +904,8 @@ pub extern "C" fn pl_pic_step_report(
             max_density: 0.0,
             max_electric_field: max_e,
             max_magnetic_field: max_b,
-            total_kinetic_energy: total_ke,
-            total_field_energy: field_energy,
+            total_kinetic_energy: total_ke_acc.value(),
+            total_field_energy: field_energy_acc.value(),
         },
     )
 }

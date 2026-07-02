@@ -9,6 +9,7 @@ use crate::rapier::ffi::{
     Bool, NBodyForceReport, NBodyParticle, NBodySolverParams, OrbitalResonanceReport,
     RelativisticOrbitReport, RocheLimitReport, Vec3, vec3_finite, vec3_from_rapier, vec3_to_rapier,
 };
+use crate::rapier::math::mul_add;
 
 use crate::rapier::math::{finite_non_negative, finite_positive};
 
@@ -134,11 +135,14 @@ fn acceleration_from_mass(
         return Vector::ZERO;
     }
     let offset = center - position;
-    let r2 = offset.length_squared() + params.softening * params.softening;
+    // Use mul_add for softened distance: r² + ε² with single rounding
+    let r2 = mul_add(params.softening, params.softening, offset.length_squared());
     if r2 <= EPSILON {
         return Vector::ZERO;
     }
-    offset * (params.gravitational_constant * mass / (r2 * r2.sqrt()))
+    // r2 * sqrt(r2) = r³; compute as r2.sqrt() * r2 to avoid overflow
+    let r3 = r2.sqrt() * r2;
+    offset * (params.gravitational_constant * mass / r3)
 }
 
 fn bh_acceleration(
@@ -392,10 +396,12 @@ pub extern "C" fn astro_relativistic_orbit_correction(
     let mu = gravitational_constant * central_mass;
     let h = r.cross(v).length();
     let radial_velocity = r.dot(v) / radius;
-    let correction = r
-        * (mu / (SPEED_OF_LIGHT * SPEED_OF_LIGHT * radius.powi(3)))
-        * (4.0 * mu / radius - v.length_squared())
-        + v * (4.0 * mu * radial_velocity / (SPEED_OF_LIGHT * SPEED_OF_LIGHT * radius.powi(2)));
+    let c2 = SPEED_OF_LIGHT * SPEED_OF_LIGHT;
+    // Compute r² and r³ safely; prefer r² * r over powi(3)
+    let r2 = radius * radius;
+    let r3 = r2 * radius;
+    let correction = r * (mu / (c2 * r3)) * (4.0 * mu / radius - v.length_squared())
+        + v * (4.0 * mu * radial_velocity / (c2 * r2));
     let Some(out_report) = (unsafe { out_report.as_mut() }) else {
         set_error(ERR_NULL_POINTER, "relativistic correction output is null");
         return Bool::FALSE;

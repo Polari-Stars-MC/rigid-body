@@ -16,6 +16,7 @@ use crate::rapier::ffi::{
     GpTimeEvolutionParams, QuantisedCirculation, Vec3, VortexReconnectionReport, VortexRing,
     VortexSegment, VortexTangleStats, finite_non_negative, finite_positive, vec3_finite,
 };
+use crate::rapier::math::KahanSum;
 
 const EPSILON: f64 = 1.0e-14;
 const FOUR_PI: f64 = 12.566_370_614_359_172;
@@ -291,7 +292,7 @@ pub extern "C" fn sf_circulation_around_loop(
 
     // Compute circulation by summing the tangential component of velocity
     // around the loop, approximated as sum over segments of v_segment · dℓ
-    let mut circulation = 0.0_f64;
+    let mut circulation_acc = KahanSum::default();
 
     for seg in segs {
         if !segment_valid(seg) {
@@ -304,8 +305,10 @@ pub extern "C" fn sf_circulation_around_loop(
         }
         // dL along segment direction
         let seg_len = vec3_sub(seg.end, seg.start);
-        circulation += vec3_dot(biot.velocity, seg_len);
+        circulation_acc.add(vec3_dot(biot.velocity, seg_len));
     }
+
+    let circulation = circulation_acc.value();
 
     let kappa_0 = if kappa_0.abs() > EPSILON {
         kappa_0
@@ -732,8 +735,8 @@ pub extern "C" fn sf_vortex_tangle_stats(
 
     let segs = unsafe { std::slice::from_raw_parts(segments, segment_count as usize) };
 
-    let mut total_length = 0.0_f64;
-    let mut total_curvature = 0.0_f64;
+    let mut total_length_acc = KahanSum::default();
+    let mut total_curvature_acc = KahanSum::default();
     let mut curvature_count = 0u32;
 
     // To compute curvature, we need triplets of consecutive segments.
@@ -743,7 +746,7 @@ pub extern "C" fn sf_vortex_tangle_stats(
             continue;
         }
         let seg_vec = vec3_sub(seg.end, seg.start);
-        total_length += vec3_length(seg_vec);
+        total_length_acc.add(vec3_length(seg_vec));
 
         // Approximate curvature from angle between consecutive segments
         if i > 0 {
@@ -759,7 +762,7 @@ pub extern "C" fn sf_vortex_tangle_stats(
                     )
                     .clamp(-1.0, 1.0);
                     let angle = cos_theta.acos();
-                    total_curvature += angle / ((pv_len + sv_len) * 0.5);
+                    total_curvature_acc.add(angle / ((pv_len + sv_len) * 0.5));
                     curvature_count += 1;
                 }
             }
@@ -769,7 +772,7 @@ pub extern "C" fn sf_vortex_tangle_stats(
     let kappa = circulation_quantum_const();
     // Kinetic energy per unit length: E/L ≈ (κ²/4π) * ln(R/ξ)
     // Use a simplified form per segment
-    let mut total_ke = 0.0_f64;
+    let mut total_ke_acc = KahanSum::default();
     for seg in segs {
         if segment_valid(seg) {
             let seg_len = vec3_length(vec3_sub(seg.end, seg.start));
@@ -781,9 +784,13 @@ pub extern "C" fn sf_vortex_tangle_stats(
             } else {
                 0.0
             };
-            total_ke += energy_per_length * seg_len;
+            total_ke_acc.add(energy_per_length * seg_len);
         }
     }
+
+    let total_length = total_length_acc.value();
+    let total_curvature = total_curvature_acc.value();
+    let total_ke = total_ke_acc.value();
 
     let avg_curvature = if curvature_count > 0 {
         total_curvature / curvature_count as f64

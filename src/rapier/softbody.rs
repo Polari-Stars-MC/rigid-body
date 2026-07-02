@@ -10,7 +10,7 @@ use crate::rapier::ffi::{
     SoftSpring, SoftVolumeConstraint, Vec3, vec3_finite, vec3_from_rapier, vec3_to_rapier,
 };
 
-use crate::rapier::math::{finite_non_negative, finite_positive};
+use crate::rapier::math::{KahanSum, finite_non_negative, finite_positive};
 
 const EPSILON: f64 = 1.0e-12;
 const MAX_PARTICLES: u32 = 2_000_000;
@@ -178,7 +178,7 @@ pub extern "C" fn softbody_mass_spring_forces(
     let out_forces = unsafe { slice::from_raw_parts_mut(out_forces, write_count) };
     out_forces[..write_count].fill(Vec3::default());
 
-    let mut total_error = 0.0;
+    let mut total_error_acc = KahanSum::default();
     let mut max_force = 0.0;
     for spring in springs {
         if !index_valid(spring.particle_a, particle_count)
@@ -208,7 +208,7 @@ pub extern "C" fn softbody_mass_spring_forces(
         let fb = vec3_to_rapier(out_forces[b]) - force;
         out_forces[a] = vec3_from_rapier(fa);
         out_forces[b] = vec3_from_rapier(fb);
-        total_error += (length - spring.rest_length).abs();
+        total_error_acc.add((length - spring.rest_length).abs());
         max_force = f64::max(max_force, force.length());
     }
 
@@ -218,7 +218,7 @@ pub extern "C" fn softbody_mass_spring_forces(
             constraint_count: spring_count,
             active_particle_count: particle_count,
             max_correction: max_force,
-            total_error,
+            total_error: total_error_acc.value(),
         };
     }
     clear_error();
@@ -258,10 +258,10 @@ pub extern "C" fn softbody_solve_xpbd_distance_constraints(
     let positions = unsafe { slice::from_raw_parts_mut(positions, particle_count as usize) };
     let inverse_masses = unsafe { slice::from_raw_parts(inverse_masses, particle_count as usize) };
     let constraints = unsafe { slice::from_raw_parts_mut(constraints, constraint_count as usize) };
-    let mut total_error = 0.0;
+    let mut total_error_acc = KahanSum::default();
     let mut max_correction = 0.0;
     for _ in 0..iterations.max(1) {
-        total_error = 0.0;
+        total_error_acc.reset();
         max_correction = 0.0;
         for constraint in constraints.iter_mut() {
             if !index_valid(constraint.particle_a, particle_count)
@@ -288,10 +288,11 @@ pub extern "C" fn softbody_solve_xpbd_distance_constraints(
                 set_error(ERR_INVALID_ARGUMENT, "invalid XPBD distance projection");
                 return Bool::FALSE;
             };
-            total_error += error;
+            total_error_acc.add(error);
             max_correction = f64::max(max_correction, error);
         }
     }
+    let total_error = total_error_acc.value();
     if let Some(out_report) = unsafe { out_report.as_mut() } {
         *out_report = SoftBodyStepReport {
             particle_count,
@@ -377,7 +378,7 @@ pub extern "C" fn softbody_solve_sphere_collision_constraints(
     let positions = unsafe { slice::from_raw_parts_mut(positions, particle_count as usize) };
     let inverse_masses = unsafe { slice::from_raw_parts(inverse_masses, particle_count as usize) };
     let spheres = unsafe { slice::from_raw_parts(spheres, sphere_count as usize) };
-    let mut total_error = 0.0;
+    let mut total_error_acc = KahanSum::default();
     let mut max_correction = 0.0;
     for sphere in spheres {
         if !vec3_finite(sphere.center) || !finite_non_negative(sphere.radius) {
@@ -401,7 +402,7 @@ pub extern "C" fn softbody_solve_sphere_collision_constraints(
                 let corrected = center + normal * sphere.radius;
                 let correction = (corrected - pos).length();
                 positions[i] = vec3_from_rapier(corrected);
-                total_error += correction;
+                total_error_acc.add(correction);
                 max_correction = f64::max(max_correction, correction);
             }
         }
@@ -412,7 +413,7 @@ pub extern "C" fn softbody_solve_sphere_collision_constraints(
             constraint_count: sphere_count,
             active_particle_count: inverse_masses.iter().filter(|mass| **mass > 0.0).count() as u32,
             max_correction,
-            total_error,
+            total_error: total_error_acc.value(),
         };
     }
     clear_error();
@@ -456,10 +457,10 @@ pub extern "C" fn softbody_solve_xpbd_volume_constraints(
     let positions = unsafe { slice::from_raw_parts_mut(positions, particle_count as usize) };
     let inverse_masses = unsafe { slice::from_raw_parts(inverse_masses, particle_count as usize) };
     let constraints = unsafe { slice::from_raw_parts_mut(constraints, constraint_count as usize) };
-    let mut total_error = 0.0;
+    let mut total_error_acc = KahanSum::default();
     let mut max_correction = 0.0;
     for _ in 0..iterations.max(1) {
-        total_error = 0.0;
+        total_error_acc.reset();
         max_correction = 0.0;
         for constraint in constraints.iter_mut() {
             if !index_valid(constraint.particle_a, particle_count)
@@ -491,29 +492,31 @@ pub extern "C" fn softbody_solve_xpbd_volume_constraints(
                 (p[3] - p[0]).cross(p[1] - p[0]) / 6.0,
                 (p[1] - p[0]).cross(p[2] - p[0]) / 6.0,
             ];
-            let mut denominator = 0.0;
+            let mut denominator = KahanSum::default();
             for i in 0..4 {
-                denominator += inverse_masses[ids[i]] * gradients[i].length_squared();
+                denominator.add(inverse_masses[ids[i]] * gradients[i].length_squared());
             }
+            let denom_val = denominator.value();
             let alpha = if dt > EPSILON {
                 constraint.compliance / (dt * dt)
             } else {
                 0.0
             };
-            if denominator + alpha <= EPSILON {
+            if denom_val + alpha <= EPSILON {
                 continue;
             }
-            let delta_lambda = -(c + alpha * constraint.lambda) / (denominator + alpha);
+            let delta_lambda = -(c + alpha * constraint.lambda) / (denom_val + alpha);
             constraint.lambda += delta_lambda;
             for i in 0..4 {
                 let corrected = p[i] + gradients[i] * (inverse_masses[ids[i]] * delta_lambda);
                 positions[ids[i]] = vec3_from_rapier(corrected);
             }
             let error = c.abs();
-            total_error += error;
+            total_error_acc.add(error);
             max_correction = f64::max(max_correction, error);
         }
     }
+    let total_error = total_error_acc.value();
     if let Some(out_report) = unsafe { out_report.as_mut() } {
         *out_report = SoftBodyStepReport {
             particle_count,
