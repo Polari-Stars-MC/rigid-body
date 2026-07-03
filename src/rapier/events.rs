@@ -11,8 +11,8 @@ use crate::rapier::error::{
 };
 use crate::rapier::ffi::{
     AirDragLaw, Bool, CollisionEventRecord, ContactForceEventRecord, CoulombFrictionLaw,
-    CustomPhysicsReport, EventDispatchMode, ExternalForceLaw, MAX_OUTPUT_CAPACITY, WorldHandle,
-    pack_collider_handle, vec3_finite, vec3_from_rapier, vec3_to_rapier,
+    CustomPhysicsReport, EventDispatchMode, ExternalForceLaw, MAX_OUTPUT_CAPACITY, NewtonGravityLaw,
+    WorldHandle, pack_collider_handle, vec3_finite, vec3_from_rapier, vec3_to_rapier,
 };
 use crate::rapier::math::KahanVec3;
 
@@ -23,6 +23,7 @@ pub(crate) struct CustomPhysicsState {
     pub(crate) coulomb_friction: Option<CoulombFrictionLaw>,
     pub(crate) air_drag: Option<AirDragLaw>,
     pub(crate) external_force: Option<ExternalForceLaw>,
+    pub(crate) newton_gravity: Option<NewtonGravityLaw>,
     pub(crate) last_report: CustomPhysicsReport,
 }
 
@@ -539,90 +540,102 @@ fn external_force_law_valid(law: ExternalForceLaw) -> bool {
         && law.gravitational_parameter >= 0.0
 }
 
-pub(crate) fn apply_custom_external_forces(world: &mut crate::rapier::world::PhysicsWorld) {
-    let custom = world.events.custom_physics();
-    let air_drag = custom
-        .air_drag
-        .filter(|law| law.enabled.0 != 0 && air_drag_law_valid(*law));
+/// Apply custom external forces (buoyancy, EM, spring, point gravity) using
+/// the already-read physics state.  Air drag is now handled by
+/// `interaction::apply_body_interactions`.
+pub(crate) fn apply_custom_external_forces_with_custom(
+    world: &mut crate::rapier::world::PhysicsWorld,
+    custom: CustomPhysicsState,
+) {
     let external_force = custom
         .external_force
         .filter(|law| law.enabled.0 != 0 && external_force_law_valid(*law));
 
-    if air_drag.is_none() && external_force.is_none() {
-        world
-            .events
-            .set_last_custom_physics_report(CustomPhysicsReport::default());
+    if external_force.is_none() {
         return;
     }
 
+    // Pre-compute constant parts of external forces outside the body loop
+    let buoyancy_force_vec = external_force
+        .filter(|law| law.buoyancy_enabled.0 != 0)
+        .map(|law| {
+            -vec3_to_rapier(law.buoyancy_gravity) * (law.fluid_density * law.displaced_volume)
+        });
+    let em_electric_vec = external_force
+        .filter(|law| law.electromagnetic_enabled.0 != 0)
+        .map(|law| vec3_to_rapier(law.electric_field) * law.charge);
+    let em_magnetic_vec = external_force
+        .filter(|law| law.electromagnetic_enabled.0 != 0)
+        .map(|law| vec3_to_rapier(law.magnetic_field));
+    let em_charge = external_force
+        .filter(|law| law.electromagnetic_enabled.0 != 0)
+        .map(|law| law.charge);
+    let spring_anchor = external_force
+        .filter(|law| law.elastic_enabled.0 != 0)
+        .map(|law| vec3_to_rapier(law.spring_anchor));
+    let spring_k = external_force
+        .filter(|law| law.elastic_enabled.0 != 0)
+        .map(|law| law.spring_stiffness);
+    let spring_d = external_force
+        .filter(|law| law.elastic_enabled.0 != 0)
+        .map(|law| law.spring_damping);
+    let gravity_source = external_force
+        .filter(|law| law.gravity_enabled.0 != 0)
+        .map(|law| vec3_to_rapier(law.gravity_source));
+    let grav_param = external_force
+        .filter(|law| law.gravity_enabled.0 != 0)
+        .map(|law| law.gravitational_parameter);
+
     let mut report = CustomPhysicsReport::default();
-    let mut total_drag = KahanVec3::default();
     let mut total_external = KahanVec3::default();
+
     for (_, body) in world.bodies.iter_mut() {
         report.body_count += 1;
         if !body.is_dynamic() {
             continue;
         }
 
-        if let Some(law) = air_drag {
-            let fluid_velocity = vec3_to_rapier(law.fluid_velocity);
-            let relative_velocity = body.linvel() - fluid_velocity;
-            let speed = relative_velocity.length();
-            if speed > 1.0e-12 {
-                let reynolds =
-                    law.density * speed * law.characteristic_length / law.dynamic_viscosity;
-                report.max_reynolds_number = report.max_reynolds_number.max(reynolds);
-                let drag_magnitude = if reynolds <= law.reynolds_stokes_limit {
-                    3.0 * std::f64::consts::PI
-                        * law.dynamic_viscosity
-                        * law.characteristic_length
-                        * speed
-                } else {
-                    0.5 * law.density * speed * speed * law.drag_coefficient * law.reference_area
-                };
-                let force = -relative_velocity / speed * drag_magnitude;
-                body.add_force(force, true);
-                total_drag.add(vec3_from_rapier(force));
-                report.drag_body_count += 1;
+        // --- External force (pre-computed constant parts) ---
+        let mut force = Vector::ZERO;
+
+        // Buoyancy: constant force per body
+        if let Some(bf) = buoyancy_force_vec {
+            force += bf;
+        }
+
+        // Electromagnetic: E-field constant, B-field × v per body
+        if let (Some(ef), Some(bf), Some(q)) = (em_electric_vec, em_magnetic_vec, em_charge) {
+            let magnetic = body.linvel().cross(bf);
+            force += ef + magnetic * q;
+        }
+
+        // Elastic spring
+        if let (Some(anchor), Some(k), Some(d)) = (spring_anchor, spring_k, spring_d) {
+            let displacement = body.translation() - anchor;
+            let damping = body.linvel() * d;
+            force += -displacement * k - damping;
+        }
+
+        // Gravity point-mass
+        if let (Some(src), Some(gp)) = (gravity_source, grav_param) {
+            let offset = src - body.translation();
+            let distance_squared = offset.length_squared();
+            if distance_squared > 1.0e-12 {
+                let mass = body.mass();
+                if mass > 0.0 {
+                    force += offset / distance_squared.sqrt()
+                        * (gp * mass / distance_squared);
+                }
             }
         }
 
-        if let Some(law) = external_force {
-            let mut force = Vector::ZERO;
-            if law.buoyancy_enabled.0 != 0 {
-                force += -vec3_to_rapier(law.buoyancy_gravity)
-                    * (law.fluid_density * law.displaced_volume);
-            }
-            if law.electromagnetic_enabled.0 != 0 {
-                let velocity = body.linvel();
-                let magnetic = velocity.cross(vec3_to_rapier(law.magnetic_field));
-                force += (vec3_to_rapier(law.electric_field) + magnetic) * law.charge;
-            }
-            if law.elastic_enabled.0 != 0 {
-                let displacement = body.translation() - vec3_to_rapier(law.spring_anchor);
-                let damping = body.linvel() * law.spring_damping;
-                force += -displacement * law.spring_stiffness - damping;
-            }
-            if law.gravity_enabled.0 != 0 {
-                let offset = vec3_to_rapier(law.gravity_source) - body.translation();
-                let distance_squared = offset.length_squared();
-                if distance_squared > 1.0e-12 {
-                    let mass = body.mass();
-                    if mass > 0.0 {
-                        force += offset / distance_squared.sqrt()
-                            * (law.gravitational_parameter * mass / distance_squared);
-                    }
-                }
-            }
-            if force != Vector::ZERO {
-                body.add_force(force, true);
-                total_external.add(vec3_from_rapier(force));
-                report.external_force_body_count += 1;
-            }
+        if force != Vector::ZERO {
+            body.add_force(force, true);
+            total_external.add(vec3_from_rapier(force));
+            report.external_force_body_count += 1;
         }
     }
 
-    report.total_drag_force = total_drag.value();
     report.total_external_force = total_external.value();
     world.events.set_last_custom_physics_report(report);
 }
@@ -803,6 +816,75 @@ pub extern "C" fn world_get_external_force_law(
         .events
         .custom_physics()
         .external_force
+        .unwrap_or_default();
+    clear_error();
+    Bool::TRUE
+}
+
+// ---------------------------------------------------------------------------
+// Newton gravity law FFI
+// ---------------------------------------------------------------------------
+
+#[unsafe(no_mangle)]
+pub extern "C" fn world_set_newton_gravity_law(
+    world: *mut WorldHandle,
+    law: NewtonGravityLaw,
+) -> Bool {
+    let Some(world) = (unsafe { world.as_mut() }) else {
+        set_error(ERR_NULL_POINTER, "world is null");
+        return Bool::FALSE;
+    };
+    if !law.gravitational_constant.is_finite()
+        || law.gravitational_constant < 0.0
+        || !law.min_distance.is_finite()
+        || law.min_distance <= 0.0
+        || !law.max_distance.is_finite()
+        || law.max_distance < 0.0
+    {
+        set_error(ERR_INVALID_ARGUMENT, "invalid Newton gravity law");
+        return Bool::FALSE;
+    }
+    world.inner.events.custom_physics.write().newton_gravity =
+        if law.enabled.0 != 0 { Some(law) } else { None };
+    clear_error();
+    Bool::TRUE
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn world_set_newton_gravity_law_flag(
+    world: *mut WorldHandle,
+    law: NewtonGravityLaw,
+) -> u8 {
+    world_set_newton_gravity_law(world, law).0
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn world_clear_newton_gravity_law(world: *mut WorldHandle) {
+    let Some(world) = (unsafe { world.as_mut() }) else {
+        return;
+    };
+    world.inner.events.custom_physics.write().newton_gravity = None;
+    clear_error();
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn world_get_newton_gravity_law(
+    world: *const WorldHandle,
+    out_law: *mut NewtonGravityLaw,
+) -> Bool {
+    let Some(world) = (unsafe { world.as_ref() }) else {
+        set_error(ERR_NULL_POINTER, "world is null");
+        return Bool::FALSE;
+    };
+    let Some(out_law) = (unsafe { out_law.as_mut() }) else {
+        set_error(ERR_NULL_POINTER, "Newton gravity output is null");
+        return Bool::FALSE;
+    };
+    *out_law = world
+        .inner
+        .events
+        .custom_physics()
+        .newton_gravity
         .unwrap_or_default();
     clear_error();
     Bool::TRUE

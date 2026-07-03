@@ -394,6 +394,37 @@ pub struct ExternalForceLaw {
     pub enabled: Bool,
 }
 
+/// Newtonian pairwise gravity configuration for body-body attraction.
+///
+/// When enabled, every dynamic body attracts every other dynamic body via
+/// Newton's law:  F = G · m₁ · m₂ / r².
+///
+/// Set `gravitational_constant` to 6.67430e-11 for real-world gravity,
+/// or a larger value for game-scale simulations.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct NewtonGravityLaw {
+    /// Gravitational constant (default: 6.67430e-11 N·m²/kg²).
+    /// Use larger values for game-scale simulations.
+    pub gravitational_constant: f64,
+    /// Minimum distance to prevent division by zero (default: 0.01 m).
+    pub min_distance: f64,
+    /// Maximum distance for gravity to apply (0 = no limit).
+    pub max_distance: f64,
+    pub enabled: Bool,
+}
+
+impl Default for NewtonGravityLaw {
+    fn default() -> Self {
+        Self {
+            gravitational_constant: 6.67430e-11,
+            min_distance: 0.01,
+            max_distance: 0.0,
+            enabled: Bool::FALSE,
+        }
+    }
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct CustomPhysicsReport {

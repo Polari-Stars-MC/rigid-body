@@ -127,6 +127,7 @@ blockquote { border-left: 3px solid var(--accent); padding: 8px 16px; margin: 16
   <a href="#collider">Collider 碰撞体</a>
   <a href="#query">Query 空间查询</a>
   <a href="#events">Events 事件系统</a>
+  <a href="#interaction">Interaction 交互力</a>
 
   <h2>高级几何</h2>
   <a href="#voxel">Voxel 体素系统</a>
@@ -173,6 +174,10 @@ blockquote { border-left: 3px solid var(--accent); padding: 8px 16px; margin: 16
   <a href="#topology">Topology 拓扑优化</a>
   <a href="#compat">Compat 兼容</a>
 
+  <h2>Java 桥接优化</h2>
+  <a href="#bridge">零拷贝 Bridge</a>
+  <a href="#mc-compat">模组兼容</a>
+
   <h2>Minecraft 集成</h2>
   <a href="#mc-jni">Java 21 JNI (1.21.1)</a>
   <a href="#mc-ffm">Java 25 FFM (1.26.1)</a>
@@ -194,8 +199,8 @@ blockquote { border-left: 3px solid var(--accent); padding: 8px 16px; margin: 16
 <h1>m/s 米每秒</h1>
 <p>
   基于 <code>rapier3d-f64</code> 的 Rust 原生物理运行时。为 Java Minecraft (NeoForge) 提供
-  刚体动力学、空间查询、体素碰撞、航天工程、混沌理论等 580 个 C ABI 函数。
-	  采用 Kahan 补偿求和与 mul_add 融合乘加以确保双精度数值稳定性。
+  刚体动力学、空间查询、体素碰撞、航天工程、混沌理论等 590 个 C ABI 函数。
+  Kahan 补偿求和 + mul_add 融合乘加确保双精度稳定性，无锁 Ring Buffer + 零拷贝 Bridge 实现零帧事件开销。
 </p>
 <div class="btns">
   <a href="#quickstart" class="btn btn-primary">快速开始</a>
@@ -209,7 +214,7 @@ blockquote { border-left: 3px solid var(--accent); padding: 8px 16px; margin: 16
 
 <pre><code class="language-text">Java 21 JNI / Java 25 FFM
   └── Rust C ABI / JNI wrappers
-        └── src/rapier 功能模块 (41 个)
+        └── src/rapier 功能模块 (43 个)
               ├── rapier3d-f64 (双精度物理引擎)
               ├── 工程公式层 (航天、弹道、气动、流体...)
               └── AnvilKit ECS 桥接</code></pre>
@@ -239,13 +244,15 @@ blockquote { border-left: 3px solid var(--accent); padding: 8px 16px; margin: 16
     ffi/
       types.rs          — 所有 #[repr(C)] 结构体 & 枚举 (~2400 行)
       convert.rs        — Rapier ↔ ABI 类型互转
-    math.rs             — 通用数学工具 (vec3 运算, write_out, 有限性检查)
+    math.rs             — Kahan求和 / mul_add融合乘加 / epsilon体系 (300+ 行)
     error.rs            — 线程本地错误状态
-    world.rs            — PhysicsWorld 结构体 & world_* 函数 (16 个)
+    bridge.rs           — 零拷贝 Java-Native 桥接 (DirectByteBuffer 共享内存)
+    interaction.rs      — 刚体间交互力 (万有引力/库仑摩擦/空气阻力)
+    world.rs            — PhysicsWorld/交互力调度/ring buffer (16 个)
     rigid_body.rs       — 刚体构建器和运行时操作 (57 个)
     collider.rs         — 碰撞体构建器和运行时操作 (56 个)
     query.rs            — 射线/点/AABB/OBB/球体/形状投射查询 (24 个)
-    events.rs           — 碰撞/接触力事件收集 (24 个)
+    events.rs           — 碰撞/接触力事件/无锁RingBuffer/回调注册 (41 个)
     voxel.rs            — 体素碰撞体生成 (17 个)
     joints.rs           — 冲量关节管理 (10 个)
     controller.rs       — 角色控制器 (13 个)
@@ -255,7 +262,7 @@ blockquote { border-left: 3px solid var(--accent); padding: 8px 16px; margin: 16
     dop.rs              — kDOP / FDH 构建器 (2 个)
     neural.rs           — 神经网络边界 (6 个)
     compat.rs           — 兼容性辅助 (4 个)
-    aerodynamics.rs     — 气动表面力累积 (5 个)
+    aerodynamics.rs     — 气动表面力/体素网格 (KahanVec3) (5 个)
     fluid.rs            — 流体浮力/阻力/NS方程/SPH (11 个)
     trajectory.rs       — 质点弹道 & 助推滑翔模型 (6 个)
     spaceflight.rs      — 轨道力学/姿态/导航/子系统 (74 个)
@@ -270,12 +277,12 @@ blockquote { border-left: 3px solid var(--accent); padding: 8px 16px; margin: 16
 
 <h3>统计</h3>
 <div class="card-grid">
-  <div class="card"><h3>580</h3><p><code>pub extern "C" fn</code> 函数</p></div>
-  <div class="card"><h3>41</h3><p>Rust 源模块</p></div>
+  <div class="card"><h3>590</h3><p><code>pub extern "C" fn</code> 函数</p></div>
+  <div class="card"><h3>44</h3><p>Rust 源模块</p></div>
   <div class="card"><h3>~2400</h3><p>行 FFI 类型定义</p></div>
-  <div class="card"><h3>180</h3><p>Rust 单元测试</p></div>
+  <div class="card"><h3>188</h3><p>Rust 单元测试</p></div>
   <div class="card"><h3>2</h3><p>Java 访问层 (JNI + FFM)</p></div>
-  <div class="card"><h3>0.1.4</h3><p>当前版本</p></div>
+  <div class="card"><h3>0.1.5</h3><p>当前版本</p></div>
 </div>
 </section>
 
@@ -295,7 +302,7 @@ cargo build --release
 
 # 运行 Rust 测试
 cargo test
-# 输出: test result: ok. 180 passed</code></pre>
+# 输出: test result: ok. 188 passed</code></pre>
 
 <h3>Java 21 JNI (Minecraft 1.21.1)</h3>
 <pre><code class="language-shell">cd test21
@@ -614,6 +621,93 @@ world.clearEvents();</code></pre>
 </section>
 
 <!-- ====== ADVANCED GEOMETRY ====== -->
+
+<section id="interaction">
+<h2>Interaction — 刚体交互力系统</h2>
+<p>
+  刚体间物理交互在 <code>world_step</code> 内自动执行。初始化时通过 <code>world_set_*_law</code>
+  配置一次，之后每帧零额外 FFI 调用。
+</p>
+
+<h3>三大交互力</h3>
+<table>
+<tr><th>系统</th><th>物理模型</th><th>配置</th></tr>
+<tr><td><strong>万有引力</strong></td><td>F = G·m₁·m₂/r² (O(n²) 直接求和)</td><td><code>NewtonGravityLaw</code> — 支持自定义 G、最小/最大距离</td></tr>
+<tr><td><strong>库仑摩擦力</strong></td><td>F_f = μ·F_n，静/动摩擦自动切换</td><td><code>CoulombFrictionLaw</code> — 读取 narrow-phase 接触数据施加</td></tr>
+<tr><td><strong>空气阻力</strong></td><td>Stokes (低 Re) + 湍流 (高 Re) 双模式</td><td><code>AirDragLaw</code> — 雷诺数自适应切换</td></tr>
+</table>
+
+<h3>架构</h3>
+<pre><code class="language-text">world_step()
+  ├── apply_custom_external_forces_with_custom()  ← 浮力/电磁/弹簧/点重力
+  ├── apply_body_interactions()
+  │     ├── pairwise_gravity()        ← 刚体间万有引力
+  │     ├── apply_coulomb_friction()  ← 接触面摩擦力
+  │     └── per_body_air_drag()       ← 空气阻力
+  └── pipeline.step()                 ← Rapier 求解器</code></pre>
+
+<h3>FFI 函数</h3>
+<table class="fn-table">
+<tr><th>函数</th><th>说明</th></tr>
+<tr><td><code>world_set_newton_gravity_law(world, law) → Bool</code></td><td>设置万有引力参数（G、最小距离、最大距离）</td></tr>
+<tr><td><code>world_clear_newton_gravity_law(world)</code></td><td>清除万有引力</td></tr>
+<tr><td><code>world_get_newton_gravity_law(world, out) → Bool</code></td><td>读取万有引力配置</td></tr>
+<tr><td><code>world_set_coulomb_friction_law(world, law) → Bool</code></td><td>设置库仑摩擦（静/动系数、阈值）</td></tr>
+<tr><td><code>world_set_air_drag_law(world, law) → Bool</code></td><td>设置空气阻力（密度、粘度、特征长度等）</td></tr>
+<tr><td><code>world_get_custom_physics_report(world, out) → Bool</code></td><td>读取综合物理报告（力、力矩、雷诺数）</td></tr>
+</table>
+
+<h3>Java 使用示例</h3>
+<pre><code class="language-java">// === 初始化（仅一次）===
+PhysicsWorld world = new PhysicsWorld(0, -9.81, 0);
+
+// 1. 启用刚体间万有引力 (G=1000 适合游戏尺度)
+world.setNewtonGravityLaw(new NewtonGravityLaw()
+    .gravitationalConstant(1000.0)
+    .minDistance(0.01)
+    .enabled(true));
+
+// 2. 启用库仑摩擦力
+world.setCoulombFrictionLaw(new CoulombFrictionLaw()
+    .staticCoefficient(0.6)
+    .dynamicCoefficient(0.4)
+    .velocityThreshold(0.01)
+    .enabled(true));
+
+// 3. 启用空气阻力
+world.setAirDragLaw(new AirDragLaw()
+    .fluidVelocity(0, 0, 0)
+    .density(1.225)         // 空气密度 kg/m³
+    .dragCoefficient(0.47)  // 球体阻力系数
+    .referenceArea(0.5)     // 参考面积 m²
+    .enabled(true));
+
+// === 每帧循环 ===
+while (running) {
+    world.step();  // 三种交互力自动执行
+    // 无需额外调用
+}</code></pre>
+
+<h3>NewtonGravityLaw 结构体</h3>
+<table>
+<tr><th>字段</th><th>类型</th><th>默认值</th><th>说明</th></tr>
+<tr><td><code>gravitational_constant</code></td><td><code>f64</code></td><td>6.67430e-11</td><td>万有引力常数 (N·m²/kg²)</td></tr>
+<tr><td><code>min_distance</code></td><td><code>f64</code></td><td>0.01</td><td>最小距离，防止除零</td></tr>
+<tr><td><code>max_distance</code></td><td><code>f64</code></td><td>0.0</td><td>最大作用距离 (0=无限)</td></tr>
+<tr><td><code>enabled</code></td><td><code>Bool</code></td><td>FALSE</td><td>是否启用</td></tr>
+</table>
+
+<h3>已有公式接入指南</h3>
+<p>项目中 42 个物理公式模块通过以下模式接入刚体系统：</p>
+<table>
+<tr><th>接入方式</th><th>适用模块</th><th>调用位置</th></tr>
+<tr><td><strong>独立公式</strong>（纯函数）</td><td>chaos, relativity, quantum, plasma, wave_optics 等</td><td>Java 侧按需调用，不自动执行</td></tr>
+<tr><td><strong>ExternalForceLaw</strong></td><td>浮力、电磁力、弹簧力、点源重力</td><td><code>apply_custom_external_forces_with_custom</code></td></tr>
+<tr><td><strong>Interaction 系统</strong></td><td>万有引力、库仑摩擦、空气阻力</td><td><code>apply_body_interactions</code></td></tr>
+<tr><td><strong>专用集成函数</strong></td><td>aerodynamics, trajectory, spaceflight, fluid</td><td>通过 <code>*_apply_*_to_body</code> 函数直接操作刚体</td></tr>
+</table>
+</section>
+
 <section id="voxel">
 <h2>Voxel — 体素系统</h2>
 
@@ -1233,6 +1327,108 @@ RigidBody terrain = world.insertStaticVoxelAabb(
 </section>
 
 <!-- ====== MINECRAFT INTEGRATION ====== -->
+
+<section id="bridge">
+<h2>Bridge — 零拷贝 Java-Native 桥接层</h2>
+<p>
+  传统 JNI 每帧为每个刚体分配 <code>newDoubleArray(3)</code> 拷贝位置/速度。
+  零拷贝桥接层通过 <code>DirectByteBuffer</code> 共享内存和预分配槽位消除全部 per-frame 分配。
+</p>
+
+<h3>三大优化路径</h3>
+<table>
+<tr><th>场景</th><th>传统方式 (每帧开销)</th><th>零拷贝方式</th></tr>
+<tr><td>读取单个刚体位置</td><td><code>newDoubleArray(3)</code> + JNI 拷贝 (1 alloc + 1 FFI)</td><td><code>UNSAFE.allocateMemory(24)</code> 一次，复用 (<strong>0 alloc + 1 FFI</strong>)</td></tr>
+<tr><td>批量读取所有刚体</td><td>N × (3 FFI 调用 + 3 次数组分配)</td><td><code>bridgeBulkBodySnapshot</code> 一次写入 DirectDoubleBuffer (<strong>0 alloc + 1 FFI</strong>)</td></tr>
+<tr><td>Minecraft chunk 体素</td><td><code>getByteArrayRegion</code> 全量拷贝 4096 字节</td><td><code>bridgeVoxelColliderFromDirectBuffer</code> 直接指针引用 (<strong>0 拷贝</strong>)</td></tr>
+</table>
+
+<h3>核心 API</h3>
+<table class="fn-table">
+<tr><th>函数</th><th>说明</th></tr>
+<tr><td><code>bridgeBulkBodySnapshot(world, out_ptr, capacity) → i32</code></td><td>一次写入所有刚体到 DirectDoubleBuffer (13 f64/body)</td></tr>
+<tr><td><code>bridgeVec3ToSlot(x, y, z, slot) → Bool</code></td><td>写入 Vec3 到预分配 24 字节槽位</td></tr>
+<tr><td><code>bridgeQuatToSlot(i, j, k, w, slot) → Bool</code></td><td>写入 Quat 到预分配 32 字节槽位</td></tr>
+<tr><td><code>bridgeWriteF64Slice(values, count, slot, cap) → i32</code></td><td>批量写入 f64 数组到 DirectDoubleBuffer</td></tr>
+<tr><td><code>bridgeVoxelColliderFromDirectBuffer(world, ptr, sx, sy, sz, ...) → i64</code></td><td>从 DirectByteBuffer 指针直接构建体素碰撞体</td></tr>
+</table>
+
+<h3>DirectByteBuffer 布局 (每刚体 13 个 f64)</h3>
+<pre><code class="language-text">[tx, ty, tz,  qi, qj, qk, qw,  vx, vy, vz,  wx, wy, wz]
+ |---translation---|  |---rotation---|  |-linvel-|  |-angvel-|
+ 偏移 0              偏移 24           偏移 56    偏移 80</code></pre>
+
+<h3>Java 使用示例</h3>
+<pre><code class="language-java">// === 初始化：分配一次，全帧复用 ===
+ByteBuffer buf = ByteBuffer.allocateDirect(MAX_BODIES * 13 * 8)
+    .order(ByteOrder.nativeOrder());
+DoubleBuffer bodies = buf.asDoubleBuffer();
+long ptr = ((sun.nio.ch.DirectBuffer) buf).address();
+
+// === 每帧：一次调用获取全部刚体状态 ===
+int count = RigidBodyNative.bridgeBulkBodySnapshot(world, ptr, MAX_BODIES);
+for (int i = 0; i < count; i++) {
+    int off = i * 13;
+    double tx = bodies.get(off);       // translation.x
+    double ty = bodies.get(off + 1);   // translation.y
+    double tz = bodies.get(off + 2);   // translation.z
+    double vx = bodies.get(off + 7);   // linvel.x
+    // ... 同步到 Minecraft Entity ...
+}
+
+// === 预分配槽位 (代替 new double[3] 模式) ===
+long posSlot = UNSAFE.allocateMemory(24);
+RigidBodyNative.bridgeVec3ToSlot(x, y, z, posSlot);
+double x = UNSAFE.getDouble(posSlot);
+double y = UNSAFE.getDouble(posSlot + 8);
+double z = UNSAFE.getDouble(posSlot + 16);
+</code></pre>
+</section>
+
+<section id="mc-compat">
+<h2>模组兼容性设计</h2>
+<p>零拷贝桥接层使用 <strong>仅标准 JVM API</strong>，不依赖任何 Minecraft 内部类或特定模组加载器。</p>
+
+<h3>兼容矩阵</h3>
+<table>
+<tr><th>平台</th><th>兼容性</th><th>说明</th></tr>
+<tr><td><strong>NeoForge</strong> (1.21.1+)</td><td>✅ 完全支持</td><td>主要目标平台</td></tr>
+<tr><td><strong>Fabric</strong> (1.21+)</td><td>✅ 完全支持</td><td>相同 JNI/FFM ABI</td></tr>
+<tr><td><strong>Forge</strong> (1.20.x)</td><td>✅ 完全支持</td><td>仅需 Java 8+ 和 JNI</td></tr>
+<tr><td><strong>Quilt</strong></td><td>✅ 完全支持</td><td>Fabric 兼容层</td></tr>
+<tr><td><strong>Paper/Spigot</strong> (服务端)</td><td>✅ 完全支持</td><td>纯 JNI，无客户端依赖</td></tr>
+<tr><td><strong>Vanilla</strong> (无模组)</td><td>✅ 完全支持</td><td>Java agent 注入 JNI 库</td></tr>
+</table>
+
+<h3>API 设计原则</h3>
+<table>
+<tr><th>原则</th><th>实现</th></tr>
+<tr><td><strong>零 Minecraft 依赖</strong></td><td>不使用 <code>net.minecraft.*</code> 任何类；所有交互通过 <code>long</code> 句柄和 <code>DirectByteBuffer</code></td></tr>
+<tr><td><strong>零反射黑魔法</strong></td><td>仅使用 <code>Unsafe.allocateMemory</code> (JDK 内部 API，所有 JVM 支持)；可选 <code>DirectBuffer.address()</code></td></tr>
+<tr><td><strong>无全局状态</strong></td><td>每个 <code>PhysicsWorld</code> 独立；多世界并行无冲突</td></tr>
+<tr><td><strong>线程安全</strong></td><td>Rust 侧 <code>parking_lot::Mutex</code> 保护事件队列；物理步进单线程</td></tr>
+<tr><td><strong>优雅降级</strong></td><td>DirectByteBuffer 不可用时自动回退到 <code>byte[]</code> + JNI 拷贝路径</td></tr>
+</table>
+
+<h3>与其他模组共存</h3>
+<pre><code class="language-java">// 1. 使用独立类加载器隔离 native 库
+//    System.loadLibrary 在 static{} 中调用，不影响其他模组
+static { System.loadLibrary("mps_rigid_body"); }
+
+// 2. 使用命名空间前缀避免 JNI 符号冲突
+//    Java_org_polaris2023_msp_1rigid_1body_RigidBodyNative_*
+
+// 3. 可选：通过 ServiceLoader 发现其他模组的物理世界
+//    public interface RigidBodyProvider {
+//        PhysicsWorld getPhysicsWorld(Level level);
+//    }
+
+// 4. 内存管理：使用 Cleaner 或 try-with-resources
+try (PhysicsWorld world = new PhysicsWorld(0, -9.81, 0)) {
+    // ... world 自动清理
+}</code></pre>
+</section>
+
 <section id="mc-jni">
 <h2>Minecraft 集成 — Java 21 JNI (NeoForge 1.21.1)</h2>
 
@@ -1576,6 +1772,10 @@ impl KahanSum {
         self.sum = t;
     }
 }</code></pre>
+<p>
+  除标量 <code>KahanSum</code> 外，项目还提供了 <code>KahanVec3</code> — 对三维向量分量独立
+  补偿求和。应用于气动面表面积分、SPH 粒子邻居遍历、软体约束求解等需要高精度向量累加的场景。
+</p>
 <p>已应用于以下累加热点（12 个模块）：</p>
 <table>
 <tr><th>模块</th><th>累加变量</th><th>场景</th></tr>
@@ -1657,7 +1857,7 @@ let msg_ptr = last_error_message();</code></pre>
 
 <section id="verification">
 <h2>验证命令</h2>
-<pre><code class="language-shell"># Rust 测试 (180 个)
+<pre><code class="language-shell"># Rust 测试 (188 个)
 cargo test
 
 # Rust 类型检查

@@ -773,6 +773,32 @@ typedef struct ExternalForceLaw {
   struct Bool enabled;
 } ExternalForceLaw;
 
+/**
+ * Newtonian pairwise gravity configuration for body-body attraction.
+ *
+ * When enabled, every dynamic body attracts every other dynamic body via
+ * Newton's law:  F = G · m₁ · m₂ / r².
+ *
+ * Set `gravitational_constant` to 6.67430e-11 for real-world gravity,
+ * or a larger value for game-scale simulations.
+ */
+typedef struct NewtonGravityLaw {
+  /**
+   * Gravitational constant (default: 6.67430e-11 N·m²/kg²).
+   * Use larger values for game-scale simulations.
+   */
+  double gravitational_constant;
+  /**
+   * Minimum distance to prevent division by zero (default: 0.01 m).
+   */
+  double min_distance;
+  /**
+   * Maximum distance for gravity to apply (0 = no limit).
+   */
+  double max_distance;
+  struct Bool enabled;
+} NewtonGravityLaw;
+
 typedef struct CustomPhysicsReport {
   uint32_t body_count;
   uint32_t drag_body_count;
@@ -3223,6 +3249,15 @@ void world_clear_external_force_law(struct WorldHandle *world);
 
 struct Bool world_get_external_force_law(const struct WorldHandle *world,
                                          struct ExternalForceLaw *out_law);
+
+struct Bool world_set_newton_gravity_law(struct WorldHandle *world, struct NewtonGravityLaw law);
+
+uint8_t world_set_newton_gravity_law_flag(struct WorldHandle *world, struct NewtonGravityLaw law);
+
+void world_clear_newton_gravity_law(struct WorldHandle *world);
+
+struct Bool world_get_newton_gravity_law(const struct WorldHandle *world,
+                                         struct NewtonGravityLaw *out_law);
 
 struct Bool world_get_custom_physics_report(const struct WorldHandle *world,
                                             struct CustomPhysicsReport *out_report);

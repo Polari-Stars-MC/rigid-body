@@ -93,19 +93,34 @@ pub extern "C" fn world_step(world: *mut WorldHandle, delta_seconds: f64) {
     }
 
     world.inner.integration_parameters.dt = delta_seconds;
-    if world
-        .inner
-        .events
-        .custom_physics()
+
+    // Cache custom physics read once to avoid double RwLock acquire.
+    // The coulomb hook setup only needs to run when the law is first enabled;
+    // we detect this by checking whether MODIFY_SOLVER_CONTACTS is already set
+    // on the first collider (all are set uniformly).
+    let custom = world.inner.events.custom_physics();
+    let coulomb_active = custom
         .coulomb_friction
-        .is_some_and(|law| law.enabled.0 != 0)
-    {
+        .is_some_and(|law| law.enabled.0 != 0);
+
+    if coulomb_active {
+        // Only set the hook on colliders that don't already have it.
+        // Most colliders get it set on first step and skip thereafter.
+        let hook_bit = ActiveHooks::MODIFY_SOLVER_CONTACTS;
         for (_, collider) in world.inner.colliders.iter_mut() {
-            collider
-                .set_active_hooks(collider.active_hooks() | ActiveHooks::MODIFY_SOLVER_CONTACTS);
+            let current = collider.active_hooks();
+            if !current.contains(hook_bit) {
+                collider.set_active_hooks(current | hook_bit);
+            }
         }
     }
-    crate::rapier::events::apply_custom_external_forces(&mut world.inner);
+
+    crate::rapier::events::apply_custom_external_forces_with_custom(
+        &mut world.inner,
+        custom.clone(),
+    );
+    // Run body-body interactions: pairwise gravity, Coulomb friction, air drag
+    crate::rapier::interaction::apply_body_interactions(&mut world.inner, &custom);
     world.inner.pipeline.step(
         world.inner.gravity,
         &world.inner.integration_parameters,

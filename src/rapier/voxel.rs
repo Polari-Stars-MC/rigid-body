@@ -179,21 +179,26 @@ fn build_greedy_cuboids_y_range(
     y_start: usize,
     y_end: usize,
 ) -> Option<Vec<(Pose, SharedShape)>> {
-    let mut visited = vec![false; grid.voxels.len()];
+    // Use generation-counter visited array instead of bool vec — avoids
+    // O(n) zeroing per call.  Each invocation bumps `gen`; a cell is
+    // "visited" when visited[cell] == gen.
+    let cell_count = grid.voxels.len();
+    let mut visited: Vec<u32> = vec![0; cell_count];
+    let generation = 1u32;
     let mut parts = Vec::new();
 
     for z in 0..grid.size_z {
         for y in y_start..y_end {
             for x in 0..grid.size_x {
                 let start = grid.index(x, y, z)?;
-                if visited[start] || !grid.is_solid(x, y, z) {
+                if visited[start] == generation || !grid.is_solid(x, y, z) {
                     continue;
                 }
 
                 let mut max_x = x + 1;
                 while max_x < grid.size_x {
                     let i = grid.index(max_x, y, z)?;
-                    if visited[i] || !grid.is_solid(max_x, y, z) {
+                    if visited[i] == generation || !grid.is_solid(max_x, y, z) {
                         break;
                     }
                     max_x += 1;
@@ -203,7 +208,7 @@ fn build_greedy_cuboids_y_range(
                 'expand_y: while max_y < y_end {
                     for xx in x..max_x {
                         let i = grid.index(xx, max_y, z)?;
-                        if visited[i] || !grid.is_solid(xx, max_y, z) {
+                        if visited[i] == generation || !grid.is_solid(xx, max_y, z) {
                             break 'expand_y;
                         }
                     }
@@ -215,7 +220,7 @@ fn build_greedy_cuboids_y_range(
                     for yy in y..max_y {
                         for xx in x..max_x {
                             let i = grid.index(xx, yy, max_z)?;
-                            if visited[i] || !grid.is_solid(xx, yy, max_z) {
+                            if visited[i] == generation || !grid.is_solid(xx, yy, max_z) {
                                 break 'expand_z;
                             }
                         }
@@ -227,7 +232,7 @@ fn build_greedy_cuboids_y_range(
                     for yy in y..max_y {
                         for xx in x..max_x {
                             let i = grid.index(xx, yy, zz)?;
-                            visited[i] = true;
+                            visited[i] = generation;
                         }
                     }
                 }
@@ -241,21 +246,22 @@ fn build_greedy_cuboids_y_range(
 }
 
 fn count_greedy_cuboids(grid: &VoxelGrid<'_>) -> Option<usize> {
-    let mut visited = vec![false; grid.voxels.len()];
+    let mut visited: Vec<u32> = vec![0; grid.voxels.len()];
+    let generation = 1u32;
     let mut count = 0usize;
 
     for z in 0..grid.size_z {
         for y in 0..grid.size_y {
             for x in 0..grid.size_x {
                 let start = grid.index(x, y, z)?;
-                if visited[start] || !grid.is_solid(x, y, z) {
+                if visited[start] == generation || !grid.is_solid(x, y, z) {
                     continue;
                 }
 
                 let mut max_x = x + 1;
                 while max_x < grid.size_x {
                     let i = grid.index(max_x, y, z)?;
-                    if visited[i] || !grid.is_solid(max_x, y, z) {
+                    if visited[i] == generation || !grid.is_solid(max_x, y, z) {
                         break;
                     }
                     max_x += 1;
@@ -265,7 +271,7 @@ fn count_greedy_cuboids(grid: &VoxelGrid<'_>) -> Option<usize> {
                 'expand_y: while max_y < grid.size_y {
                     for xx in x..max_x {
                         let i = grid.index(xx, max_y, z)?;
-                        if visited[i] || !grid.is_solid(xx, max_y, z) {
+                        if visited[i] == generation || !grid.is_solid(xx, max_y, z) {
                             break 'expand_y;
                         }
                     }
@@ -277,7 +283,7 @@ fn count_greedy_cuboids(grid: &VoxelGrid<'_>) -> Option<usize> {
                     for yy in y..max_y {
                         for xx in x..max_x {
                             let i = grid.index(xx, yy, max_z)?;
-                            if visited[i] || !grid.is_solid(xx, yy, max_z) {
+                            if visited[i] == generation || !grid.is_solid(xx, yy, max_z) {
                                 break 'expand_z;
                             }
                         }
@@ -289,7 +295,7 @@ fn count_greedy_cuboids(grid: &VoxelGrid<'_>) -> Option<usize> {
                     for yy in y..max_y {
                         for xx in x..max_x {
                             let i = grid.index(xx, yy, zz)?;
-                            visited[i] = true;
+                            visited[i] = generation;
                         }
                     }
                 }

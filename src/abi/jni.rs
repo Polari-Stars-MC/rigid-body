@@ -748,3 +748,29 @@ jni!(boolean crbTreeUpdate(long tree, long id, double min_x, double min_y, doubl
 jni!(boolean crbTreeRemove(long tree, long id) { crt::crb_tree_remove(m::<CRTH>(tree), id as u64).0 as jbyte });
 jni!(int crbTreeQueryAabbCount(long tree, double min_x, double min_y, double min_z, double max_x, double max_y, double max_z) { crt::crb_tree_query_aabb_count(cp::<CRTH>(tree), aa(min_x,min_y,min_z,max_x,max_y,max_z)) as jint });
 jni!(int crbTreeQueryAabb(long tree, double min_x, double min_y, double min_z, double max_x, double max_y, double max_z, long out_ids, int capacity) { crt::crb_tree_query_aabb(cp::<CRTH>(tree), aa(min_x,min_y,min_z,max_x,max_y,max_z), pm::<u64>(out_ids), u32_from_jint(capacity)) as jint });
+
+// =========================================================================
+// Zero-copy bridge functions — eliminate per-frame JNI allocation
+// =========================================================================
+use crate::rapier::bridge as br;
+
+jni!(int bridgeBulkBodySnapshot(long world, long out_address, int capacity) {
+    br::bulk_body_snapshot_to_direct_buffer(cp::<WH>(world), out_address, capacity) as jint
+});
+
+jni!(boolean bridgeVec3ToSlot(double x, double y, double z, long slot) {
+    br::write_vec3_to_slot(slot, v3(x, y, z)).into()
+});
+
+jni!(boolean bridgeQuatToSlot(double i, double j, double k, double w, long slot) {
+    br::write_quat_to_slot(slot, qt(i, j, k, w)).into()
+});
+
+jni!(int bridgeWriteF64Slice(long values, int value_count, long slot, int capacity) {
+    let v = unsafe { std::slice::from_raw_parts(p::<f64>(values), value_count as usize) };
+    br::write_f64_slice(slot, v, capacity) as jint
+});
+
+jni!(long bridgeVoxelColliderFromDirectBuffer(long world, long voxel_address, int size_x, int size_y, int size_z, double voxel_size, double origin_x, double origin_y, double origin_z, int mode, int dynamic_body, int small_voxel_limit, int mesh_voxel_limit) {
+    br::voxel_collider_from_direct_buffer(m::<WH>(world), voxel_address, size_x, size_y, size_z, voxel_size, origin_x, origin_y, origin_z, mode, dynamic_body != 0, small_voxel_limit, mesh_voxel_limit)
+});
