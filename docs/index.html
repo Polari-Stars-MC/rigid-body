@@ -1359,29 +1359,37 @@ RigidBody terrain = world.insertStaticVoxelAabb(
  偏移 0              偏移 24           偏移 56    偏移 80</code></pre>
 
 <h3>Java 使用示例</h3>
-<pre><code class="language-java">// === 初始化：分配一次，全帧复用 ===
-ByteBuffer buf = ByteBuffer.allocateDirect(MAX_BODIES * 13 * 8)
-    .order(ByteOrder.nativeOrder());
-DoubleBuffer bodies = buf.asDoubleBuffer();
-long ptr = ((sun.nio.ch.DirectBuffer) buf).address();
+<pre><code class="language-java">// 获取 Unsafe 实例 (所有 JVM 通用，含 Java 21+)
+private static final Unsafe U = getUnsafe();
+private static Unsafe getUnsafe() {
+    try {
+        Field f = Unsafe.class.getDeclaredField("theUnsafe");
+        f.setAccessible(true);
+        return (Unsafe) f.get(null);
+    } catch (Exception e) { throw new Error(e); }
+}
+
+// === 初始化：分配本地内存，全帧复用 ===
+long bufPtr = U.allocateMemory(MAX_BODIES * 13 * 8);
+U.setMemory(bufPtr, MAX_BODIES * 13 * 8, (byte) 0);
 
 // === 每帧：一次调用获取全部刚体状态 ===
-int count = RigidBodyNative.bridgeBulkBodySnapshot(world, ptr, MAX_BODIES);
+int count = RigidBodyNative.bridgeBulkBodySnapshot(world, bufPtr, MAX_BODIES);
 for (int i = 0; i < count; i++) {
-    int off = i * 13;
-    double tx = bodies.get(off);       // translation.x
-    double ty = bodies.get(off + 1);   // translation.y
-    double tz = bodies.get(off + 2);   // translation.z
-    double vx = bodies.get(off + 7);   // linvel.x
+    long off = bufPtr + i * 13 * 8;
+    double tx = U.getDouble(off);        // translation.x
+    double ty = U.getDouble(off + 8);    // translation.y
+    double tz = U.getDouble(off + 16);   // translation.z
+    double vx = U.getDouble(off + 56);   // linvel.x
     // ... 同步到 Minecraft Entity ...
 }
 
 // === 预分配槽位 (代替 new double[3] 模式) ===
-long posSlot = UNSAFE.allocateMemory(24);
+long posSlot = U.allocateMemory(24);
 RigidBodyNative.bridgeVec3ToSlot(x, y, z, posSlot);
-double x = UNSAFE.getDouble(posSlot);
-double y = UNSAFE.getDouble(posSlot + 8);
-double z = UNSAFE.getDouble(posSlot + 16);
+double x = U.getDouble(posSlot);
+double y = U.getDouble(posSlot + 8);
+double z = U.getDouble(posSlot + 16);
 </code></pre>
 </section>
 
@@ -1403,8 +1411,8 @@ double z = UNSAFE.getDouble(posSlot + 16);
 <h3>API 设计原则</h3>
 <table>
 <tr><th>原则</th><th>实现</th></tr>
-<tr><td><strong>零 Minecraft 依赖</strong></td><td>不使用 <code>net.minecraft.*</code> 任何类；所有交互通过 <code>long</code> 句柄和 <code>DirectByteBuffer</code></td></tr>
-<tr><td><strong>零反射黑魔法</strong></td><td>仅使用 <code>Unsafe.allocateMemory</code> (JDK 内部 API，所有 JVM 支持)；可选 <code>DirectBuffer.address()</code></td></tr>
+<tr><td><strong>零 Minecraft 依赖</strong></td><td>不使用 <code>net.minecraft.*</code> 任何类；所有交互通过 <code>long</code> 句柄和 <code>Unsafe</code> 分配的本地内存</td></tr>
+<tr><td><strong>零反射黑魔法</strong></td><td>仅使用 <code>Unsafe.allocateMemory</code> + 反射获取实例（JDK 内部 API，所有 JVM 8–25 均支持）；不依赖 <code>sun.nio.ch.DirectBuffer</code>（Java 16+ 已强封装）</td></tr>
 <tr><td><strong>无全局状态</strong></td><td>每个 <code>PhysicsWorld</code> 独立；多世界并行无冲突</td></tr>
 <tr><td><strong>线程安全</strong></td><td>Rust 侧 <code>parking_lot::Mutex</code> 保护事件队列；物理步进单线程</td></tr>
 <tr><td><strong>优雅降级</strong></td><td>DirectByteBuffer 不可用时自动回退到 <code>byte[]</code> + JNI 拷贝路径</td></tr>
