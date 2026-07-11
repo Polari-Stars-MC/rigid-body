@@ -2906,6 +2906,14 @@ struct Bool collider_set_pose(struct WorldHandle *world,
                               struct Vec3 translation,
                               struct Quat rotation);
 
+struct Bool collider_set_translation(struct WorldHandle *world,
+                                     ColliderHandleRaw handle,
+                                     struct Vec3 translation);
+
+struct Bool collider_set_rotation(struct WorldHandle *world,
+                                  ColliderHandleRaw handle,
+                                  struct Quat rotation);
+
 uint8_t collider_set_pose_flag(struct WorldHandle *world,
                                ColliderHandleRaw handle,
                                struct Vec3 translation,
@@ -4241,6 +4249,8 @@ uint8_t rigid_body_set_pose_flag(struct WorldHandle *world,
                                  struct Quat rotation,
                                  struct Bool wake_up);
 
+struct Vec3 rigid_body_get_force(const struct WorldHandle *world, RigidBodyHandleRaw handle);
+
 struct Vec3 rigid_body_get_linvel(const struct WorldHandle *world, RigidBodyHandleRaw handle);
 
 void rigid_body_get_linvel_out(const struct WorldHandle *world,
@@ -4278,6 +4288,16 @@ struct Bool rigid_body_add_force(struct WorldHandle *world,
                                  struct Vec3 force,
                                  struct Bool wake_up);
 
+struct Bool rigid_body_add_force_at_point(struct WorldHandle *world,
+                                          RigidBodyHandleRaw handle,
+                                          struct Vec3 force,
+                                          struct Vec3 point,
+                                          struct Bool wake_up);
+
+struct Bool rigid_body_reset_force(struct WorldHandle *world,
+                                   RigidBodyHandleRaw handle,
+                                   struct Bool wake_up);
+
 uint8_t rigid_body_add_force_flag(struct WorldHandle *world,
                                   RigidBodyHandleRaw handle,
                                   struct Vec3 force,
@@ -4287,6 +4307,10 @@ struct Bool rigid_body_add_torque(struct WorldHandle *world,
                                   RigidBodyHandleRaw handle,
                                   struct Vec3 torque,
                                   struct Bool wake_up);
+
+struct Bool rigid_body_reset_torque(struct WorldHandle *world,
+                                    RigidBodyHandleRaw handle,
+                                    struct Bool wake_up);
 
 uint8_t rigid_body_add_torque_flag(struct WorldHandle *world,
                                    RigidBodyHandleRaw handle,

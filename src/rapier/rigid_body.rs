@@ -540,6 +540,23 @@ pub extern "C" fn rigid_body_set_pose_flag(
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn rigid_body_get_force(
+    world: *const WorldHandle,
+    handle: RigidBodyHandleRaw,
+) -> Vec3 {
+    let Some(world) = (unsafe { world.as_ref() }) else {
+        return Vec3::default();
+    };
+
+    world
+        .inner
+        .bodies
+        .get(unpack_rigid_body_handle(handle))
+        .map(|body| vec3_from_rapier(body.user_force()))
+        .unwrap_or_default()
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn rigid_body_get_linvel(
     world: *const WorldHandle,
     handle: RigidBodyHandleRaw,
@@ -683,6 +700,45 @@ pub extern "C" fn rigid_body_add_force(
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn rigid_body_add_force_at_point(
+    world: *mut WorldHandle,
+    handle: RigidBodyHandleRaw,
+    force: Vec3,
+    point: Vec3,
+    wake_up: Bool,
+) -> Bool {
+    let Some(world) = (unsafe { world.as_mut() }) else {
+        return Bool::FALSE;
+    };
+    let Some(body) = world.inner.bodies.get_mut(unpack_rigid_body_handle(handle)) else {
+        return Bool::FALSE;
+    };
+    if !vec3_finite(force) || !vec3_finite(point) {
+        return Bool::FALSE;
+    }
+
+    body.add_force_at_point(vec3_to_rapier(force), vec3_to_rapier(point), wake_up.0 != 0);
+    Bool::TRUE
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rigid_body_reset_force(
+    world: *mut WorldHandle,
+    handle: RigidBodyHandleRaw,
+    wake_up: Bool,
+) -> Bool {
+    let Some(world) = (unsafe { world.as_mut() }) else {
+        return Bool::FALSE;
+    };
+    let Some(body) = world.inner.bodies.get_mut(unpack_rigid_body_handle(handle)) else {
+        return Bool::FALSE;
+    };
+
+    body.reset_forces(wake_up.0 != 0);
+    Bool::TRUE
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn rigid_body_add_force_flag(
     world: *mut WorldHandle,
     handle: RigidBodyHandleRaw,
@@ -710,6 +766,23 @@ pub extern "C" fn rigid_body_add_torque(
     }
 
     body.add_torque(vec3_to_rapier(torque), wake_up.0 != 0);
+    Bool::TRUE
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rigid_body_reset_torque(
+    world: *mut WorldHandle,
+    handle: RigidBodyHandleRaw,
+    wake_up: Bool,
+) -> Bool {
+    let Some(world) = (unsafe { world.as_mut() }) else {
+        return Bool::FALSE;
+    };
+    let Some(body) = world.inner.bodies.get_mut(unpack_rigid_body_handle(handle)) else {
+        return Bool::FALSE;
+    };
+
+    body.reset_torques(wake_up.0 != 0);
     Bool::TRUE
 }
 

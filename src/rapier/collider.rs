@@ -3,6 +3,7 @@ use rapier3d::prelude::{Array2, Collider, ColliderBuilder, SharedShape, TypedSha
 use smallvec::SmallVec;
 use std::slice;
 use rapier3d::na::Unit;
+use crate::convert::quat_to_rapier;
 use crate::rapier::ffi::{
     AabbDesc, Bool, ColliderBuilderHandle, ColliderHandleRaw, InteractionGroupsDesc, Obb, Quat,
     RigidBodyHandleRaw, ShapeDesc, Sphere, Vec3, WorldHandle, active_events_from_bits,
@@ -852,6 +853,54 @@ pub extern "C" fn collider_set_pose(
     }
 
     collider.set_position(isometry_from_parts(translation, rotation));
+    Bool::TRUE
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn collider_set_translation(
+    world: *mut WorldHandle,
+    handle: ColliderHandleRaw,
+    translation: Vec3,
+) -> Bool {
+    let Some(world) = (unsafe { world.as_mut() }) else {
+        return Bool::FALSE;
+    };
+    let Some(collider) = world
+        .inner
+        .colliders
+        .get_mut(unpack_collider_handle(handle))
+    else {
+        return Bool::FALSE;
+    };
+    if !vec3_finite(translation) {
+        return Bool::FALSE;
+    }
+
+    collider.set_translation(vec3_to_rapier(translation));
+    Bool::TRUE
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn collider_set_rotation(
+    world: *mut WorldHandle,
+    handle: ColliderHandleRaw,
+    rotation: Quat,
+) -> Bool {
+    let Some(world) = (unsafe { world.as_mut() }) else {
+        return Bool::FALSE;
+    };
+    let Some(collider) = world
+        .inner
+        .colliders
+        .get_mut(unpack_collider_handle(handle))
+    else {
+        return Bool::FALSE;
+    };
+    if !quat_finite(rotation) {
+        return Bool::FALSE;
+    }
+
+    collider.set_rotation(quat_to_rapier(rotation));
     Bool::TRUE
 }
 
