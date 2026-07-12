@@ -623,45 +623,109 @@ world.clearEvents();</code></pre>
 <!-- ====== ADVANCED GEOMETRY ====== -->
 
 <section id="interaction">
-<h2>Interaction — 刚体交互力系统</h2>
+<h2>Interaction — 刚体交互力系统 (ForceRegistry)</h2>
 <p>
-  刚体间物理交互在 <code>world_step</code> 内自动执行。初始化时通过 <code>world_set_*_law</code>
-  配置一次，之后每帧零额外 FFI 调用。
+  刚体间物理交互在 <code>world_step</code> 内通过 <strong>ForceRegistry</strong> 自动执行。
+  初始化时通过 <code>world_set_*_law</code> 配置一次（内部自动注册到 ForceRegistry），
+  之后每帧零额外 FFI 调用。
+</p>
+<p>
+  <span class="badge badge-rust">Rust</span>
+  <span class="badge badge-jni">JNI 21+</span>
+  <span class="badge badge-ffm">FFM 25+</span>
+  <strong>v0.1.4+</strong> — 力系统已从硬编码 if-let 分支重构为类型化注册表。
 </p>
 
-<h3>三大交互力</h3>
+<h3>ForceRegistry 架构</h3>
+<pre><code class="language-text">ForceLaw (trait)          ← 每种物理模型实现 apply() / enabled() / law_type()
+  ↓
+ForceRegistry             ← Vec&lt;(ForceLawType, Box&lt;dyn ForceLaw&gt;)&gt;
+  ↓ apply_all()
+world_step 发起           ← 单个调用，无 if-let 分支</code></pre>
+
+<h3>三大核心交互力</h3>
 <table>
-<tr><th>系统</th><th>物理模型</th><th>配置</th></tr>
-<tr><td><strong>万有引力</strong></td><td>F = G·m₁·m₂/r² (O(n²) 直接求和)</td><td><code>NewtonGravityLaw</code> — 支持自定义 G、最小/最大距离</td></tr>
-<tr><td><strong>库仑摩擦力</strong></td><td>F_f = μ·F_n，静/动摩擦自动切换</td><td><code>CoulombFrictionLaw</code> — 读取 narrow-phase 接触数据施加</td></tr>
-<tr><td><strong>空气阻力</strong></td><td>Stokes (低 Re) + 湍流 (高 Re) 双模式</td><td><code>AirDragLaw</code> — 雷诺数自适应切换</td></tr>
+<tr><th>系统</th><th>物理模型</th><th>配置</th><th>ForceLawType</th></tr>
+<tr><td><strong>万有引力</strong></td><td>F = G·m₁·m₂/r² (O(n²) 直接求和)</td><td><code>NewtonGravityLaw</code></td><td><code>NewtonianGravity</code></td></tr>
+<tr><td><strong>库仑摩擦力</strong></td><td>F_f = μ·F_n，静/动摩擦自动切换</td><td><code>CoulombFrictionLaw</code></td><td><code>CoulombFriction</code></td></tr>
+<tr><td><strong>空气阻力</strong></td><td>Stokes (低 Re) + 湍流 (高 Re) 双模式</td><td><code>AirDragLaw</code></td><td><code>AirDrag</code></td></tr>
 </table>
 
-<h3>架构</h3>
+<h3>全部 ForceLawType 变体 (27 种)</h3>
+<table>
+<tr><th>分类</th><th>变体</th><th>说明</th></tr>
+<tr><td rowspan="5">核心力</td><td><code>WorldGravity</code></td><td>Rapier 内置重力</td></tr>
+<tr><td><code>UserForce</code></td><td>直接施加力 (FFI add_force)</td></tr>
+<tr><td><code>NewtonianGravity</code></td><td>刚体间万有引力</td></tr>
+<tr><td><code>CoulombFriction</code></td><td>接触面摩擦力</td></tr>
+<tr><td><code>AirDrag</code></td><td>雷诺数自适应空气阻力</td></tr>
+<tr><td rowspan="4">ExternalForce</td><td><code>Buoyancy</code></td><td>浮力 (阿基米德原理)</td></tr>
+<tr><td><code>Electromagnetic</code></td><td>洛伦兹力</td></tr>
+<tr><td><code>ElasticSpring</code></td><td>线性弹簧</td></tr>
+<tr><td><code>PointGravity</code></td><td>点源引力</td></tr>
+<tr><td rowspan="2">气动</td><td><code>AerodynamicSurface</code></td><td>面元气动力</td></tr>
+<tr><td><code>AerodynamicVoxel</code></td><td>体素气动力</td></tr>
+<tr><td>流体</td><td><code>FluidAABB</code></td><td>AABB 流体阻力</td></tr>
+<tr><td rowspan="2">分子</td><td><code>MolecularLennardJones</code></td><td>Lennard-Jones 势</td></tr>
+<tr><td><code>MolecularCoulomb</code></td><td>分子间库仑力</td></tr>
+<tr><td rowspan="6">航天</td><td><code>SpaceJ2</code></td><td>J2 摄动</td></tr>
+<tr><td><code>SpaceCMG</code></td><td>控制力矩陀螺</td></tr>
+<tr><td><code>SpaceAtmosphericDrag</code></td><td>大气阻力 (轨道)</td></tr>
+<tr><td><code>SpaceSolarRadiation</code></td><td>太阳辐射压</td></tr>
+<tr><td><code>SpaceGravityGradient</code></td><td>重力梯度力矩</td></tr>
+<tr><td><code>SpaceMagneticTorquer</code></td><td>磁力矩器</td></tr>
+<tr><td rowspan="3">弹道</td><td><code>TrajectoryCoriolis</code></td><td>科里奥利力</td></tr>
+<tr><td><code>TrajectoryCentrifugal</code></td><td>离心力</td></tr>
+<tr><td><code>TrajectoryGravity</code></td><td>中心天体重力</td></tr>
+<tr><td>控制</td><td><code>ControlPID</code></td><td>PID 控制力</td></tr>
+<tr><td>扩展</td><td><code>Custom(u64)</code></td><td>用户自定义力 (FFI 注册)</td></tr>
+</table>
+
+<h3>执行流程</h3>
 <pre><code class="language-text">world_step()
-  ├── apply_custom_external_forces_with_custom()  ← 浮力/电磁/弹簧/点重力
-  ├── apply_body_interactions()
-  │     ├── pairwise_gravity()        ← 刚体间万有引力
-  │     ├── apply_coulomb_friction()  ← 接触面摩擦力
-  │     └── per_body_air_drag()       ← 空气阻力
-  └── pipeline.step()                 ← Rapier 求解器</code></pre>
+  ├── force_registry.apply_all()         ← 遍历所有已注册的 ForceLaw
+  │     ├── NewtonianGravityForceLaw::apply()
+  │     ├── AirDragForceLaw::apply()
+  │     ├── BuoyancyForceLaw::apply()     (如果已注册)
+  │     ├── ...更多已注册的律...
+  │     └── ForceReport ← 按类型汇总统计数据
+  ├── (旧路径兼容 — 未迁移到 ForceLaw 的力仍走原路径)
+  └── pipeline.step()                     ← Rapier 求解器</code></pre>
 
 <h3>FFI 函数</h3>
 <table class="fn-table">
-<tr><th>函数</th><th>说明</th></tr>
-<tr><td><code>world_set_newton_gravity_law(world, law) → Bool</code></td><td>设置万有引力参数（G、最小距离、最大距离）</td></tr>
-<tr><td><code>world_clear_newton_gravity_law(world)</code></td><td>清除万有引力</td></tr>
-<tr><td><code>world_get_newton_gravity_law(world, out) → Bool</code></td><td>读取万有引力配置</td></tr>
-<tr><td><code>world_set_coulomb_friction_law(world, law) → Bool</code></td><td>设置库仑摩擦（静/动系数、阈值）</td></tr>
-<tr><td><code>world_set_air_drag_law(world, law) → Bool</code></td><td>设置空气阻力（密度、粘度、特征长度等）</td></tr>
-<tr><td><code>world_get_custom_physics_report(world, out) → Bool</code></td><td>读取综合物理报告（力、力矩、雷诺数）</td></tr>
+<tr><th>函数</th><th>说明</th><th>JNI</th></tr>
+<tr><td><code>world_set_newton_gravity_law(world, law) → Bool</code></td><td>设置万有引力 + 自动注册到 ForceRegistry</td><td>✅</td></tr>
+<tr><td><code>world_clear_newton_gravity_law(world)</code></td><td>清除万有引力 + 从 ForceRegistry 注销</td><td>✅</td></tr>
+<tr><td><code>world_get_newton_gravity_law(world, out) → Bool</code></td><td>读取万有引力配置</td><td>—</td></tr>
+<tr><td><code>world_set_coulomb_friction_law(world, law) → Bool</code></td><td>设置库仑摩擦</td><td>✅</td></tr>
+<tr><td><code>world_clear_coulomb_friction_law(world)</code></td><td>清除库仑摩擦</td><td>✅</td></tr>
+<tr><td><code>world_set_air_drag_law(world, law) → Bool</code></td><td>设置空气阻力 + 自动注册到 ForceRegistry</td><td>✅</td></tr>
+<tr><td><code>world_clear_air_drag_law(world)</code></td><td>清除空气阻力 + 从 ForceRegistry 注销</td><td>✅</td></tr>
+<tr><td><code>world_set_external_force_law(world, law) → Bool</code></td><td>设置外部力 (浮力/电磁/弹簧/点重力)</td><td>✅</td></tr>
+<tr><td><code>world_clear_external_force_law(world)</code></td><td>清除外部力</td><td>✅</td></tr>
+<tr><td><code>world_get_custom_physics_report(world, out) → Bool</code></td><td>读取综合物理报告 (力/力矩/雷诺数)</td><td>—</td></tr>
+<tr><td><code>world_get_force_registry_count(world) → u32</code></td><td>ForceRegistry 中已注册力的数量</td><td>✅</td></tr>
+<tr><td><code>world_get_force_registry_typed_count(world, type) → u32</code></td><td>指定 ForceLawType 的注册数量</td><td>✅</td></tr>
+</table>
+
+<h3>事件环缓冲 — 无锁零分配调度</h3>
+<table class="fn-table">
+<tr><th>函数</th><th>说明</th><th>JNI</th></tr>
+<tr><td><code>world_init_collision_event_ring(world, capacity) → Bool</code></td><td>初始化碰撞事件环缓冲</td><td>✅</td></tr>
+<tr><td><code>world_init_contact_force_event_ring(world, capacity) → Bool</code></td><td>初始化接触力事件环缓冲</td><td>✅</td></tr>
+<tr><td><code>world_drain_collision_event_ring(world, out, cap) → u32</code></td><td>从环缓冲排空碰撞事件</td><td>✅</td></tr>
+<tr><td><code>world_drain_contact_force_event_ring(world, out, cap) → u32</code></td><td>从环缓冲排空接触力事件</td><td>✅</td></tr>
+<tr><td><code>world_collision_event_ring_len(world) → u32</code></td><td>环缓冲中待处理碰撞事件数</td><td>✅</td></tr>
+<tr><td><code>world_contact_force_event_ring_len(world) → u32</code></td><td>环缓冲中待处理接触力事件数</td><td>✅</td></tr>
+<tr><td><code>world_set_event_dispatch_mode(world, mode) → Bool</code></td><td>设置事件调度模式 (Poll/Callback/Both)</td><td>✅</td></tr>
 </table>
 
 <h3>Java 使用示例</h3>
 <pre><code class="language-java">// === 初始化（仅一次）===
 PhysicsWorld world = new PhysicsWorld(0, -9.81, 0);
 
-// 1. 启用刚体间万有引力 (G=1000 适合游戏尺度)
+// 1. 启用刚体间万有引力
 world.setNewtonGravityLaw(new NewtonGravityLaw()
     .gravitationalConstant(1000.0)
     .minDistance(0.01)
@@ -682,11 +746,43 @@ world.setAirDragLaw(new AirDragLaw()
     .referenceArea(0.5)     // 参考面积 m²
     .enabled(true));
 
+// 3b. 启用外部力 (浮力 + 电磁 + 弹簧 + 点重力)
+world.setExternalForceLaw(new ExternalForceLaw()
+    .fluidDensity(1000.0).displacedVolume(0.5).buoyancyEnabled(true)  // 浮力
+    .charge(1.6e-19).electricField(0, 0, 1000).magneticField(0, 1, 0).electromagneticEnabled(true)  // 电磁
+    .springAnchor(0, 10, 0).springStiffness(100.0).springDamping(10.0).elasticEnabled(true)  // 弹簧
+    .gravitySource(0, 100, 0).gravitationalParameter(398600.0).gravityEnabled(true)  // 点重力
+    .enabled(true));
+
+// 查看 ForceRegistry 状态
+int totalLaws = world.getForceRegistryCount();
+int gravityLaws = world.getForceRegistryTypedCount(ForceLawType.NEWTONIAN_GRAVITY);
+
+// 事件环缓冲 (无锁零分配)
+world.initCollisionEventRing(4096);
+world.initContactForceEventRing(4096);
+
 // === 每帧循环 ===
 while (running) {
-    world.step();  // 三种交互力自动执行
-    // 无需额外调用
-}</code></pre>
+    world.step();  // ForceRegistry 自动执行所有已注册的力
+    // 批量排空事件
+    CollisionEventRecord[] collisions = world.drainCollisionEventRing(1024);
+    ContactForceEventRecord[] contacts = world.drainContactForceEventRing(1024);
+}
+
+// === 气动/流体/弹道公式 (按需调用) ===
+AeroForceReport aeroReport = new AeroForceReport();
+world.aeroApplySurfaces(bodyHandle, windVel, airDensity, surfaces, surfaces.length, true, aeroReport);
+
+FluidForceReport fluidReport = new FluidForceReport();
+world.fluidApplyAabbForces(bodyHandle, fluidVolume, bodyHalfExtents, bodyVolume, true, fluidReport);
+
+TrajectoryForceReport trajReport = new TrajectoryForceReport();
+world.trajectoryApplyForcesToBody(bodyHandle, trajEnv, true, trajReport);
+
+// 分子力计算 (纯函数)
+double ljPotential = world.molecularLennardJonesPotential(distance, epsilon, sigma);
+double coulombPotential = world.molecularCoulombPotential(distance, q1, q2, k, eps);</code></pre>
 
 <h3>NewtonGravityLaw 结构体</h3>
 <table>
@@ -697,14 +793,26 @@ while (running) {
 <tr><td><code>enabled</code></td><td><code>Bool</code></td><td>FALSE</td><td>是否启用</td></tr>
 </table>
 
+<h3>新增 JNI 支持矩阵</h3>
+<table>
+<tr><th>模块</th><th>JNI 函数</th><th>说明</th></tr>
+<tr><td><strong>Force Law API</strong></td><td><code>worldSetCoulombFrictionLaw</code>, <code>worldSetAirDragLaw</code>, <code>worldSetExternalForceLaw</code>, <code>worldSetNewtonGravityLaw</code></td><td>力律配置</td></tr>
+<tr><td><strong>Force Law Clear</strong></td><td><code>worldClearCoulombFrictionLaw</code>, <code>worldClearAirDragLaw</code>, <code>worldClearExternalForceLaw</code>, <code>worldClearNewtonGravityLaw</code></td><td>力律清除</td></tr>
+<tr><td><strong>Force Registry</strong></td><td><code>worldForceRegistryCount</code>, <code>worldForceRegistryTypedCount</code></td><td>注册表查询</td></tr>
+<tr><td><strong>Event Ring</strong></td><td><code>worldInitCollisionEventRing</code>, <code>worldInitContactForceEventRing</code>, <code>worldDrainCollisionEventRing</code>, <code>worldDrainContactForceEventRing</code>, <code>worldCollisionEventRingLen</code>, <code>worldContactForceEventRingLen</code>, <code>worldSetEventDispatchMode</code></td><td>无锁事件缓冲</td></tr>
+<tr><td><strong>Aerodynamics</strong></td><td><code>aeroApplySurfaces</code></td><td>面元气动力</td></tr>
+<tr><td><strong>Fluid</strong></td><td><code>fluidApplyAabbForces</code></td><td>AABB 流体阻力</td></tr>
+<tr><td><strong>Trajectory</strong></td><td><code>trajectoryApplyForcesToBody</code></td><td>弹道力</td></tr>
+<tr><td><strong>Molecular</strong></td><td><code>molecularLennardJonesPotential</code>, <code>molecularCoulombPotential</code></td><td>分子势能计算</td></tr>
+</table>
+
 <h3>已有公式接入指南</h3>
-<p>项目中 42 个物理公式模块通过以下模式接入刚体系统：</p>
 <table>
 <tr><th>接入方式</th><th>适用模块</th><th>调用位置</th></tr>
-<tr><td><strong>独立公式</strong>（纯函数）</td><td>chaos, relativity, quantum, plasma, wave_optics 等</td><td>Java 侧按需调用，不自动执行</td></tr>
-<tr><td><strong>ExternalForceLaw</strong></td><td>浮力、电磁力、弹簧力、点源重力</td><td><code>apply_custom_external_forces_with_custom</code></td></tr>
-<tr><td><strong>Interaction 系统</strong></td><td>万有引力、库仑摩擦、空气阻力</td><td><code>apply_body_interactions</code></td></tr>
-<tr><td><strong>专用集成函数</strong></td><td>aerodynamics, trajectory, spaceflight, fluid</td><td>通过 <code>*_apply_*_to_body</code> 函数直接操作刚体</td></tr>
+<tr><td><strong>ForceRegistry (推荐)</strong></td><td>NewtonianGravity, AirDrag, CoulombFriction</td><td><code>force_registry.apply_all()</code> 在 world_step 自动执行</td></tr>
+<tr><td><strong>独立公式 (纯函数)</strong></td><td>chaos, relativity, quantum, plasma, wave_optics 等</td><td>Java 侧按需调用，不自动执行</td></tr>
+<tr><td><strong>ExternalForceLaw</strong></td><td>浮力、电磁力、弹簧力、点源重力</td><td><code>apply_custom_external_forces_with_custom</code> + ForceRegistry</td></tr>
+<tr><td><strong>专用集成函数</strong></td><td>aerodynamics, trajectory, spaceflight, fluid, molecular</td><td>通过 <code>*_apply_*_to_body</code> JNI 函数操作刚体</td></tr>
 </table>
 </section>
 

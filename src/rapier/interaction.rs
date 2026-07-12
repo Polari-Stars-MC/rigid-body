@@ -339,6 +339,172 @@ pub(crate) fn apply_body_interactions(
 }
 
 // ---------------------------------------------------------------------------
+// ForceLaw impls — registry-compatible wrappers
+// ---------------------------------------------------------------------------
+
+use crate::rapier::forces::{ForceLaw, ForceLawType, ForceReport};
+use rapier3d::prelude::{ColliderSet, NarrowPhase, RigidBodySet};
+
+/// Newtonian pairwise gravity as a registered force law.
+pub(crate) struct NewtonianGravityForceLaw {
+    pub gravitational_constant: f64,
+    pub min_distance: f64,
+    pub max_distance: f64,
+    pub enabled: bool,
+}
+
+impl ForceLaw for NewtonianGravityForceLaw {
+    fn law_type(&self) -> ForceLawType {
+        ForceLawType::NewtonianGravity
+    }
+
+    fn enabled(&self) -> bool {
+        self.enabled
+    }
+
+    fn apply(
+        &self,
+        bodies: &mut RigidBodySet,
+        _colliders: &mut ColliderSet,
+        _narrow_phase: &NarrowPhase,
+        report: &mut ForceReport,
+    ) {
+        let g = self.gravitational_constant;
+        let min_dist = self.min_distance;
+        let max_dist = self.max_distance;
+
+        let body_data: Vec<_> = bodies
+            .iter()
+            .filter(|(_, b)| b.is_dynamic())
+            .map(|(h, b)| {
+                let mass = b.mass();
+                (h, if mass > 0.0 { mass } else { 0.0 }, b.translation())
+            })
+            .filter(|(_, m, _)| *m > 0.0)
+            .collect();
+
+        if body_data.len() < 2 {
+            return;
+        }
+
+        let mut total_force = Vector::ZERO;
+        let mut body_count = 0u32;
+
+        for i in 0..body_data.len() {
+            let (hi, mi, pi) = (body_data[i].0, body_data[i].1, body_data[i].2);
+            let mut net_force = Vector::ZERO;
+
+            for (hj, mj, pj) in &body_data {
+                if hi == *hj {
+                    continue;
+                }
+                let offset = *pj - pi;
+                let dist_sq = offset.length_squared();
+                if max_dist > 0.0 && dist_sq > max_dist * max_dist {
+                    continue;
+                }
+                let dist = dist_sq.sqrt().max(min_dist);
+                let force_mag = g * mi * mj / (dist_sq * dist);
+                net_force += offset * force_mag;
+            }
+
+            if net_force != Vector::ZERO {
+                if let Some(body) = bodies.get_mut(hi) {
+                    body.add_force(net_force, true);
+                    total_force += net_force;
+                    body_count += 1;
+                }
+            }
+        }
+
+        report.add(self.law_type(), total_force, body_count);
+    }
+
+    fn clone_box(&self) -> Box<dyn ForceLaw> {
+        Box::new(Self {
+            gravitational_constant: self.gravitational_constant,
+            min_distance: self.min_distance,
+            max_distance: self.max_distance,
+            enabled: self.enabled,
+        })
+    }
+}
+
+/// Air drag as a registered force law.
+pub(crate) struct AirDragForceLaw {
+    pub fluid_velocity: Vector,
+    pub density: f64,
+    pub dynamic_viscosity: f64,
+    pub characteristic_length: f64,
+    pub reference_area: f64,
+    pub drag_coefficient: f64,
+    pub reynolds_stokes_limit: f64,
+    pub enabled: bool,
+}
+
+impl ForceLaw for AirDragForceLaw {
+    fn law_type(&self) -> ForceLawType {
+        ForceLawType::AirDrag
+    }
+
+    fn enabled(&self) -> bool {
+        self.enabled
+    }
+
+    fn apply(
+        &self,
+        bodies: &mut RigidBodySet,
+        _colliders: &mut ColliderSet,
+        _narrow_phase: &NarrowPhase,
+        report: &mut ForceReport,
+    ) {
+        let mut total_drag = Vector::ZERO;
+        let mut body_count = 0u32;
+
+        for (_, body) in bodies.iter_mut() {
+            if !body.is_dynamic() {
+                continue;
+            }
+
+            let relative_velocity = body.linvel() - self.fluid_velocity;
+            let speed = relative_velocity.length();
+            if speed <= 1.0e-12 {
+                continue;
+            }
+
+            let reynolds = self.density * speed * self.characteristic_length / self.dynamic_viscosity;
+            report.max_reynolds_number = report.max_reynolds_number.max(reynolds);
+
+            let drag_magnitude = if reynolds <= self.reynolds_stokes_limit {
+                3.0 * std::f64::consts::PI * self.dynamic_viscosity * self.characteristic_length * speed
+            } else {
+                0.5 * self.density * speed * speed * self.drag_coefficient * self.reference_area
+            };
+
+            let force = -relative_velocity / speed * drag_magnitude;
+            body.add_force(force, true);
+            total_drag += force;
+            body_count += 1;
+        }
+
+        report.add(self.law_type(), total_drag, body_count);
+    }
+
+    fn clone_box(&self) -> Box<dyn ForceLaw> {
+        Box::new(Self {
+            fluid_velocity: self.fluid_velocity,
+            density: self.density,
+            dynamic_viscosity: self.dynamic_viscosity,
+            characteristic_length: self.characteristic_length,
+            reference_area: self.reference_area,
+            drag_coefficient: self.drag_coefficient,
+            reynolds_stokes_limit: self.reynolds_stokes_limit,
+            enabled: self.enabled,
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 

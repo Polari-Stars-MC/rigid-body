@@ -19,6 +19,7 @@ pub(crate) mod error;
 pub(crate) mod events;
 pub(crate) mod ffi;
 pub(crate) mod fluid;
+pub(crate) mod forces;
 pub(crate) mod fracture;
 pub(crate) mod interaction;
 pub(crate) mod joints;

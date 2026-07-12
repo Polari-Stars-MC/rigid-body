@@ -12,6 +12,7 @@ use crate::rapier::ffi::{
     pack_rigid_body_handle, quat_finite, quat_from_rapier, unpack_rigid_body_handle, vec3_finite,
     vec3_from_rapier, vec3_to_rapier,
 };
+use crate::rapier::forces::ForceRegistry;
 
 const MAX_STEP_SECONDS: f64 = 1.0;
 
@@ -29,6 +30,7 @@ pub(crate) struct PhysicsWorld {
     pub(crate) ccd_solver: CCDSolver,
     pub(crate) hooks: crate::rapier::events::CallbackPhysicsHooks,
     pub(crate) events: Arc<crate::rapier::events::CollectingEventHandler>,
+    pub(crate) force_registry: ForceRegistry,
 }
 
 impl PhysicsWorld {
@@ -55,6 +57,7 @@ impl PhysicsWorld {
             ccd_solver: CCDSolver::new(),
             hooks: crate::rapier::events::CallbackPhysicsHooks::new(events.clone()),
             events,
+            force_registry: ForceRegistry::new(),
         }
     }
 }
@@ -115,12 +118,74 @@ pub extern "C" fn world_step(world: *mut WorldHandle, delta_seconds: f64) {
         }
     }
 
-    crate::rapier::events::apply_custom_external_forces_with_custom(
-        &mut world.inner,
-        custom.clone(),
+    // 1. Pre-check which force types are registered (avoids borrow conflict).
+    let has_newton_gravity = !world
+        .inner
+        .force_registry
+        .find_by_type(crate::rapier::forces::ForceLawType::NewtonianGravity)
+        .is_empty();
+    let has_coulomb = !world
+        .inner
+        .force_registry
+        .find_by_type(crate::rapier::forces::ForceLawType::CoulombFriction)
+        .is_empty();
+    let has_air_drag = !world
+        .inner
+        .force_registry
+        .find_by_type(crate::rapier::forces::ForceLawType::AirDrag)
+        .is_empty();
+    let has_external_forces = !world
+        .inner
+        .force_registry
+        .find_by_type(crate::rapier::forces::ForceLawType::Buoyancy)
+        .is_empty()
+        || !world
+            .inner
+            .force_registry
+            .find_by_type(crate::rapier::forces::ForceLawType::Electromagnetic)
+            .is_empty()
+        || !world
+            .inner
+            .force_registry
+            .find_by_type(crate::rapier::forces::ForceLawType::ElasticSpring)
+            .is_empty()
+        || !world
+            .inner
+            .force_registry
+            .find_by_type(crate::rapier::forces::ForceLawType::PointGravity)
+            .is_empty();
+
+    // 2. Apply forces via the type-registry (new path).
+    let force_report = world.inner.force_registry.apply_all(
+        &mut world.inner.bodies,
+        &mut world.inner.colliders,
+        &world.inner.narrow_phase,
     );
-    // Run body-body interactions: pairwise gravity, Coulomb friction, air drag
-    crate::rapier::interaction::apply_body_interactions(&mut world.inner, &custom);
+
+    // 3. Legacy path: apply forces that haven't been migrated to ForceLaw yet.
+    if !has_external_forces {
+        crate::rapier::events::apply_custom_external_forces_with_custom(
+            &mut world.inner,
+            custom.clone(),
+        );
+    }
+    if !has_newton_gravity || !has_coulomb || !has_air_drag {
+        crate::rapier::interaction::apply_body_interactions(&mut world.inner, &custom);
+    }
+
+    // 4. Merge registry report into events, but only if it has content.
+    //    Otherwise preserve the legacy report (set by apply_* functions above).
+    let has_registry_forces = force_report
+        .contributions
+        .values()
+        .any(|c| c.body_count > 0);
+    if has_registry_forces {
+        world
+            .inner
+            .events
+            .set_last_custom_physics_report(force_report.to_legacy_report());
+    }
+
     world.inner.pipeline.step(
         world.inner.gravity,
         &world.inner.integration_parameters,
@@ -497,6 +562,76 @@ pub extern "C" fn world_update_body_velocities(
     }
     updated
 }
+
+// ---------------------------------------------------------------------------
+// ForceRegistry FFI — generic access for advanced callers
+// ---------------------------------------------------------------------------
+
+use crate::rapier::forces::ForceLawType;
+
+/// Opaque handle for a force law registered in the world's ForceRegistry.
+/// Maps to `ForceLawHandle` in Rust.
+pub type ForceLawHandleRaw = u64;
+
+#[unsafe(no_mangle)]
+pub extern "C" fn world_get_force_registry_count(world: *const WorldHandle) -> u32 {
+    let Some(world) = (unsafe { world.as_ref() }) else {
+        return 0;
+    };
+    world.inner.force_registry.len() as u32
+}
+
+/// Get count of registered force laws of a specific type.
+/// `law_type` is the numeric discriminant of `ForceLawType`.
+#[unsafe(no_mangle)]
+pub extern "C" fn world_get_force_registry_typed_count(
+    world: *const WorldHandle,
+    law_type: u32,
+) -> u32 {
+    let Some(world) = (unsafe { world.as_ref() }) else {
+        return 0;
+    };
+    let law_type = match force_law_type_from_u32(law_type) {
+        Some(lt) => lt,
+        None => return 0,
+    };
+    world.inner.force_registry.find_by_type(law_type).len() as u32
+}
+
+/// Convert a u32 tag to `ForceLawType`.  The mapping matches cbindgen's
+/// C enum generation: 0 = WorldGravity, 1 = UserForce, ...
+fn force_law_type_from_u32(tag: u32) -> Option<ForceLawType> {
+    match tag {
+        0 => Some(ForceLawType::WorldGravity),
+        1 => Some(ForceLawType::UserForce),
+        2 => Some(ForceLawType::NewtonianGravity),
+        3 => Some(ForceLawType::CoulombFriction),
+        4 => Some(ForceLawType::AirDrag),
+        5 => Some(ForceLawType::Buoyancy),
+        6 => Some(ForceLawType::Electromagnetic),
+        7 => Some(ForceLawType::ElasticSpring),
+        8 => Some(ForceLawType::PointGravity),
+        9 => Some(ForceLawType::AerodynamicSurface),
+        10 => Some(ForceLawType::AerodynamicVoxel),
+        11 => Some(ForceLawType::FluidAABB),
+        12 => Some(ForceLawType::MolecularLennardJones),
+        13 => Some(ForceLawType::MolecularCoulomb),
+        14 => Some(ForceLawType::SpaceJ2),
+        15 => Some(ForceLawType::SpaceCMG),
+        16 => Some(ForceLawType::SpaceAtmosphericDrag),
+        17 => Some(ForceLawType::SpaceSolarRadiation),
+        18 => Some(ForceLawType::SpaceGravityGradient),
+        19 => Some(ForceLawType::SpaceMagneticTorquer),
+        20 => Some(ForceLawType::TrajectoryCoriolis),
+        21 => Some(ForceLawType::TrajectoryCentrifugal),
+        22 => Some(ForceLawType::TrajectoryGravity),
+        23 => Some(ForceLawType::ControlPID),
+        _ => None, // Custom(u64) must use the runtime-register path
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
 
 #[cfg(test)]
 mod tests {

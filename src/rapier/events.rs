@@ -714,6 +714,31 @@ pub extern "C" fn world_set_air_drag_law(world: *mut WorldHandle, law: AirDragLa
 
     world.inner.events.custom_physics.write().air_drag =
         if law.enabled.0 != 0 { Some(law) } else { None };
+
+    // Also register into the ForceRegistry for the new dispatch path.
+    // Remove any existing AirDrag law first, then register the new one.
+    {
+        let existing = world.inner.force_registry.find_by_type(
+            crate::rapier::forces::ForceLawType::AirDrag,
+        );
+        for h in existing {
+            world.inner.force_registry.unregister(h);
+        }
+        if law.enabled.0 != 0 {
+            let drag_law = crate::rapier::interaction::AirDragForceLaw {
+                fluid_velocity: vec3_to_rapier(law.fluid_velocity),
+                density: law.density,
+                dynamic_viscosity: law.dynamic_viscosity,
+                characteristic_length: law.characteristic_length,
+                reference_area: law.reference_area,
+                drag_coefficient: law.drag_coefficient,
+                reynolds_stokes_limit: law.reynolds_stokes_limit,
+                enabled: true,
+            };
+            world.inner.force_registry.register(Box::new(drag_law));
+        }
+    }
+
     clear_error();
     Bool::TRUE
 }
@@ -846,6 +871,25 @@ pub extern "C" fn world_set_newton_gravity_law(
     }
     world.inner.events.custom_physics.write().newton_gravity =
         if law.enabled.0 != 0 { Some(law) } else { None };
+
+    // Also register into the ForceRegistry.
+    {
+        use crate::rapier::forces::ForceLawType;
+        let existing = world.inner.force_registry.find_by_type(ForceLawType::NewtonianGravity);
+        for h in existing {
+            world.inner.force_registry.unregister(h);
+        }
+        if law.enabled.0 != 0 {
+            let gravity_law = crate::rapier::interaction::NewtonianGravityForceLaw {
+                gravitational_constant: law.gravitational_constant,
+                min_distance: law.min_distance,
+                max_distance: law.max_distance,
+                enabled: true,
+            };
+            world.inner.force_registry.register(Box::new(gravity_law));
+        }
+    }
+
     clear_error();
     Bool::TRUE
 }

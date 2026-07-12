@@ -127,6 +127,37 @@ public final class RigidBodyFfm {
     public static final MemoryLayout SCALAR_KALMAN = MemoryLayout.structLayout(
             ValueLayout.JAVA_DOUBLE.withName("value"),
             ValueLayout.JAVA_DOUBLE.withName("covariance"));
+    // Force-law structs
+    public static final MemoryLayout COULOMB_FRICTION_LAW = MemoryLayout.structLayout(
+            ValueLayout.JAVA_DOUBLE.withName("static_coefficient"),
+            ValueLayout.JAVA_DOUBLE.withName("dynamic_coefficient"),
+            ValueLayout.JAVA_DOUBLE.withName("velocity_threshold"),
+            BOOL.withName("enabled"),
+            MemoryLayout.paddingLayout(7));
+    public static final MemoryLayout AIR_DRAG_LAW = MemoryLayout.structLayout(
+            VEC3.withName("fluid_velocity"),
+            ValueLayout.JAVA_DOUBLE.withName("density"),
+            ValueLayout.JAVA_DOUBLE.withName("dynamic_viscosity"),
+            ValueLayout.JAVA_DOUBLE.withName("characteristic_length"),
+            ValueLayout.JAVA_DOUBLE.withName("reference_area"),
+            ValueLayout.JAVA_DOUBLE.withName("drag_coefficient"),
+            ValueLayout.JAVA_DOUBLE.withName("reynolds_stokes_limit"),
+            BOOL.withName("enabled"),
+            MemoryLayout.paddingLayout(7));
+    public static final MemoryLayout NEWTON_GRAVITY_LAW = MemoryLayout.structLayout(
+            ValueLayout.JAVA_DOUBLE.withName("gravitational_constant"),
+            ValueLayout.JAVA_DOUBLE.withName("min_distance"),
+            ValueLayout.JAVA_DOUBLE.withName("max_distance"),
+            BOOL.withName("enabled"),
+            MemoryLayout.paddingLayout(7));
+    public static final MemoryLayout CUSTOM_PHYSICS_REPORT = MemoryLayout.structLayout(
+            ValueLayout.JAVA_INT.withName("body_count"),
+            ValueLayout.JAVA_INT.withName("drag_body_count"),
+            ValueLayout.JAVA_INT.withName("external_force_body_count"),
+            MemoryLayout.paddingLayout(4),
+            VEC3.withName("total_drag_force"),
+            VEC3.withName("total_external_force"),
+            ValueLayout.JAVA_DOUBLE.withName("max_reynolds_number"));
 
     public static final long VEC3_X = VEC3.byteOffset(MemoryLayout.PathElement.groupElement("x"));
     public static final long VEC3_Y = VEC3.byteOffset(MemoryLayout.PathElement.groupElement("y"));
@@ -155,6 +186,19 @@ public final class RigidBodyFfm {
     public static final long HOHMANN_TRANSFER_TIME = HOHMANN_TRANSFER.byteOffset(MemoryLayout.PathElement.groupElement("transfer_time"));
     public static final long SCALAR_KALMAN_VALUE = SCALAR_KALMAN.byteOffset(MemoryLayout.PathElement.groupElement("value"));
     public static final long SCALAR_KALMAN_COVARIANCE = SCALAR_KALMAN.byteOffset(MemoryLayout.PathElement.groupElement("covariance"));
+    // Force-law field offsets
+    public static final long AIR_DRAG_LAW_DENSITY = AIR_DRAG_LAW.byteOffset(MemoryLayout.PathElement.groupElement("density"));
+    public static final long AIR_DRAG_LAW_DRAG_COEFFICIENT = AIR_DRAG_LAW.byteOffset(MemoryLayout.PathElement.groupElement("drag_coefficient"));
+    public static final long AIR_DRAG_LAW_REFERENCE_AREA = AIR_DRAG_LAW.byteOffset(MemoryLayout.PathElement.groupElement("reference_area"));
+    public static final long AIR_DRAG_LAW_ENABLED = AIR_DRAG_LAW.byteOffset(
+            MemoryLayout.PathElement.groupElement("enabled"),
+            MemoryLayout.PathElement.groupElement("_0"));
+    public static final long COULOMB_LAW_STATIC = COULOMB_FRICTION_LAW.byteOffset(MemoryLayout.PathElement.groupElement("static_coefficient"));
+    public static final long COULOMB_LAW_DYNAMIC = COULOMB_FRICTION_LAW.byteOffset(MemoryLayout.PathElement.groupElement("dynamic_coefficient"));
+    public static final long NEWTON_GRAVITY_LAW_G = NEWTON_GRAVITY_LAW.byteOffset(MemoryLayout.PathElement.groupElement("gravitational_constant"));
+    public static final long CUSTOM_PHYSICS_REPORT_BODY_COUNT = CUSTOM_PHYSICS_REPORT.byteOffset(MemoryLayout.PathElement.groupElement("body_count"));
+    public static final long CUSTOM_PHYSICS_REPORT_DRAG_BODY_COUNT = CUSTOM_PHYSICS_REPORT.byteOffset(MemoryLayout.PathElement.groupElement("drag_body_count"));
+    public static final long CUSTOM_PHYSICS_REPORT_MAX_REYNOLDS = CUSTOM_PHYSICS_REPORT.byteOffset(MemoryLayout.PathElement.groupElement("max_reynolds_number"));
 
     private static final Linker LINKER = Linker.nativeLinker();
 
@@ -246,6 +290,19 @@ public final class RigidBodyFfm {
     private final MethodHandle colliderSetActiveHooks;
     private final MethodHandle colliderSetContactForceEventThreshold;
     private final MethodHandle colliderGetDensity;
+    // Force-law FFM handles
+    private final MethodHandle worldSetCoulombFrictionLawFlag;
+    private final MethodHandle worldGetCoulombFrictionLaw;
+    private final MethodHandle worldClearCoulombFrictionLaw;
+    private final MethodHandle worldSetAirDragLawFlag;
+    private final MethodHandle worldGetAirDragLaw;
+    private final MethodHandle worldClearAirDragLaw;
+    private final MethodHandle worldSetNewtonGravityLawFlag;
+    private final MethodHandle worldGetNewtonGravityLaw;
+    private final MethodHandle worldClearNewtonGravityLaw;
+    private final MethodHandle worldGetCustomPhysicsReport;
+    private final MethodHandle worldGetForceRegistryCount;
+    private final MethodHandle worldGetForceRegistryTypedCount;
     private final MethodHandle queryCastRayOut;
     private final MethodHandle queryProjectPointOut;
     private final MethodHandle queryIntersectAabb;
@@ -397,6 +454,31 @@ public final class RigidBodyFfm {
         colliderSetActiveHooks = downcall("collider_set_active_hooks_flag", FunctionDescriptor.of(ValueLayout.JAVA_BYTE, ValueLayout.ADDRESS, ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT));
         colliderSetContactForceEventThreshold = downcall("collider_set_contact_force_event_threshold_flag", FunctionDescriptor.of(ValueLayout.JAVA_BYTE, ValueLayout.ADDRESS, ValueLayout.JAVA_LONG, ValueLayout.JAVA_DOUBLE));
         colliderGetDensity = downcall("collider_get_density", FunctionDescriptor.of(ValueLayout.JAVA_DOUBLE, ValueLayout.ADDRESS, ValueLayout.JAVA_LONG));
+        // Force-law downcalls
+        worldSetCoulombFrictionLawFlag = downcall("world_set_coulomb_friction_law_flag",
+                FunctionDescriptor.of(ValueLayout.JAVA_BYTE, ValueLayout.ADDRESS, COULOMB_FRICTION_LAW));
+        worldGetCoulombFrictionLaw = downcall("world_get_coulomb_friction_law",
+                FunctionDescriptor.of(BOOL, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
+        worldClearCoulombFrictionLaw = downcall("world_clear_coulomb_friction_law",
+                FunctionDescriptor.ofVoid(ValueLayout.ADDRESS));
+        worldSetAirDragLawFlag = downcall("world_set_air_drag_law_flag",
+                FunctionDescriptor.of(ValueLayout.JAVA_BYTE, ValueLayout.ADDRESS, AIR_DRAG_LAW));
+        worldGetAirDragLaw = downcall("world_get_air_drag_law",
+                FunctionDescriptor.of(BOOL, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
+        worldClearAirDragLaw = downcall("world_clear_air_drag_law",
+                FunctionDescriptor.ofVoid(ValueLayout.ADDRESS));
+        worldSetNewtonGravityLawFlag = downcall("world_set_newton_gravity_law_flag",
+                FunctionDescriptor.of(ValueLayout.JAVA_BYTE, ValueLayout.ADDRESS, NEWTON_GRAVITY_LAW));
+        worldGetNewtonGravityLaw = downcall("world_get_newton_gravity_law",
+                FunctionDescriptor.of(BOOL, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
+        worldClearNewtonGravityLaw = downcall("world_clear_newton_gravity_law",
+                FunctionDescriptor.ofVoid(ValueLayout.ADDRESS));
+        worldGetCustomPhysicsReport = downcall("world_get_custom_physics_report",
+                FunctionDescriptor.of(BOOL, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
+        worldGetForceRegistryCount = downcall("world_get_force_registry_count",
+                FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS));
+        worldGetForceRegistryTypedCount = downcall("world_get_force_registry_typed_count",
+                FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_INT));
         queryCastRayOut = downcall("query_cast_ray_out", FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.ADDRESS, VEC3, VEC3, ValueLayout.JAVA_DOUBLE, BOOL, QUERY_FILTER, ValueLayout.ADDRESS));
         queryProjectPointOut = downcall("query_project_point_out", FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.ADDRESS, VEC3, ValueLayout.JAVA_DOUBLE, BOOL, QUERY_FILTER, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
         queryIntersectAabb = downcall("query_intersect_aabb", FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS, AABB, QUERY_FILTER, ValueLayout.ADDRESS, ValueLayout.JAVA_INT));

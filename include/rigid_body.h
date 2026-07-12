@@ -5586,6 +5586,14 @@ uint32_t world_update_body_velocities(struct WorldHandle *world,
                                       uint32_t count,
                                       struct Bool wake_up);
 
+uint32_t world_get_force_registry_count(const struct WorldHandle *world);
+
+/**
+ * Get count of registered force laws of a specific type.
+ * `law_type` is the numeric discriminant of `ForceLawType`.
+ */
+uint32_t world_get_force_registry_typed_count(const struct WorldHandle *world, uint32_t law_type);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus

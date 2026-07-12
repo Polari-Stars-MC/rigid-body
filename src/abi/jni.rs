@@ -628,6 +628,93 @@ jni!(int worldGetContactForceEvents(long world, long out_events, int capacity) {
 jni!(void worldClearContactPairFilterCallback(long world) { ev::world_clear_contact_pair_filter_callback(m::<WH>(world)); });
 jni!(void worldClearIntersectionPairFilterCallback(long world) { ev::world_clear_intersection_pair_filter_callback(m::<WH>(world)); });
 
+// =========================================================================
+// Force law API — Coulomb friction, air drag, external force, Newton gravity
+// =========================================================================
+jni!(boolean worldSetCoulombFrictionLaw(long world, double static_coefficient, double dynamic_coefficient, double velocity_threshold, int enabled) {
+    ev::world_set_coulomb_friction_law(m::<WH>(world), crate::rapier::ffi::CoulombFrictionLaw {
+        static_coefficient, dynamic_coefficient, velocity_threshold, enabled: jb(enabled),
+    }).0 as jbyte
+});
+jni!(boolean worldClearCoulombFrictionLaw(long world) { ev::world_clear_coulomb_friction_law(m::<WH>(world)); Bool::TRUE.0 as jbyte });
+jni!(boolean worldSetAirDragLaw(long world, double fluid_vx, double fluid_vy, double fluid_vz, double density, double viscosity, double char_len, double ref_area, double cd, double re_limit, int enabled) {
+    ev::world_set_air_drag_law(m::<WH>(world), crate::rapier::ffi::AirDragLaw {
+        fluid_velocity: v3(fluid_vx, fluid_vy, fluid_vz), density, dynamic_viscosity: viscosity,
+        characteristic_length: char_len, reference_area: ref_area, drag_coefficient: cd,
+        reynolds_stokes_limit: re_limit, enabled: jb(enabled),
+    }).0 as jbyte
+});
+jni!(boolean worldClearAirDragLaw(long world) { ev::world_clear_air_drag_law(m::<WH>(world)); Bool::TRUE.0 as jbyte });
+jni!(boolean worldSetExternalForceLaw(long world, double buoyancy_gravity_x, double buoyancy_gravity_y, double buoyancy_gravity_z, double fluid_density, double displaced_volume, int buoyancy_enabled, double charge, double electric_x, double electric_y, double electric_z, double magnetic_x, double magnetic_y, double magnetic_z, int em_enabled, double spring_x, double spring_y, double spring_z, double spring_stiffness, double spring_damping, int elastic_enabled, double gravity_source_x, double gravity_source_y, double gravity_source_z, double gravitational_parameter, int gravity_enabled, int enabled) {
+    ev::world_set_external_force_law(m::<WH>(world), crate::rapier::ffi::ExternalForceLaw {
+        buoyancy_gravity: v3(buoyancy_gravity_x, buoyancy_gravity_y, buoyancy_gravity_z),
+        fluid_density, displaced_volume, buoyancy_enabled: jb(buoyancy_enabled),
+        charge, electric_field: v3(electric_x, electric_y, electric_z),
+        magnetic_field: v3(magnetic_x, magnetic_y, magnetic_z), electromagnetic_enabled: jb(em_enabled),
+        spring_anchor: v3(spring_x, spring_y, spring_z), spring_stiffness, spring_damping,
+        elastic_enabled: jb(elastic_enabled),
+        gravity_source: v3(gravity_source_x, gravity_source_y, gravity_source_z),
+        gravitational_parameter, gravity_enabled: jb(gravity_enabled),
+        enabled: jb(enabled),
+    }).0 as jbyte
+});
+jni!(boolean worldClearExternalForceLaw(long world) { ev::world_clear_external_force_law(m::<WH>(world)); Bool::TRUE.0 as jbyte });
+jni!(boolean worldSetNewtonGravityLaw(long world, double gravitational_constant, double min_distance, double max_distance, int enabled) {
+    ev::world_set_newton_gravity_law(m::<WH>(world), crate::rapier::ffi::NewtonGravityLaw {
+        gravitational_constant, min_distance, max_distance, enabled: jb(enabled),
+    }).0 as jbyte
+});
+jni!(boolean worldClearNewtonGravityLaw(long world) { ev::world_clear_newton_gravity_law(m::<WH>(world)); Bool::TRUE.0 as jbyte });
+
+// =========================================================================
+// Event ring buffer — lock-free dispatch
+// =========================================================================
+jni!(boolean worldInitCollisionEventRing(long world, int capacity) { ev::world_init_collision_event_ring(m::<WH>(world), u32_from_jint(capacity)).0 as jbyte });
+jni!(boolean worldInitContactForceEventRing(long world, int capacity) { ev::world_init_contact_force_event_ring(m::<WH>(world), u32_from_jint(capacity)).0 as jbyte });
+jni!(int worldDrainCollisionEventRing(long world, long out_events, int capacity) { ev::world_drain_collision_event_ring(cp::<WH>(world), pm::<CER>(out_events), u32_from_jint(capacity)) as jint });
+jni!(int worldDrainContactForceEventRing(long world, long out_events, int capacity) { ev::world_drain_contact_force_event_ring(cp::<WH>(world), pm::<ContactForceEventRecord>(out_events), u32_from_jint(capacity)) as jint });
+jni!(int worldCollisionEventRingLen(long world) { ev::world_collision_event_ring_len(cp::<WH>(world)) as jint });
+jni!(int worldContactForceEventRingLen(long world) { ev::world_contact_force_event_ring_len(cp::<WH>(world)) as jint });
+jni!(boolean worldSetEventDispatchMode(long world, int mode) { ev::world_set_event_dispatch_mode(m::<WH>(world), u32_from_jint(mode)).0 as jbyte });
+
+// =========================================================================
+// Aerodynamics — surface & voxel force applications
+// =========================================================================
+use crate::rapier::aerodynamics as aero_jni;
+jni!(boolean aeroApplySurfaces(long world, long body, double wind_x, double wind_y, double wind_z, double density, long surfaces, int surface_count, int wake_up, long out_report) {
+    aero_jni::aero_apply_surfaces(m::<WH>(world), body as RRaw, v3(wind_x, wind_y, wind_z), density,
+        p::<crate::rapier::ffi::AeroSurface>(surfaces), u32_from_jint(surface_count), jb(wake_up),
+        pm::<crate::rapier::ffi::AeroForceReport>(out_report)).0 as jbyte
+});
+
+// =========================================================================
+// Fluid dynamics — AABB drag & buoyancy
+// =========================================================================
+use crate::rapier::fluid as fluid_jni;
+jni!(boolean fluidApplyAabbForces(long world, long body, double center_x, double center_y, double center_z, double half_x, double half_y, double half_z, double density, double linear_drag, double quadratic_drag, double angular_drag, double flow_x, double flow_y, double flow_z, double gravity_x, double gravity_y, double gravity_z, double body_half_x, double body_half_y, double body_half_z, double body_volume, int wake_up, long out_report) {
+    fluid_jni::fluid_apply_aabb_forces(m::<WH>(world), body as RRaw,
+        crate::rapier::ffi::FluidVolume { center: v3(center_x, center_y, center_z), half_extents: v3(half_x, half_y, half_z), density, linear_drag, quadratic_drag, angular_drag, flow_velocity: v3(flow_x, flow_y, flow_z), gravity: v3(gravity_x, gravity_y, gravity_z) },
+        v3(body_half_x, body_half_y, body_half_z), body_volume, jb(wake_up),
+        pm::<crate::rapier::ffi::FluidForceReport>(out_report)).0 as jbyte
+});
+
+// =========================================================================
+// Trajectory — projectile ballistics
+// =========================================================================
+use crate::rapier::trajectory as traj_jni;
+jni!(boolean trajectoryApplyForcesToBody(long world, long body, double gravity_x, double gravity_y, double gravity_z, double flow_x, double flow_y, double flow_z, double mass, double ref_area, double density, double drag_coeff, double lift_coeff, double lift_x, double lift_y, double lift_z, int wake_up, long out_report) {
+    traj_jni::trajectory_apply_forces_to_body(m::<WH>(world), body as RRaw,
+        crate::rapier::ffi::TrajectoryEnvironment { gravity: v3(gravity_x, gravity_y, gravity_z), flow_velocity: v3(flow_x, flow_y, flow_z), mass, reference_area: ref_area, density, drag_coefficient: drag_coeff, lift_coefficient: lift_coeff, lift_direction: v3(lift_x, lift_y, lift_z) },
+        jb(wake_up), pm::<crate::rapier::ffi::TrajectoryForceReport>(out_report)).0 as jbyte
+});
+
+// =========================================================================
+// Molecular dynamics — Lennard-Jones & Coulomb potential calculators
+// =========================================================================
+use crate::rapier::molecular as mol_jni;
+jni!(double molecularLennardJonesPotential(double r, double epsilon, double sigma) { mol_jni::molecular_lennard_jones_potential(r, epsilon, sigma) });
+jni!(double molecularCoulombPotential(double r, double q1, double q2, double k, double eps) { mol_jni::molecular_coulomb_potential(r, q1, q2, k, eps) });
+
 #[cfg(feature = "anvilkit-bridge")]
 jni!(long anvilKitAppCreate() { to_jlong(ak::anvilkit_app_create()) });
 #[cfg(feature = "anvilkit-bridge")]
