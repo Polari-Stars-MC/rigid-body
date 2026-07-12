@@ -32,6 +32,10 @@ fn to_jlong<T>(value: *mut T) -> jlong {
     value as isize as jlong
 }
 
+fn to_jint(value: usize) -> jlong {
+    value as jlong
+}
+
 fn m<T>(value: jlong) -> *mut T {
     value as isize as *mut T
 }
@@ -192,7 +196,7 @@ macro_rules! jni {
     (@default bool_array) => { std::ptr::null_mut() };
     ($ret:ident $method:ident ( $($kind:ident $arg:ident),* ) $body:block) => {
         #[unsafe(export_name = concat!(
-            "Java_org_polaris2023_msp_1rigid_1body_RigidBodyNative_",
+            "Java_org_polaris2023_mps_rapier_RapierNative_",
             stringify!($method)
         ))]
         #[allow(non_snake_case)]
@@ -225,7 +229,7 @@ macro_rules! jni_e_c {
     (@default bool_array) => { std::ptr::null_mut() };
     ($ret:ident $method:ident ( $($kind:ident $arg:ident),* ) $body:block) => {
         #[unsafe(export_name = concat!(
-            "Java_org_polaris2023_msp_1rigid_1body_RigidBodyNative_",
+            "Java_org_polaris2023_mps_rapier_RapierNative_",
             stringify!($method)
         ))]
         #[allow(non_snake_case)]
@@ -241,7 +245,7 @@ jni!(boolean abiSupportsJni() { abi::abi_supports_jni().0 as jbyte });
 jni!(int abiLastErrorCode() { er::last_error_code() as jint });
 jni!(void abiClearLastError() { er::last_error_clear(); });
 
-#[unsafe(export_name = "Java_org_polaris2023_msp_1rigid_1body_RigidBodyNative_abiLastErrorMessage")]
+#[unsafe(export_name = "Java_org_polaris2023_mps_rapier_RapierNative_abiLastErrorMessage")]
 #[allow(non_snake_case)]
 pub extern "system" fn abiLastErrorMessage(env: JNIEnv, _class: jclass) -> jstring {
     catch_unwind(AssertUnwindSafe(|| {
@@ -292,12 +296,8 @@ jni!(long worldCopyCollider(long world, long handle)  { col::world_copy_collider
 jni!(void colliderDestroyRaw(long collider) { col::collider_destroy_raw(m::<CB>(collider)); });
 
 jni!(long colliderBuilderCreate(int shape_type, double a, double b, double c) { to_jlong(col::collider_builder_create(self::shape_type(shape_type), v3(a, b, c))) });
-jni_e_c!(long colliderBuilderCreateHeightmap(env _env, class _class, double_array data, int data_x, int data_y, double scale_x, double scale_y, double scale_z) {
-    let Some(values) = jdoublearray_to_array(&_env, data) else {
-        return 0;
-    };
-    to_jlong(col::collider_builder_create_heightmap(values.as_ptr(), u32_from_jint(data_x), u32_from_jint(data_y), Vec3 { x: scale_x, y: scale_y, z: scale_z }))
-});
+jni!(long colliderBuilderCreateHalfSpace(double nx, double ny, double nz) { to_jlong(col::collider_builder_create_halfspace(v3(nx, ny, nz))) });
+jni_e_c!(long colliderBuilderCreateHeightmap(env _env, class _class, long data, int data_x, int data_y, double scale_x, double scale_y, double scale_z) { to_jlong(col::collider_builder_create_heightmap(p::<f64>(data), u32_from_jint(data_x), u32_from_jint(data_y), Vec3 { x: scale_x, y: scale_y, z: scale_z })) });
 jni!(long colliderBuilderCreateEx(int shape_type, double a, double b, double c, double d) { to_jlong(col::collider_builder_create_ex(sd(shape_type, a, b, c, d))) });
 jni!(long colliderBuilderCreateSphere(double x, double y, double z, double radius) { to_jlong(col::collider_builder_create_sphere(Sphere { center: v3(x, y, z), radius })) });
 jni!(long colliderBuilderCreateObb(double cx, double cy, double cz, double hx, double hy, double hz, double qi, double qj, double qk, double qw) { to_jlong(col::collider_builder_create_obb(Obb {center: v3(cx, cy, cz),half_extents: v3(hx, hy, hz),rotation: qt(qi, qj, qk, qw),})) });
@@ -318,8 +318,8 @@ jni!(long colliderBuilderCreateSphericalShell(double cx, double cy, double cz, d
 jni!(long colliderBuilderCreateKdop(long points_xyz, int point_count, int preset) { to_jlong(dop::collider_builder_create_kdop(p::<f64>(points_xyz), u32_from_jint(point_count), kdop_preset(preset))) });
 jni!(long colliderBuilderCreateFdh(long points_xyz, int point_count, long directions_xyz, int direction_count) { to_jlong(dop::collider_builder_create_fdh(p::<f64>(points_xyz), u32_from_jint(point_count), p::<f64>(directions_xyz), u32_from_jint(direction_count))) });
 jni!(long colliderBuilderCreateNeuralBounds(double cx, double cy, double cz, double hx, double hy, double hz, double qi, double qj, double qk, double qw, int sample_resolution, int hidden_width, int hidden_layers, int activation, double output_scale, double padding, long weights, int weight_count) { to_jlong(neu::collider_builder_create_neural_bounds(NeuralBoundsDesc { center: v3(cx,cy,cz), half_extents: v3(hx,hy,hz), rotation: qt(qi,qj,qk,qw), sample_resolution: u32_from_jint(sample_resolution), hidden_width: u32_from_jint(hidden_width), hidden_layers: u32_from_jint(hidden_layers), activation: neural_activation(activation), output_scale, padding,}, p::<f64>(weights), u32_from_jint(weight_count))) });
-jni_e_c!(long colliderBuilderCreateVoxels(env _env, class _class, long voxels, int size_x, int size_y, int size_z, double voxel_size, double origin_x, double origin_y, double origin_z, int mode, int dynamic_body, int small_voxel_limit, int mesh_voxel_limit) { to_jlong(vx::collider_builder_create_voxels(p::<u8>(voxels), u32_from_jint(size_x), u32_from_jint(size_y), u32_from_jint(size_z), voxel_size, v3(origin_x, origin_y, origin_z), VoxelColliderOptions { mode: voxel_mode(mode), dynamic_body: jb(dynamic_body), small_voxel_limit: u32_from_jint(small_voxel_limit), mesh_voxel_limit: u32_from_jint(mesh_voxel_limit) })) });
-jni_e_c!(long colliderBuilderCreateVoxelsAuto(env _env, class _class, long voxels, int size_x, int size_y, int size_z, double voxel_size, double origin_x, double origin_y, double origin_z, int dynamic_body) { to_jlong(vx::collider_builder_create_voxels_auto(p::<u8>(voxels), u32_from_jint(size_x), u32_from_jint(size_y), u32_from_jint(size_z), voxel_size, v3(origin_x, origin_y, origin_z), jb(dynamic_body))) });
+jni!(long colliderBuilderCreateVoxels(long voxels, int size_x, int size_y, int size_z, double voxel_size, double origin_x, double origin_y, double origin_z, int mode, int dynamic_body, int small_voxel_limit, int mesh_voxel_limit) { to_jlong(vx::collider_builder_create_voxels(p::<u8>(voxels), u32_from_jint(size_x), u32_from_jint(size_y), u32_from_jint(size_z), voxel_size, v3(origin_x, origin_y, origin_z), VoxelColliderOptions { mode: voxel_mode(mode), dynamic_body: jb(dynamic_body), small_voxel_limit: u32_from_jint(small_voxel_limit), mesh_voxel_limit: u32_from_jint(mesh_voxel_limit) })) });
+jni!(long colliderBuilderCreateVoxelsAuto(long voxels, int size_x, int size_y, int size_z, double voxel_size, double origin_x, double origin_y, double origin_z, int dynamic_body) { to_jlong(vx::collider_builder_create_voxels_auto(p::<u8>(voxels), u32_from_jint(size_x), u32_from_jint(size_y), u32_from_jint(size_z), voxel_size, v3(origin_x, origin_y, origin_z), jb(dynamic_body))) });
 jni_e_c!(long colliderBuilderCreateVoxelBytes(env _env, class _class, byte_array voxels, int size_x, int size_y, int size_z, double voxel_size, double origin_x, double origin_y, double origin_z, int mode, int dynamic_body, int small_voxel_limit, int mesh_voxel_limit) {
     let Some(values) = jbytearray_to_array(&_env, voxels) else {
         return 0;
@@ -410,7 +410,11 @@ jni_e_c!(double_array colliderGetTranslation(env _env, class _class, long world,
 jni_e_c!(double_array colliderGetRotation(env _env, class _class, long world, long handle) { quat_to_j_double_array(_env, col::collider_get_rotation(cp::<WH>(world), handle as CRaw)) });
 jni!(void colliderGetTranslationOut(long world, long handle, long out_translation) { col::collider_get_translation_out(cp::<WH>(world), handle as CRaw, pm::<Vec3>(out_translation)); });
 jni!(void colliderGetRotationOut(long world, long handle, long out_rotation) { col::collider_get_rotation_out(cp::<WH>(world), handle as CRaw, pm::<Quat>(out_rotation)); });
+jni!(long colliderGetShapeSize(long world, long handle) { to_jint(col::collider_get_shape_count(cp::<WH>(world), handle as CRaw)) });
+
 jni!(boolean colliderSetPose(long world, long handle, double x, double y, double z, double qi, double qj, double qk, double qw) { col::collider_set_pose(m::<WH>(world), handle as CRaw, v3(x, y, z), qt(qi, qj, qk, qw)).0 as jbyte });
+jni!(boolean colliderSetTranslation(long world, long handle, double x, double y, double z) { col::collider_set_translation(m::<WH>(world), handle as CRaw, v3(x, y, z)).0 as jbyte });
+jni!(boolean colliderSetRotation(long world, long handle, double qi, double qj, double qk, double qw) { col::collider_set_rotation(m::<WH>(world), handle as CRaw, qt(qi, qj, qk, qw)).0 as jbyte });
 jni!(boolean colliderSetSensor(long world, long handle, int sensor) { col::collider_set_sensor(m::<WH>(world), handle as CRaw, jb(sensor)).0 as jbyte });
 jni!(boolean colliderSetFriction(long world, long handle, double friction) { col::collider_set_friction(m::<WH>(world), handle as CRaw, friction).0 as jbyte });
 jni!(boolean colliderSetRestitution(long world, long handle, double restitution) { col::collider_set_restitution(m::<WH>(world), handle as CRaw, restitution).0 as jbyte });
@@ -451,6 +455,7 @@ jni!(void rigidBodyGetRotationOut(long world, long body, long out_rotation) { rb
 jni!(boolean rigidBodySetPose(long world, long body, double x, double y, double z, double qi, double qj, double qk, double qw, int wake_up) { rb::rigid_body_set_pose(m::<WH>(world), body as RRaw, v3(x, y, z), qt(qi, qj, qk, qw), jb(wake_up)).0 as jbyte });
 jni!(boolean rigidBodySetTranslation(long world, long body, double x, double y, double z, int wake_up) { rb::rigid_body_set_translation(m::<WH>(world), body as RRaw, v3(x, y, z), jb(wake_up)).0 as jbyte });
 jni!(boolean rigidBodySetRotation(long world, long body, double qi, double qj, double qk, double qw, int wake_up) { rb::rigid_body_set_rotation(m::<WH>(world), body as RRaw, qt(qi, qj, qk, qw), jb(wake_up)).0 as jbyte });
+jni_e_c!(double_array rigidBodyGetForce(env _env, class _class, long world, long body) { vec3_to_j_double_array(_env, rb::rigid_body_get_force(cp::<WH>(world), body as RRaw)) });
 jni_e_c!(double_array rigidBodyGetLinvel(env _env, class _class, long world, long body) { vec3_to_j_double_array(_env, rb::rigid_body_get_linvel(cp::<WH>(world), body as RRaw)) });
 jni!(void rigidBodyGetLinvelOut(long world, long body, long out_linvel) { rb::rigid_body_get_linvel_out(cp::<WH>(world), body as RRaw, pm::<Vec3>(out_linvel)); });
 jni!(boolean rigidBodySetLinvel(long world, long body, double x, double y, double z, int wake_up) { rb::rigid_body_set_linvel(m::<WH>(world), body as RRaw, v3(x, y, z), jb(wake_up)).0 as jbyte });
@@ -458,7 +463,10 @@ jni_e_c!(double_array rigidBodyGetAngvel(env _env, class _class, long world, lon
 jni!(void rigidBodyGetAngvelOut(long world, long body, long out_angvel) { rb::rigid_body_get_angvel_out(cp::<WH>(world), body as RRaw, pm::<Vec3>(out_angvel)); });
 jni!(boolean rigidBodySetAngvel(long world, long body, double x, double y, double z, int wake_up) { rb::rigid_body_set_angvel(m::<WH>(world), body as RRaw, v3(x, y, z), jb(wake_up)).0 as jbyte });
 jni!(boolean rigidBodyAddForce(long world, long body, double x, double y, double z, int wake_up) { rb::rigid_body_add_force(m::<WH>(world), body as RRaw, v3(x, y, z), jb(wake_up)).0 as jbyte });
+jni!(boolean rigidBodyAddForceAtPoint(long world, long body, double x, double y, double z, double px, double py, double pz, int wake_up) { rb::rigid_body_add_force_at_point(m::<WH>(world), body as RRaw, v3(x, y, z), v3(px, py, pz), jb(wake_up)).0 as jbyte });
+jni!(boolean rigidBodyResetForce(long world, long body, int wake_up) { rb::rigid_body_reset_force(m::<WH>(world), body as RRaw, jb(wake_up)).0 as jbyte });
 jni!(boolean rigidBodyAddTorque(long world, long body, double x, double y, double z, int wake_up) { rb::rigid_body_add_torque(m::<WH>(world), body as RRaw, v3(x, y, z), jb(wake_up)).0 as jbyte });
+jni!(boolean rigidBodyResetTorque(long world, long body, int wake_up) { rb::rigid_body_reset_torque(m::<WH>(world), body as RRaw, jb(wake_up)).0 as jbyte });
 jni!(boolean rigidBodyApplyImpulse(long world, long body, double x, double y, double z, int wake_up) { rb::rigid_body_apply_impulse(m::<WH>(world), body as RRaw, v3(x, y, z), jb(wake_up)).0 as jbyte });
 jni!(boolean rigidBodyApplyTorqueImpulse(long world, long body, double x, double y, double z, int wake_up) { rb::rigid_body_apply_torque_impulse(m::<WH>(world), body as RRaw, v3(x, y, z), jb(wake_up)).0 as jbyte });
 jni!(boolean rigidBodyEnableCcd(long world, long body, int enabled) { rb::rigid_body_enable_ccd(m::<WH>(world), body as RRaw, jb(enabled)).0 as jbyte });

@@ -1,8 +1,9 @@
 use rapier3d::math::{Pose, Rotation, Vector};
-use rapier3d::prelude::{Array2, Collider, ColliderBuilder, SharedShape};
+use rapier3d::prelude::{Array2, Collider, ColliderBuilder, SharedShape, TypedShape};
 use smallvec::SmallVec;
 use std::slice;
-
+use rapier3d::na::Unit;
+use crate::convert::quat_to_rapier;
 use crate::rapier::ffi::{
     AabbDesc, Bool, ColliderBuilderHandle, ColliderHandleRaw, InteractionGroupsDesc, Obb, Quat,
     RigidBodyHandleRaw, ShapeDesc, Sphere, Vec3, WorldHandle, active_events_from_bits,
@@ -130,6 +131,17 @@ pub extern "C" fn collider_builder_create(
 
     Box::into_raw(Box::new(ColliderBuilderHandle {
         inner: default_builder(shape_desc),
+    }))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn collider_builder_create_halfspace(normal: Vec3) -> *mut ColliderBuilderHandle {
+    if !vec3_finite(normal) {
+        return std::ptr::null_mut();
+    }
+
+    Box::into_raw(Box::new(ColliderBuilderHandle {
+        inner: ColliderBuilder::halfspace(Unit::new_unchecked(vec3_to_rapier(normal).normalize())),
     }))
 }
 
@@ -762,6 +774,21 @@ pub extern "C" fn collider_get_translation(
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn collider_get_shape_count(
+    world: *const WorldHandle,
+    handle: ColliderHandleRaw,
+) -> usize {
+    let Some(world) = (unsafe { world.as_ref() }) else {
+        return 0;
+    };
+
+    match world.inner.colliders.get(unpack_collider_handle(handle)).unwrap().shape().as_typed_shape() {
+        TypedShape::Compound(compound) => compound.shapes().len(),
+        _ => 1,
+    }
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn collider_get_translation_out(
     world: *const WorldHandle,
     handle: ColliderHandleRaw,
@@ -826,6 +853,54 @@ pub extern "C" fn collider_set_pose(
     }
 
     collider.set_position(isometry_from_parts(translation, rotation));
+    Bool::TRUE
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn collider_set_translation(
+    world: *mut WorldHandle,
+    handle: ColliderHandleRaw,
+    translation: Vec3,
+) -> Bool {
+    let Some(world) = (unsafe { world.as_mut() }) else {
+        return Bool::FALSE;
+    };
+    let Some(collider) = world
+        .inner
+        .colliders
+        .get_mut(unpack_collider_handle(handle))
+    else {
+        return Bool::FALSE;
+    };
+    if !vec3_finite(translation) {
+        return Bool::FALSE;
+    }
+
+    collider.set_translation(vec3_to_rapier(translation));
+    Bool::TRUE
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn collider_set_rotation(
+    world: *mut WorldHandle,
+    handle: ColliderHandleRaw,
+    rotation: Quat,
+) -> Bool {
+    let Some(world) = (unsafe { world.as_mut() }) else {
+        return Bool::FALSE;
+    };
+    let Some(collider) = world
+        .inner
+        .colliders
+        .get_mut(unpack_collider_handle(handle))
+    else {
+        return Bool::FALSE;
+    };
+    if !quat_finite(rotation) {
+        return Bool::FALSE;
+    }
+
+    collider.set_rotation(quat_to_rapier(rotation));
     Bool::TRUE
 }
 
