@@ -468,4 +468,14 @@ public final class RigidBodyNative {
     public static native boolean crbTreeRemove(long tree, long id);
     public static native int crbTreeQueryAabbCount(long tree, double minX, double minY, double minZ, double maxX, double maxY, double maxZ);
     public static native int crbTreeQueryAabb(long tree, double minX, double minY, double minZ, double maxX, double maxY, double maxZ, long outIds, int capacity);
+
+    // =========================================================================
+    // Shared Arena — zero-JNI physics data access
+    // =========================================================================
+    public static native boolean worldCreateSharedArena(long world, int maxBodies, int maxColliders, int maxEvents, int maxCommands, long[] outAddrSize);
+    public static native void    worldDestroySharedArena(long world);
+    public static native long    worldGetSharedArenaAddress(long world);
+    public static native long    worldGetSharedArenaSize(long world);
+    public static native void    worldResetSharedArenaEvents(long world);
+    public static native java.nio.ByteBuffer worldGetArenaDirectByteBuffer(long world);
 }

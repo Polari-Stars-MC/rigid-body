@@ -5908,6 +5908,46 @@ uint32_t world_get_force_registry_count(const struct WorldHandle *world);
  */
 uint32_t world_get_force_registry_typed_count(const struct WorldHandle *world, uint32_t law_type);
 
+/**
+ * Create a shared-memory physics arena.
+ *
+ * Returns the arena pointer as a u64 (suitable for `MemorySegment.ofAddress` in Java).
+ * The arena persists for the lifetime of the world.
+ *
+ * `max_bodies` — max concurrent bodies to mirror
+ * `max_events` — max pending collision/contact events
+ * `max_commands` — max pending commands (force/set pose etc.)
+ * `out_address` — receives the arena base address
+ * `out_size` — receives the total arena size in bytes (for Java MemorySegment mapping)
+ */
+struct Bool world_create_shared_arena(struct WorldHandle *world,
+                                      uint32_t max_bodies,
+                                      uint32_t max_colliders,
+                                      uint32_t max_events,
+                                      uint32_t max_commands,
+                                      uint64_t *out_address,
+                                      uint64_t *out_size);
+
+/**
+ * Destroy the shared arena (if any).
+ */
+void world_destroy_shared_arena(struct WorldHandle *world);
+
+/**
+ * Get the arena address (returns 0 if no arena).
+ */
+uint64_t world_get_shared_arena_address(const struct WorldHandle *world);
+
+/**
+ * Get the arena size (returns 0 if no arena).
+ */
+uint64_t world_get_shared_arena_size(const struct WorldHandle *world);
+
+/**
+ * Reset the event ring (Java calls this after draining events).
+ */
+void world_reset_shared_arena_events(struct WorldHandle *world);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus

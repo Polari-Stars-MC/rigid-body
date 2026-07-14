@@ -32,6 +32,7 @@ pub(crate) struct PhysicsWorld {
     pub(crate) hooks: crate::rapier::events::CallbackPhysicsHooks,
     pub(crate) events: Arc<crate::rapier::events::CollectingEventHandler>,
     pub(crate) force_registry: ForceRegistry,
+    pub(crate) shared_arena: Option<Box<crate::rapier::shared_arena::SharedPhysicsArena>>,
 }
 
 impl PhysicsWorld {
@@ -59,6 +60,7 @@ impl PhysicsWorld {
             hooks: crate::rapier::events::CallbackPhysicsHooks::new(events.clone()),
             events,
             force_registry: ForceRegistry::new(),
+            shared_arena: None,
         }
     }
 }
@@ -168,6 +170,55 @@ pub extern "C" fn world_step(world: *mut WorldHandle, delta_seconds: f64) {
         &world.inner.hooks,
         &*world.inner.events,
     );
+
+    // 5. Flush shared arena (if enabled) — zero-JNI state for Java
+    if let Some(ref arena) = world.inner.shared_arena {
+        // Process any commands Java wrote before stepping
+        let commands = arena.drain_commands();
+        if !commands.is_empty() {
+            for (cmd_type, body_idx, a0, a1, a2) in commands {
+                // Find the body by index (sequential mapping)
+                let mut handle = None;
+                let mut idx = 0u32;
+                for (h, _) in world.inner.bodies.iter() {
+                    if idx == body_idx { handle = Some(h); break; }
+                    idx += 1;
+                }
+                if let Some(h) = handle {
+                    if let Some(body) = world.inner.bodies.get_mut(h) {
+                        match cmd_type {
+                            0 => body.add_force(
+                                rapier3d::prelude::Vector::new(a0, a1, a2), true),
+                            1 => body.add_torque(
+                                rapier3d::prelude::Vector::new(a0, a1, a2), true),
+                            4 => body.apply_impulse(
+                                rapier3d::prelude::Vector::new(a0, a1, a2), true),
+                            6 => body.wake_up(true),
+                            7 => body.sleep(),
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            // Re-run pipeline step with newly applied commands
+            world.inner.pipeline.step(
+                world.inner.gravity,
+                &world.inner.integration_parameters,
+                &mut world.inner.islands,
+                &mut world.inner.broad_phase,
+                &mut world.inner.narrow_phase,
+                &mut world.inner.bodies,
+                &mut world.inner.colliders,
+                &mut world.inner.impulse_joints,
+                &mut world.inner.multibody_joints,
+                &mut world.inner.ccd_solver,
+                &world.inner.hooks,
+                &*world.inner.events,
+            );
+        }
+        // Flush body state to arena after step
+        arena.flush_all_bodies(&world.inner.bodies);
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -716,5 +767,87 @@ mod tests {
         assert_eq!(&values[7..10], &[4.0, 5.0, 6.0]);
 
         world_destroy(world);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Shared Arena FFI — zero-JNI physics data access
+// ---------------------------------------------------------------------------
+
+/// Create a shared-memory physics arena.
+///
+/// Returns the arena pointer as a u64 (suitable for `MemorySegment.ofAddress` in Java).
+/// The arena persists for the lifetime of the world.
+///
+/// `max_bodies` — max concurrent bodies to mirror
+/// `max_events` — max pending collision/contact events
+/// `max_commands` — max pending commands (force/set pose etc.)
+/// `out_address` — receives the arena base address
+/// `out_size` — receives the total arena size in bytes (for Java MemorySegment mapping)
+#[unsafe(no_mangle)]
+pub extern "C" fn world_create_shared_arena(
+    world: *mut WorldHandle,
+    max_bodies: u32,
+    max_colliders: u32,
+    max_events: u32,
+    max_commands: u32,
+    out_address: *mut u64,
+    out_size: *mut u64,
+) -> Bool {
+    let Some(world) = (unsafe { world.as_mut() }) else {
+        set_error(ERR_NULL_POINTER, "world is null");
+        return Bool::FALSE;
+    };
+    if max_bodies == 0 || max_events == 0 || max_commands == 0 {
+        set_error(ERR_INVALID_ARGUMENT, "arena capacities must be >0");
+        return Bool::FALSE;
+    }
+
+    let arena = crate::rapier::shared_arena::SharedPhysicsArena::new(
+        max_bodies, max_colliders, max_events, max_commands,
+    );
+    let addr = arena.address();
+    let sz = arena.size() as u64;
+
+    world.inner.shared_arena = Some(Box::new(arena));
+
+    if let Some(p) = (unsafe { out_address.as_mut() }) { *p = addr; }
+    if let Some(p) = (unsafe { out_size.as_mut() }) { *p = sz; }
+    clear_error();
+    Bool::TRUE
+}
+
+/// Destroy the shared arena (if any).
+#[unsafe(no_mangle)]
+pub extern "C" fn world_destroy_shared_arena(world: *mut WorldHandle) {
+    if let Some(world) = (unsafe { world.as_mut() }) {
+        world.inner.shared_arena = None;
+    }
+}
+
+/// Get the arena address (returns 0 if no arena).
+#[unsafe(no_mangle)]
+pub extern "C" fn world_get_shared_arena_address(world: *const WorldHandle) -> u64 {
+    let Some(world) = (unsafe { world.as_ref() }) else {
+        return 0;
+    };
+    world.inner.shared_arena.as_ref().map_or(0, |a| a.address())
+}
+
+/// Get the arena size (returns 0 if no arena).
+#[unsafe(no_mangle)]
+pub extern "C" fn world_get_shared_arena_size(world: *const WorldHandle) -> u64 {
+    let Some(world) = (unsafe { world.as_ref() }) else {
+        return 0;
+    };
+    world.inner.shared_arena.as_ref().map_or(0, |a| a.size() as u64)
+}
+
+/// Reset the event ring (Java calls this after draining events).
+#[unsafe(no_mangle)]
+pub extern "C" fn world_reset_shared_arena_events(world: *mut WorldHandle) {
+    let Some(world) = (unsafe { world.as_mut() }) else { return };
+    if let Some(ref arena) = world.inner.shared_arena {
+        arena.reset_event_ring();
     }
 }

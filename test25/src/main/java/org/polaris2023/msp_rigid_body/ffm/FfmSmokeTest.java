@@ -29,6 +29,7 @@ public final class FfmSmokeTest {
             }
 
             assertSpaceFormulaWrappers(api);
+            assertSharedArenaZeroFfm(api);
 
             MemorySegment world = api.worldCreate(0.0, -9.81, 0.0);
             try {
@@ -464,6 +465,46 @@ public final class FfmSmokeTest {
                 throw new AssertionError("world_clear_events did not clear event queues");
             }
         } finally {
+            api.worldDestroy(world);
+        }
+    }
+
+    private static void assertSharedArenaZeroFfm(RigidBodyFfm api) {
+        MemorySegment world = api.worldCreate(0.0, -9.81, 0.0);
+        try {
+            MemorySegment outAddr = Arena.ofAuto().allocate(8);
+            MemorySegment outSize = Arena.ofAuto().allocate(8);
+            if (!api.worldCreateSharedArena(world, 16, 0, 256, 256, outAddr, outSize)) {
+                throw new AssertionError("worldCreateSharedArena failed");
+            }
+
+            long addr = outAddr.get(ValueLayout.JAVA_LONG, 0);
+            long sz = outSize.get(ValueLayout.JAVA_LONG, 0);
+            if (addr == 0 || sz == 0) {
+                throw new AssertionError("arena returned null address or zero size");
+            }
+
+            MemorySegment arenaSeg = MemorySegment.ofAddress(addr, sz, Arena.global());
+            SharedPhysicsArena arena = new SharedPhysicsArena(arenaSeg);
+            if (arena.getMaxBodies() < 1) throw new AssertionError("arena capacities invalid");
+
+            MemorySegment b = api.rigidBodyBuilderCreate(0);
+            api.rigidBodyBuilderSetTranslation(b, 10.0, 20.0, 30.0);
+            api.rigidBodyBuilderSetAdditionalMass(b, 5.0);
+            long body = api.rigidBodyBuilderBuild(b);
+            if (api.worldInsertRigidBody(world, body) == 0L)
+                throw new AssertionError("worldInsertRigidBody failed");
+
+            api.worldStep(world, 1.0 / 60.0);
+            int bc = arena.getBodyCount();
+            if (bc != 1) throw new AssertionError("arena bodyCount should be 1, got " + bc);
+            assertClose(10.0, arena.getBodyPX(0), "FFM arena posX");
+            assertClose(20.0, arena.getBodyPY(0), "FFM arena posY");
+
+            arena.cmdAddForce(0, 100.0, 0.0, 0.0);
+            api.worldStep(world, 1.0 / 60.0);
+        } finally {
+            api.worldDestroySharedArena(world);
             api.worldDestroy(world);
         }
     }

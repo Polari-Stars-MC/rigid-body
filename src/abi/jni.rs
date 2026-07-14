@@ -874,6 +874,40 @@ jni!(long bridgeVoxelColliderFromDirectBuffer(long world, long voxel_address, in
 });
 
 // =========================================================================
+// Shared Arena — zero-JNI physics state read/write
+// =========================================================================
+
+jni!(boolean worldCreateSharedArena(long world, int max_bodies, int max_colliders, int max_events, int max_commands, long out_address, long out_size) {
+    wo::world_create_shared_arena(m::<WH>(world), u32_from_jint(max_bodies), u32_from_jint(max_colliders), u32_from_jint(max_events), u32_from_jint(max_commands), pm::<u64>(out_address), pm::<u64>(out_size)).0 as jbyte
+});
+jni!(void worldDestroySharedArena(long world) { wo::world_destroy_shared_arena(m::<WH>(world)); });
+jni!(long worldGetSharedArenaAddress(long world) { wo::world_get_shared_arena_address(cp::<WH>(world)) as jlong });
+jni!(long worldGetSharedArenaSize(long world) { wo::world_get_shared_arena_size(cp::<WH>(world)) as jlong });
+/// Returns the arena wrapped as a Java DirectByteBuffer.
+///
+/// This uses `NewDirectByteBuffer` — a standard JNI API since Java 1.4.
+/// The returned ByteBuffer wraps the native arena memory directly, enabling
+/// zero-JNI reads/writes from pure `java.nio.ByteBuffer` / `java.nio.DoubleBuffer`.
+#[unsafe(export_name = "Java_org_polaris2023_mps_rapier_RapierNative_worldGetArenaDirectByteBuffer")]
+#[allow(non_snake_case)]
+pub extern "system" fn worldGetArenaDirectByteBuffer(env: JNIEnv, _class: jclass, world: jlong) -> ljni::sys::jobject {
+    catch_unwind(AssertUnwindSafe(|| {
+        let world = world as *mut WH;
+        let addr = wo::world_get_shared_arena_address(world);
+        let size = wo::world_get_shared_arena_size(world);
+        if addr == 0 || size == 0 {
+            return std::ptr::null_mut();
+        }
+        let env_raw: *mut JNIEnv = &raw const env as *mut _;
+        let env = unsafe { &mut *env_raw };
+        unsafe { env.new_direct_byte_buffer(addr as _, size as _) }
+            .map(|bb| bb.as_raw())
+            .unwrap_or(std::ptr::null_mut())
+    }))
+    .unwrap_or(std::ptr::null_mut())
+}
+
+// =========================================================================
 // Space flight — apply-to-body functions
 //
 // NOTE: These accept `out_accel` as a native-memory output pointer (long).

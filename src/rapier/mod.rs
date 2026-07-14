@@ -36,6 +36,7 @@ pub(crate) mod query;
 pub(crate) mod relativity;
 pub(crate) mod rigid_body;
 pub(crate) mod rtree;
+pub(crate) mod shared_arena;
 pub(crate) mod softbody;
 pub(crate) mod spaceflight;
 pub(crate) mod superfluidity;
