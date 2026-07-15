@@ -716,14 +716,14 @@ impl ForceLaw for CelestialGravityForceLaw {
             };
 
             let force = crate::rapier::ffi::vec3_to_rapier(accel);
-            // Get mass from body and compute actual force
-            if let Some(body) = facade.bodies.get(*handle) {
+            // P2 fix: single get_mut() instead of get() + get_mut() double lookup
+            if let Some(body) = facade.bodies.get_mut(*handle) {
                 let mass = body.mass();
                 if mass > 0.0 {
                     let force = force * mass;
                     ForceFacade::push_force(
                         facade.frame_log,
-                        facade.bodies.get_mut(*handle).unwrap(),
+                        body,
                         *handle,
                         force,
                         self.law_type(),

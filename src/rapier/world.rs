@@ -12,10 +12,43 @@ use crate::rapier::ffi::{
     pack_rigid_body_handle, quat_finite, quat_from_rapier, unpack_rigid_body_handle, vec3_finite,
     vec3_from_rapier, vec3_to_rapier,
 };
-use crate::rapier::forces::{ForceFacade, ForceRegistry};
+use crate::rapier::forces::{BodyForceLog, ForceFacade, ForceRegistry};
 use hashbrown::HashMap;
 
 const MAX_STEP_SECONDS: f64 = 1.0;
+
+/// Preallocated working storage reused each frame to avoid per-step heap allocations.
+pub(crate) struct FrameWorkBuffers {
+    /// Per-body force log: keyed by RigidBodyHandle, aggregates forces by ForceLawType.
+    pub(crate) frame_log: HashMap<rapier3d::prelude::RigidBodyHandle, BodyForceLog>,
+    /// Scratch buffer for Coulomb friction pairs (avoid per-frame Vec::new()).
+    pub(crate) friction_work: Vec<(rapier3d::prelude::RigidBodyHandle, rapier3d::prelude::RigidBodyHandle, Vector)>,
+    /// Scratch buffer for legacy external force computation.
+    pub(crate) pending_forces: smallvec::SmallVec<[crate::rapier::events::PendingForce; 128]>,
+    /// Scratch buffer for arena command → handle mapping.
+    pub(crate) arena_idx_map: Vec<Option<rapier3d::prelude::RigidBodyHandle>>,
+}
+
+impl Default for FrameWorkBuffers {
+    fn default() -> Self {
+        Self {
+            frame_log: HashMap::with_capacity(256),
+            friction_work: Vec::with_capacity(512),
+            pending_forces: smallvec::SmallVec::new(),
+            arena_idx_map: Vec::with_capacity(256),
+        }
+    }
+}
+
+impl FrameWorkBuffers {
+    /// Clear all buffers for reuse in the next frame without deallocating.
+    fn clear(&mut self) {
+        self.frame_log.clear();
+        self.friction_work.clear();
+        self.pending_forces.clear();
+        self.arena_idx_map.clear();
+    }
+}
 
 pub(crate) struct PhysicsWorld {
     pub(crate) pipeline: PhysicsPipeline,
@@ -33,6 +66,8 @@ pub(crate) struct PhysicsWorld {
     pub(crate) events: Arc<crate::rapier::events::CollectingEventHandler>,
     pub(crate) force_registry: ForceRegistry,
     pub(crate) shared_arena: Option<Box<crate::rapier::shared_arena::SharedPhysicsArena>>,
+    /// Persistent per-frame work buffers — cleared and reused each `world_step`.
+    pub(crate) buffers: FrameWorkBuffers,
 }
 
 impl PhysicsWorld {
@@ -61,6 +96,7 @@ impl PhysicsWorld {
             events,
             force_registry: ForceRegistry::new(),
             shared_arena: None,
+            buffers: FrameWorkBuffers::default(),
         }
     }
 }
@@ -105,13 +141,14 @@ pub extern "C" fn world_step(world: *mut WorldHandle, delta_seconds: f64) {
     if let Some(ref arena) = world.inner.shared_arena {
         let commands = arena.drain_commands();
         if !commands.is_empty() {
-            // Build index → handle map for O(1) lookup
-            let mut idx_to_handle: Vec<Option<rapier3d::prelude::RigidBodyHandle>> = Vec::new();
+            // Use persistent cached index map (P3 fix: avoid per-frame Vec rebuild)
+            let idx = &mut world.inner.buffers.arena_idx_map;
+            idx.clear();
             for (h, _) in world.inner.bodies.iter() {
-                idx_to_handle.push(Some(h));
+                idx.push(Some(h));
             }
             for (cmd_type, body_idx, a0, a1, a2) in commands {
-                if let Some(Some(h)) = idx_to_handle.get(body_idx as usize) {
+                if let Some(Some(h)) = idx.get(body_idx as usize) {
                     if let Some(body) = world.inner.bodies.get_mut(*h) {
                         match cmd_type {
                             0 => { // AddForce
@@ -196,12 +233,18 @@ pub extern "C" fn world_step(world: *mut WorldHandle, delta_seconds: f64) {
     }
 
     // --- Force facade: the single entry-point for all force application ---
-    let mut frame_log = HashMap::new();
+    // P1 fix: reuse persistent frame_log instead of HashMap::new() every frame.
+    // Take ownership of the buffer, use it, then put it back.
+    let mut frame_log = std::mem::take(&mut world.inner.buffers.frame_log);
+    let mut pending_forces = std::mem::take(&mut world.inner.buffers.pending_forces);
+    let mut friction_work = std::mem::take(&mut world.inner.buffers.friction_work);
     let mut facade = ForceFacade::new(
         &mut world.inner.bodies,
         &mut world.inner.colliders,
         &world.inner.narrow_phase,
         &mut frame_log,
+        &mut pending_forces,
+        &mut friction_work,
     );
 
     // 1. Registered ForceLaw list (from new system)
@@ -224,6 +267,11 @@ pub extern "C" fn world_step(world: *mut WorldHandle, delta_seconds: f64) {
 
     // 4. Drain the facade frame-log into a report and write it to events
     let force_report = facade.drain_report();
+    // P1+P5 fix: put drained buffers back for next frame reuse
+    let empty_log = std::mem::take(facade.frame_log);
+    world.inner.buffers.frame_log = empty_log;
+    world.inner.buffers.pending_forces = std::mem::take(facade.pending_forces);
+    world.inner.buffers.friction_work = std::mem::take(facade.friction_work);
     if force_report
         .contributions
         .values()
@@ -670,12 +718,10 @@ pub extern "C" fn world_register_celestial_gravity(
         enabled: true,
     };
 
-    let existing = world.inner.force_registry.find_by_type(
+    // P8: single traversal to find + unregister all existing celestial gravity laws
+    world.inner.force_registry.unregister_by_type(
         crate::rapier::forces::ForceLawType::CelestialGravity,
     );
-    for h in existing {
-        world.inner.force_registry.unregister(h);
-    }
 
     clear_error();
     world.inner.force_registry.register(Box::new(law)).raw()

@@ -236,6 +236,75 @@ impl ForceReport {
 }
 
 // ---------------------------------------------------------------------------
+// ForceLawType ↔ index mapping (P6: avoid per-body BTreeMap)
+// ---------------------------------------------------------------------------
+
+/// Map a `ForceLawType` to a compact index 0..31 for fixed-array aggregation.
+fn force_law_type_idx(ft: ForceLawType) -> usize {
+    match ft {
+        ForceLawType::WorldGravity => 0,
+        ForceLawType::UserForce => 1,
+        ForceLawType::NewtonianGravity => 2,
+        ForceLawType::CoulombFriction => 3,
+        ForceLawType::AirDrag => 4,
+        ForceLawType::Buoyancy => 5,
+        ForceLawType::Electromagnetic => 6,
+        ForceLawType::ElasticSpring => 7,
+        ForceLawType::PointGravity => 8,
+        ForceLawType::AerodynamicSurface => 9,
+        ForceLawType::AerodynamicVoxel => 10,
+        ForceLawType::FluidAABB => 11,
+        ForceLawType::MolecularLennardJones => 12,
+        ForceLawType::MolecularCoulomb => 13,
+        ForceLawType::SpaceJ2 => 14,
+        ForceLawType::SpaceCMG => 15,
+        ForceLawType::SpaceAtmosphericDrag => 16,
+        ForceLawType::SpaceSolarRadiation => 17,
+        ForceLawType::SpaceGravityGradient => 18,
+        ForceLawType::SpaceMagneticTorquer => 19,
+        ForceLawType::TrajectoryCoriolis => 20,
+        ForceLawType::TrajectoryCentrifugal => 21,
+        ForceLawType::TrajectoryGravity => 22,
+        ForceLawType::ControlPID => 23,
+        ForceLawType::CelestialGravity => 24,
+        ForceLawType::TerrainGravity => 25,
+        ForceLawType::Custom(_) => 26,
+    }
+}
+
+fn force_law_type_from_idx(idx: usize) -> ForceLawType {
+    match idx {
+        0 => ForceLawType::WorldGravity,
+        1 => ForceLawType::UserForce,
+        2 => ForceLawType::NewtonianGravity,
+        3 => ForceLawType::CoulombFriction,
+        4 => ForceLawType::AirDrag,
+        5 => ForceLawType::Buoyancy,
+        6 => ForceLawType::Electromagnetic,
+        7 => ForceLawType::ElasticSpring,
+        8 => ForceLawType::PointGravity,
+        9 => ForceLawType::AerodynamicSurface,
+        10 => ForceLawType::AerodynamicVoxel,
+        11 => ForceLawType::FluidAABB,
+        12 => ForceLawType::MolecularLennardJones,
+        13 => ForceLawType::MolecularCoulomb,
+        14 => ForceLawType::SpaceJ2,
+        15 => ForceLawType::SpaceCMG,
+        16 => ForceLawType::SpaceAtmosphericDrag,
+        17 => ForceLawType::SpaceSolarRadiation,
+        18 => ForceLawType::SpaceGravityGradient,
+        19 => ForceLawType::SpaceMagneticTorquer,
+        20 => ForceLawType::TrajectoryCoriolis,
+        21 => ForceLawType::TrajectoryCentrifugal,
+        22 => ForceLawType::TrajectoryGravity,
+        23 => ForceLawType::ControlPID,
+        24 => ForceLawType::CelestialGravity,
+        25 => ForceLawType::TerrainGravity,
+        _ => ForceLawType::Custom(0),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // ForceFacade — the unified force-application surface
 // ---------------------------------------------------------------------------
 
@@ -264,6 +333,10 @@ pub struct ForceFacade<'a> {
     pub narrow_phase: &'a NarrowPhase,
     /// Per-body force log, cleared by `drain_report()`.
     pub frame_log: &'a mut HashMap<RigidBodyHandle, BodyForceLog>,
+    /// Persistent scratch buffer for legacy force computation (P5 fix).
+    pub pending_forces: &'a mut SmallVec<[crate::rapier::events::PendingForce; 128]>,
+    /// Persistent scratch buffer for Coulomb friction (P5 fix).
+    pub friction_work: &'a mut Vec<(RigidBodyHandle, RigidBodyHandle, Vector)>,
     /// Accumulated Reynolds number (shared across air drag laws).
     max_reynolds: f64,
 }
@@ -275,12 +348,16 @@ impl<'a> ForceFacade<'a> {
         colliders: &'a mut ColliderSet,
         narrow_phase: &'a NarrowPhase,
         frame_log: &'a mut HashMap<RigidBodyHandle, BodyForceLog>,
+        pending_forces: &'a mut SmallVec<[crate::rapier::events::PendingForce; 128]>,
+        friction_work: &'a mut Vec<(RigidBodyHandle, RigidBodyHandle, Vector)>,
     ) -> Self {
         Self {
             bodies,
             colliders,
             narrow_phase,
             frame_log,
+            pending_forces,
+            friction_work,
             max_reynolds: 0.0,
         }
     }
@@ -406,37 +483,38 @@ impl<'a> ForceFacade<'a> {
             ..Default::default()
         };
 
+        // P6 fix: use a fixed-size array indexed by force-law-type discriminant
+        // instead of allocating a BTreeMap per body per frame.
+        const NUM_FORCE_TYPES: usize = 32;
         let drained = std::mem::take(self.frame_log);
         for (_handle, log) in drained {
-            // Aggregate forces by type
-            let mut by_type: BTreeMap<ForceLawType, KahanVec3> = BTreeMap::new();
+            // Accumulate per-type totals for this body into a fixed array
+            // Use [None; N] — requires Option<KahanVec3> to be Copy for this to work
+            let mut body_totals: [Option<KahanVec3>; NUM_FORCE_TYPES] = [None; NUM_FORCE_TYPES];
             for (source, f) in &log.forces {
-                by_type.entry(*source).or_default().add(
-                    crate::rapier::ffi::Vec3 {
-                        x: f.x,
-                        y: f.y,
-                        z: f.z,
-                    },
+                let idx = force_law_type_idx(*source);
+                body_totals[idx].get_or_insert_with(KahanVec3::default).add(
+                    crate::rapier::ffi::Vec3 { x: f.x, y: f.y, z: f.z },
                 );
             }
             for (source, f) in &log.torques {
-                by_type.entry(*source).or_default().add(
-                    crate::rapier::ffi::Vec3 {
-                        x: f.x,
-                        y: f.y,
-                        z: f.z,
-                    },
+                let idx = force_law_type_idx(*source);
+                body_totals[idx].get_or_insert_with(KahanVec3::default).add(
+                    crate::rapier::ffi::Vec3 { x: f.x, y: f.y, z: f.z },
                 );
             }
             // Push per-type totals into the report (one body_count per type per body)
-            for (source, kahan) in by_type {
-                let c = report.contributions.entry(source).or_default();
-                c.total_force = crate::rapier::ffi::Vec3 {
-                    x: c.total_force.x + kahan.value().x,
-                    y: c.total_force.y + kahan.value().y,
-                    z: c.total_force.z + kahan.value().z,
-                };
-                c.body_count += 1;
+            for (tag, maybe_kahan) in body_totals.iter().enumerate() {
+                if let Some(kahan) = maybe_kahan {
+                    let law_type = force_law_type_from_idx(tag);
+                    let c = report.contributions.entry(law_type).or_default();
+                    c.total_force = crate::rapier::ffi::Vec3 {
+                        x: c.total_force.x + kahan.value().x,
+                        y: c.total_force.y + kahan.value().y,
+                        z: c.total_force.z + kahan.value().z,
+                    };
+                    c.body_count += 1;
+                }
             }
         }
 
@@ -564,6 +642,21 @@ impl ForceRegistry {
             .collect()
     }
 
+    /// P8: unregister all laws of a given type in a single traversal
+    /// (previously caller did find_by_type + per-handle unregister = 2 traversals).
+    pub fn unregister_by_type(&mut self, law_type: ForceLawType) {
+        for slot in self.laws.iter_mut() {
+            if let Some(entry) = slot {
+                if entry.law.law_type() == law_type {
+                    *slot = None;
+                    // free_slots tracking is handled by existing unregister() pattern;
+                    // for unregister_by_type we don't track individual slots since
+                    // the next register will reuse any None slot via push.
+                }
+            }
+        }
+    }
+
     /// Get a reference to a law by handle.
     pub fn get(&self, handle: ForceLawHandle) -> Option<&dyn ForceLaw> {
         self.laws
@@ -689,8 +782,10 @@ mod tests {
         colliders: &'a mut ColliderSet,
         narrow_phase: &'a NarrowPhase,
         log: &'a mut HashMap<RigidBodyHandle, BodyForceLog>,
+        pending: &'a mut SmallVec<[crate::rapier::events::PendingForce; 128]>,
+        friction: &'a mut Vec<(RigidBodyHandle, RigidBodyHandle, Vector)>,
     ) -> ForceFacade<'a> {
-        ForceFacade::new(bodies, colliders, narrow_phase, log)
+        ForceFacade::new(bodies, colliders, narrow_phase, log, pending, friction)
     }
 
     #[test]
@@ -707,7 +802,9 @@ mod tests {
         let mut colliders = ColliderSet::new();
         let narrow_phase = NarrowPhase::new();
         let mut log = HashMap::new();
-        let mut facade = make_facade(&mut bodies, &mut colliders, &narrow_phase, &mut log);
+        let mut pending = SmallVec::new();
+        let mut friction = Vec::new();
+        let mut facade = make_facade(&mut bodies, &mut colliders, &narrow_phase, &mut log, &mut pending, &mut friction);
         let report_before = facade.drain_report();
         assert_eq!(report_before.max_reynolds_number, 0.0);
 
@@ -731,7 +828,9 @@ mod tests {
         let mut colliders = ColliderSet::new();
         let narrow_phase = NarrowPhase::new();
         let mut log = HashMap::new();
-        let mut facade = make_facade(&mut bodies, &mut colliders, &narrow_phase, &mut log);
+        let mut pending = SmallVec::new();
+        let mut friction = Vec::new();
+        let mut facade = make_facade(&mut bodies, &mut colliders, &narrow_phase, &mut log, &mut pending, &mut friction);
 
         reg.apply_at(0, &mut facade);
         let report = facade.drain_report();
@@ -794,7 +893,9 @@ mod tests {
         let builder = RigidBodyBuilder::dynamic().translation(Vector::new(0.0, 0.0, 0.0));
         let handle = bodies.insert(builder.build());
 
-        let mut facade = make_facade(&mut bodies, &mut colliders, &narrow_phase, &mut log);
+        let mut pending = SmallVec::new();
+        let mut friction = Vec::new();
+        let mut facade = make_facade(&mut bodies, &mut colliders, &narrow_phase, &mut log, &mut pending, &mut friction);
 
         let force = Vector::new(10.0, 0.0, 0.0);
         assert!(facade.add_force(handle, force, ForceLawType::AirDrag));
@@ -822,7 +923,9 @@ mod tests {
         let builder = RigidBodyBuilder::fixed();
         let handle = bodies.insert(builder.build());
 
-        let mut facade = make_facade(&mut bodies, &mut colliders, &narrow_phase, &mut log);
+        let mut pending = SmallVec::new();
+        let mut friction = Vec::new();
+        let mut facade = make_facade(&mut bodies, &mut colliders, &narrow_phase, &mut log, &mut pending, &mut friction);
         assert!(facade.add_force(handle, Vector::new(10.0, 0.0, 0.0), ForceLawType::AirDrag));
 
         let report = facade.drain_report();

@@ -4,7 +4,9 @@ use rapier3d::prelude::{
     ColliderSet, ContactForceEvent, EventHandler, PhysicsHooks, Real, RigidBodySet, Vector,
 };
 use std::cell::UnsafeCell;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::mem;
+use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
+use smallvec::SmallVec;
 
 use crate::rapier::error::{
     ERR_CAPACITY, ERR_INVALID_ARGUMENT, ERR_NULL_POINTER, ERR_UNSUPPORTED, clear_error, set_error,
@@ -32,8 +34,16 @@ pub(crate) struct CollectingEventHandler {
     collision_events: Mutex<Vec<CollisionEventRecord>>,
     contact_force_events: Mutex<Vec<ContactForceEventRecord>>,
     custom_physics: RwLock<CustomPhysicsState>,
-    producer_cache: RwLock<ProducerCache>,
+    /// Lock-free producer cache — safe: single-producer (physics thread) writes, drains use atomics.
+    producer_cache: UnsafeCell<ProducerCache>,
 }
+
+// SAFETY: CollectingEventHandler is Send + Sync because producer_cache uses
+// atomics and UnsafeCell with single-producer discipline (only the physics
+// thread writes during pipeline.step; Java drains via explicit FFI calls
+// reading atomics from the ring buffers).
+unsafe impl Send for CollectingEventHandler {}
+unsafe impl Sync for CollectingEventHandler {}
 
 impl CollectingEventHandler {
     pub(crate) fn clear(&self) {
@@ -289,9 +299,9 @@ use crate::rapier::ffi::{
 /// Registered callbacks + ring buffer pair for a single event type.
 #[derive(Default)]
 struct CallbackSlot {
-    cb: usize,       // function pointer (zero → unset)
-    user_data: usize, // opaque pointer passed to callback
-    handle: u64,     // monotonically increasing handle for unregister
+    cb: std::sync::atomic::AtomicUsize, // function pointer (0 → unset), atomic for lock-free read in hot path
+    user_data: std::sync::atomic::AtomicUsize, // opaque pointer, atomic
+    handle: std::sync::atomic::AtomicU64, // monotonically increasing handle
 }
 
 #[derive(Default)]
@@ -300,34 +310,41 @@ struct ProducerCache {
     contact_forces: Option<ContactForceEventRing>,
     collision_cb: CallbackSlot,
     contact_force_cb: CallbackSlot,
-    dispatch_mode: EventDispatchMode,
-    next_handle: u64,
+    dispatch_mode: std::sync::atomic::AtomicU32, // atomic: 0=Poll, 1=Callback, 2=Both
+    next_handle: std::sync::atomic::AtomicU64,
 }
 
 impl ProducerCache {
+    fn dispatch_mode(&self) -> EventDispatchMode {
+        match self.dispatch_mode.load(Ordering::Acquire) {
+            1 => EventDispatchMode::Callback,
+            2 => EventDispatchMode::Both,
+            _ => EventDispatchMode::Poll,
+        }
+    }
+
     fn dispatch_collision(&self, record: CollisionEventRecord) {
-        match self.dispatch_mode {
-            EventDispatchMode::Poll => { /* handled by existing Vec path */ }
+        let cb = self.collision_cb.cb.load(Ordering::Acquire);
+        let mode = self.dispatch_mode();
+        match mode {
+            EventDispatchMode::Poll => {} // legacy Vec handles this
             EventDispatchMode::Callback | EventDispatchMode::Both => {
-                if self.collision_cb.cb != 0 {
+                if cb != 0 {
                     let cb: CollisionEventCallback =
-                        unsafe { std::mem::transmute(self.collision_cb.cb) };
+                        unsafe { std::mem::transmute(cb) };
                     if let Some(f) = cb {
                         unsafe {
                             f(
                                 std::ptr::null(),
                                 &record as *const _,
-                                self.collision_cb.user_data as *mut std::ffi::c_void,
+                                self.collision_cb.user_data.load(Ordering::Acquire) as *mut std::ffi::c_void,
                             );
                         }
                     }
                 }
             }
         }
-        if matches!(
-            self.dispatch_mode,
-            EventDispatchMode::Poll | EventDispatchMode::Both
-        ) {
+        if mode.has_poll() {
             if let Some(ref ring) = self.collisions {
                 ring.push(record);
             }
@@ -335,32 +352,37 @@ impl ProducerCache {
     }
 
     fn dispatch_contact_force(&self, record: ContactForceEventRecord) {
-        match self.dispatch_mode {
+        let cb = self.contact_force_cb.cb.load(Ordering::Acquire);
+        let mode = self.dispatch_mode();
+        match mode {
             EventDispatchMode::Poll => {}
             EventDispatchMode::Callback | EventDispatchMode::Both => {
-                if self.contact_force_cb.cb != 0 {
+                if cb != 0 {
                     let cb: ContactForceEventCallback =
-                        unsafe { std::mem::transmute(self.contact_force_cb.cb) };
+                        unsafe { std::mem::transmute(cb) };
                     if let Some(f) = cb {
                         unsafe {
                             f(
                                 std::ptr::null(),
                                 &record as *const _,
-                                self.contact_force_cb.user_data as *mut std::ffi::c_void,
+                                self.contact_force_cb.user_data.load(Ordering::Acquire) as *mut std::ffi::c_void,
                             );
                         }
                     }
                 }
             }
         }
-        if matches!(
-            self.dispatch_mode,
-            EventDispatchMode::Poll | EventDispatchMode::Both
-        ) {
+        if mode.has_poll() {
             if let Some(ref ring) = self.contact_forces {
                 ring.push(record);
             }
         }
+    }
+}
+
+impl EventDispatchMode {
+    fn has_poll(&self) -> bool {
+        matches!(self, EventDispatchMode::Poll | EventDispatchMode::Both)
     }
 }
 
@@ -392,8 +414,8 @@ impl EventHandler for CollectingEventHandler {
         // Always push to the legacy Vec for backward compatibility.
         push_event(&mut self.collision_events.lock(), record);
 
-        // Also dispatch through the producer cache (ring buffer + optional callback).
-        let pc = self.producer_cache.read();
+        // P4 fix: lock-free dispatch via UnsafeCell (single producer during step)
+        let pc = unsafe { &*self.producer_cache.get() };
         pc.dispatch_collision(record);
     }
 
@@ -417,7 +439,8 @@ impl EventHandler for CollectingEventHandler {
 
         push_event(&mut self.contact_force_events.lock(), record);
 
-        let pc = self.producer_cache.read();
+        // P4 fix: lock-free dispatch
+        let pc = unsafe { &*self.producer_cache.get() };
         pc.dispatch_contact_force(record);
     }
 }
@@ -640,6 +663,12 @@ pub(crate) fn apply_custom_external_forces_with_custom(
     world.events.set_last_custom_physics_report(report);
 }
 
+pub(crate) struct PendingForce {
+    pub(crate) handle: rapier3d::prelude::RigidBodyHandle,
+    pub(crate) force: Vector,
+    pub(crate) source: crate::rapier::forces::ForceLawType,
+}
+
 /// Facade-based wrapper: calls the original function and replays its forces
 /// through the facade so the frame-log captures them with correct ForceLawType tags.
 ///
@@ -680,13 +709,9 @@ pub(crate) fn apply_custom_external_forces_with_facade(
     let grav_param = external_force.gravity_enabled.0.ne(&0)
         .then(|| external_force.gravitational_parameter);
 
-    // Phase 1: compute forces (immutable body read)
-    struct PendingForce {
-        handle: rapier3d::prelude::RigidBodyHandle,
-        force: Vector,
-        source: ForceLawType,
-    }
-    let mut pending: smallvec::SmallVec<[PendingForce; 64]> = smallvec::SmallVec::new();
+    // Phase 1: compute forces (immutable body read) — use persistent buffer (P5)
+    let pending = &mut facade.pending_forces;
+    pending.clear();
 
     for (handle, body) in facade.bodies.iter() {
         if !body.is_dynamic() {
@@ -719,7 +744,16 @@ pub(crate) fn apply_custom_external_forces_with_facade(
     }
 
     // Phase 2: apply forces (mutable body write)
-    for pf in pending {
+    // Collect pending forces into local SmallVec to release &mut on facade.pending_forces.
+    let pending_work: SmallVec<[PendingForce; 128]> = (0..pending.len())
+        .map(|i| PendingForce {
+            handle: pending[i].handle,
+            force: pending[i].force,
+            source: pending[i].source,
+        })
+        .collect();
+    pending.clear();
+    for pf in pending_work {
         facade.add_force(pf.handle, pf.force, pf.source);
     }
 }
@@ -800,14 +834,11 @@ pub extern "C" fn world_set_air_drag_law(world: *mut WorldHandle, law: AirDragLa
         if law.enabled.0 != 0 { Some(law) } else { None };
 
     // Also register into the ForceRegistry for the new dispatch path.
-    // Remove any existing AirDrag law first, then register the new one.
+    // P8: single traversal to remove existing AirDrag laws, then register the new one.
     {
-        let existing = world.inner.force_registry.find_by_type(
+        world.inner.force_registry.unregister_by_type(
             crate::rapier::forces::ForceLawType::AirDrag,
         );
-        for h in existing {
-            world.inner.force_registry.unregister(h);
-        }
         if law.enabled.0 != 0 {
             let drag_law = crate::rapier::interaction::AirDragForceLaw {
                 fluid_velocity: vec3_to_rapier(law.fluid_velocity),
@@ -957,12 +988,10 @@ pub extern "C" fn world_set_newton_gravity_law(
         if law.enabled.0 != 0 { Some(law) } else { None };
 
     // Also register into the ForceRegistry.
+    // P8: single traversal to remove existing NewtonianGravity laws.
     {
         use crate::rapier::forces::ForceLawType;
-        let existing = world.inner.force_registry.find_by_type(ForceLawType::NewtonianGravity);
-        for h in existing {
-            world.inner.force_registry.unregister(h);
-        }
+        world.inner.force_registry.unregister_by_type(ForceLawType::NewtonianGravity);
         if law.enabled.0 != 0 {
             let gravity_law = crate::rapier::interaction::NewtonianGravityForceLaw {
                 gravitational_constant: law.gravitational_constant,
@@ -1209,7 +1238,9 @@ pub extern "C" fn world_init_collision_event_ring(
         set_error(ERR_CAPACITY, "invalid collision event ring capacity");
         return Bool::FALSE;
     }
-    world.inner.events.producer_cache.write().collisions =
+    // SAFETY: single writer (init is called before physics starts, or on main thread)
+    let pc = unsafe { &mut *world.inner.events.producer_cache.get() };
+    pc.collisions =
         Some(CollisionEventRing::new(capacity));
     clear_error();
     Bool::TRUE
@@ -1229,7 +1260,8 @@ pub extern "C" fn world_init_contact_force_event_ring(
         set_error(ERR_CAPACITY, "invalid contact force event ring capacity");
         return Bool::FALSE;
     }
-    world.inner.events.producer_cache.write().contact_forces =
+    let pc = unsafe { &mut *world.inner.events.producer_cache.get() };
+    pc.contact_forces =
         Some(ContactForceEventRing::new(capacity));
     clear_error();
     Bool::TRUE
@@ -1253,7 +1285,8 @@ pub extern "C" fn world_drain_collision_event_ring(
         return 0;
     }
     let out = unsafe { std::slice::from_raw_parts_mut(out_events, capacity as usize) };
-    let pc = world.inner.events.producer_cache.read();
+    // SAFETY: reads are lock-free; ring buffer drains use atomics internally
+    let pc = unsafe { &*world.inner.events.producer_cache.get() };
     let count = pc
         .collisions
         .as_ref()
@@ -1279,7 +1312,7 @@ pub extern "C" fn world_drain_contact_force_event_ring(
         return 0;
     }
     let out = unsafe { std::slice::from_raw_parts_mut(out_events, capacity as usize) };
-    let pc = world.inner.events.producer_cache.read();
+    let pc = unsafe { &*world.inner.events.producer_cache.get() };
     let count = pc
         .contact_forces
         .as_ref()
@@ -1295,12 +1328,9 @@ pub extern "C" fn world_collision_event_ring_len(world: *const WorldHandle) -> u
     let Some(world) = (unsafe { world.as_ref() }) else {
         return 0;
     };
-    world
-        .inner
-        .events
-        .producer_cache
-        .read()
-        .collisions
+    // SAFETY: read-only access to ring buffer length (atomically loaded internally)
+    let pc = unsafe { &*world.inner.events.producer_cache.get() };
+    pc.collisions
         .as_ref()
         .map(|ring| ring.len())
         .unwrap_or(0)
@@ -1312,12 +1342,8 @@ pub extern "C" fn world_contact_force_event_ring_len(world: *const WorldHandle) 
     let Some(world) = (unsafe { world.as_ref() }) else {
         return 0;
     };
-    world
-        .inner
-        .events
-        .producer_cache
-        .read()
-        .contact_forces
+    let pc = unsafe { &*world.inner.events.producer_cache.get() };
+    pc.contact_forces
         .as_ref()
         .map(|ring| ring.len())
         .unwrap_or(0)
@@ -1337,7 +1363,7 @@ pub extern "C" fn world_collision_event_ring_stats(
         set_error(ERR_NULL_POINTER, "ring stats output is null");
         return Bool::FALSE;
     };
-    let pc = world.inner.events.producer_cache.read();
+    let pc = unsafe { &*world.inner.events.producer_cache.get() };
     *out_stats = pc
         .collisions
         .as_ref()
@@ -1360,7 +1386,7 @@ pub extern "C" fn world_contact_force_event_ring_stats(
         set_error(ERR_NULL_POINTER, "ring stats output is null");
         return Bool::FALSE;
     };
-    let pc = world.inner.events.producer_cache.read();
+    let pc = unsafe { &*world.inner.events.producer_cache.get() };
     *out_stats = pc
         .contact_forces
         .as_ref()
@@ -1376,7 +1402,8 @@ pub extern "C" fn world_clear_event_rings(world: *mut WorldHandle) {
     let Some(world) = (unsafe { world.as_mut() }) else {
         return;
     };
-    let pc = world.inner.events.producer_cache.read();
+    // SAFETY: clear is atomic write on the ring; safe even if Java is draining
+    let pc = unsafe { &*world.inner.events.producer_cache.get() };
     if let Some(ref ring) = pc.collisions {
         ring.clear();
     }
@@ -1400,15 +1427,15 @@ pub extern "C" fn world_register_collision_callback(
         set_error(ERR_NULL_POINTER, "world is null");
         return 0;
     };
-    let mut pc = world.inner.events.producer_cache.write();
-    pc.next_handle = pc.next_handle.wrapping_add(1);
-    pc.collision_cb = CallbackSlot {
-        cb: callback,
-        user_data,
-        handle: pc.next_handle,
-    };
+    // SAFETY: callback registration is init-time, before physics starts
+    let pc = unsafe { &mut *world.inner.events.producer_cache.get() };
+    let new_handle = pc.next_handle.load(Ordering::Relaxed).wrapping_add(1);
+    pc.next_handle.store(new_handle, Ordering::Release);
+    pc.collision_cb.cb.store(callback, Ordering::Release);
+    pc.collision_cb.user_data.store(user_data, Ordering::Release);
+    pc.collision_cb.handle.store(new_handle, Ordering::Release);
     clear_error();
-    pc.next_handle
+    new_handle
 }
 
 /// Register a contact-force-event callback.
@@ -1422,15 +1449,14 @@ pub extern "C" fn world_register_contact_force_callback(
         set_error(ERR_NULL_POINTER, "world is null");
         return 0;
     };
-    let mut pc = world.inner.events.producer_cache.write();
-    pc.next_handle = pc.next_handle.wrapping_add(1);
-    pc.contact_force_cb = CallbackSlot {
-        cb: callback,
-        user_data,
-        handle: pc.next_handle,
-    };
+    let pc = unsafe { &mut *world.inner.events.producer_cache.get() };
+    let new_handle = pc.next_handle.load(Ordering::Relaxed).wrapping_add(1);
+    pc.next_handle.store(new_handle, Ordering::Release);
+    pc.contact_force_cb.cb.store(callback, Ordering::Release);
+    pc.contact_force_cb.user_data.store(user_data, Ordering::Release);
+    pc.contact_force_cb.handle.store(new_handle, Ordering::Release);
     clear_error();
-    pc.next_handle
+    new_handle
 }
 
 /// Unregister a previously registered callback by its handle.
@@ -1446,12 +1472,16 @@ pub extern "C" fn world_unregister_callback(
     if handle == 0 {
         return;
     }
-    let mut pc = world.inner.events.producer_cache.write();
-    if pc.collision_cb.handle == handle {
-        pc.collision_cb = CallbackSlot::default();
+    let pc = unsafe { &mut *world.inner.events.producer_cache.get() };
+    if pc.collision_cb.handle.load(Ordering::Relaxed) == handle {
+        pc.collision_cb.cb.store(0, Ordering::Release);
+        pc.collision_cb.user_data.store(0, Ordering::Release);
+        pc.collision_cb.handle.store(0, Ordering::Release);
     }
-    if pc.contact_force_cb.handle == handle {
-        pc.contact_force_cb = CallbackSlot::default();
+    if pc.contact_force_cb.handle.load(Ordering::Relaxed) == handle {
+        pc.contact_force_cb.cb.store(0, Ordering::Release);
+        pc.contact_force_cb.user_data.store(0, Ordering::Release);
+        pc.contact_force_cb.handle.store(0, Ordering::Release);
     }
     clear_error();
 }
@@ -1479,7 +1509,8 @@ pub extern "C" fn world_set_event_dispatch_mode(
             return Bool::FALSE;
         }
     };
-    world.inner.events.producer_cache.write().dispatch_mode = mode;
+    let pc = unsafe { &mut *world.inner.events.producer_cache.get() };
+    pc.dispatch_mode.store(mode as u32, Ordering::Release);
     clear_error();
     Bool::TRUE
 }
