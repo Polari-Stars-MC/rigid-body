@@ -516,44 +516,61 @@ impl ForceLaw for NewtonianGravityForceLaw {
     fn apply(&self, facade: &mut ForceFacade<'_>) {
         let g = self.gravitational_constant;
         let min_dist = self.min_distance;
-        let max_dist = self.max_distance;
+        let max_dist_sq = if self.max_distance > 0.0 {
+            self.max_distance * self.max_distance
+        } else {
+            f64::MAX
+        };
         let source = self.law_type();
 
-        let body_data: Vec<_> = facade
+        // Collect only dynamic bodies with mass > 0
+        let body_data: SmallVec<[(RigidBodyHandle, f64, Vector); 64]> = facade
             .bodies
             .iter()
             .filter(|(_, b)| b.is_dynamic())
-            .map(|(h, b)| {
+            .filter_map(|(h, b)| {
                 let mass = b.mass();
-                (h, if mass > 0.0 { mass } else { 0.0 }, b.translation())
+                if mass > 0.0 {
+                    Some((h, mass, b.translation()))
+                } else {
+                    None
+                }
             })
-            .filter(|(_, m, _)| *m > 0.0)
             .collect();
 
         if body_data.len() < 2 {
             return;
         }
 
-        for i in 0..body_data.len() {
-            let (hi, mi, pi) = (body_data[i].0, body_data[i].1, body_data[i].2);
-            let mut net_force = Vector::ZERO;
+        // Newton III: compute F_ij = -F_ji, only upper triangle
+        // Use SmallVec for force accumulator (stack-allocated for ≤64 bodies)
+        let n = body_data.len();
+        let mut forces: SmallVec<[(RigidBodyHandle, Vector); 64]> = SmallVec::new();
+        for (h, _, _) in &body_data {
+            forces.push((*h, Vector::ZERO));
+        }
 
-            for (hj, mj, pj) in &body_data {
-                if hi == *hj {
-                    continue;
-                }
-                let offset = *pj - pi;
+        for i in 0..n {
+            let (_hi, mi, pi) = (body_data[i].0, body_data[i].1, body_data[i].2);
+            for j in (i + 1)..n {
+                let (hj, mj, pj) = (body_data[j].0, body_data[j].1, body_data[j].2);
+                let offset = pj - pi;
                 let dist_sq = offset.length_squared();
-                if max_dist > 0.0 && dist_sq > max_dist * max_dist {
+                if dist_sq > max_dist_sq {
                     continue;
                 }
                 let dist = dist_sq.sqrt().max(min_dist);
                 let force_mag = g * mi * mj / (dist_sq * dist);
-                net_force += offset * force_mag;
+                let f_ij = offset * force_mag;
+                forces[i].1 += f_ij;
+                forces[j].1 -= f_ij;
             }
+        }
 
-            if net_force != Vector::ZERO {
-                facade.add_force(hi, net_force, source);
+        // Single pass: apply accumulated forces
+        for (handle, force) in &forces {
+            if *force != Vector::ZERO {
+                facade.add_force(*handle, *force, source);
             }
         }
     }
@@ -722,7 +739,7 @@ impl ForceLaw for CelestialGravityForceLaw {
                 if mass > 0.0 {
                     let force = force * mass;
                     ForceFacade::push_force(
-                        facade.frame_log,
+                        facade.body_log,
                         body,
                         *handle,
                         force,

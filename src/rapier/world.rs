@@ -19,8 +19,10 @@ const MAX_STEP_SECONDS: f64 = 1.0;
 
 /// Preallocated working storage reused each frame to avoid per-step heap allocations.
 pub(crate) struct FrameWorkBuffers {
-    /// Per-body force log: keyed by RigidBodyHandle, aggregates forces by ForceLawType.
-    pub(crate) frame_log: HashMap<rapier3d::prelude::RigidBodyHandle, BodyForceLog>,
+    /// Per-body force log: indexed by handle index for O(1) access without hashing.
+    /// Index = RigidBodyHandle::into_raw_parts().0 (arena index portion).
+    /// Auto-expands when new bodies are inserted beyond current capacity.
+    pub(crate) body_log: Vec<Option<BodyForceLog>>,
     /// Scratch buffer for Coulomb friction pairs (avoid per-frame Vec::new()).
     pub(crate) friction_work: Vec<(rapier3d::prelude::RigidBodyHandle, rapier3d::prelude::RigidBodyHandle, Vector)>,
     /// Scratch buffer for legacy external force computation.
@@ -32,7 +34,7 @@ pub(crate) struct FrameWorkBuffers {
 impl Default for FrameWorkBuffers {
     fn default() -> Self {
         Self {
-            frame_log: HashMap::with_capacity(256),
+            body_log: Vec::with_capacity(256),
             friction_work: Vec::with_capacity(512),
             pending_forces: smallvec::SmallVec::new(),
             arena_idx_map: Vec::with_capacity(256),
@@ -43,10 +45,27 @@ impl Default for FrameWorkBuffers {
 impl FrameWorkBuffers {
     /// Clear all buffers for reuse in the next frame without deallocating.
     fn clear(&mut self) {
-        self.frame_log.clear();
+        // Clear individual log entries (keep capacity)
+        for entry in self.body_log.iter_mut() {
+            if let Some(log) = entry {
+                log.forces.clear();
+                log.torques.clear();
+                *entry = None; // mark slot as reusable
+            }
+        }
+        // Truncate to zero but keep capacity
+        self.body_log.truncate(0);
         self.friction_work.clear();
         self.pending_forces.clear();
         self.arena_idx_map.clear();
+    }
+
+    /// Ensure body_log can hold at least `max_index` entries.
+    /// Called whenever a new body is inserted with a higher handle index.
+    fn ensure_body_log_capacity(&mut self, max_index: usize) {
+        if max_index >= self.body_log.len() {
+            self.body_log.resize_with(max_index + 1, || None);
+        }
     }
 }
 
@@ -233,16 +252,16 @@ pub extern "C" fn world_step(world: *mut WorldHandle, delta_seconds: f64) {
     }
 
     // --- Force facade: the single entry-point for all force application ---
-    // P1 fix: reuse persistent frame_log instead of HashMap::new() every frame.
-    // Take ownership of the buffer, use it, then put it back.
-    let mut frame_log = std::mem::take(&mut world.inner.buffers.frame_log);
+    // O1 fix: reuse persistent body_log (Vec-indexed by handle) instead of HashMap.
+    // Take ownership of the buffers, use them, then put them back.
+    let mut body_log = std::mem::take(&mut world.inner.buffers.body_log);
     let mut pending_forces = std::mem::take(&mut world.inner.buffers.pending_forces);
     let mut friction_work = std::mem::take(&mut world.inner.buffers.friction_work);
     let mut facade = ForceFacade::new(
         &mut world.inner.bodies,
         &mut world.inner.colliders,
         &world.inner.narrow_phase,
-        &mut frame_log,
+        &mut body_log,
         &mut pending_forces,
         &mut friction_work,
     );
@@ -268,8 +287,8 @@ pub extern "C" fn world_step(world: *mut WorldHandle, delta_seconds: f64) {
     // 4. Drain the facade frame-log into a report and write it to events
     let force_report = facade.drain_report();
     // P1+P5 fix: put drained buffers back for next frame reuse
-    let empty_log = std::mem::take(facade.frame_log);
-    world.inner.buffers.frame_log = empty_log;
+    let empty_log = std::mem::take(facade.body_log);
+    world.inner.buffers.body_log = empty_log;
     world.inner.buffers.pending_forces = std::mem::take(facade.pending_forces);
     world.inner.buffers.friction_work = std::mem::take(facade.friction_work);
     if force_report

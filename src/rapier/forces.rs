@@ -331,8 +331,9 @@ pub struct ForceFacade<'a> {
     pub bodies: &'a mut RigidBodySet,
     pub colliders: &'a mut ColliderSet,
     pub narrow_phase: &'a NarrowPhase,
-    /// Per-body force log, cleared by `drain_report()`.
-    pub frame_log: &'a mut HashMap<RigidBodyHandle, BodyForceLog>,
+    /// Per-body force log: indexed by handle index (arena Index → usize).
+    /// `None` = no forces for this body yet.  Auto-expanding.
+    pub body_log: &'a mut Vec<Option<BodyForceLog>>,
     /// Persistent scratch buffer for legacy force computation (P5 fix).
     pub pending_forces: &'a mut SmallVec<[crate::rapier::events::PendingForce; 128]>,
     /// Persistent scratch buffer for Coulomb friction (P5 fix).
@@ -347,7 +348,7 @@ impl<'a> ForceFacade<'a> {
         bodies: &'a mut RigidBodySet,
         colliders: &'a mut ColliderSet,
         narrow_phase: &'a NarrowPhase,
-        frame_log: &'a mut HashMap<RigidBodyHandle, BodyForceLog>,
+        body_log: &'a mut Vec<Option<BodyForceLog>>,
         pending_forces: &'a mut SmallVec<[crate::rapier::events::PendingForce; 128]>,
         friction_work: &'a mut Vec<(RigidBodyHandle, RigidBodyHandle, Vector)>,
     ) -> Self {
@@ -355,11 +356,21 @@ impl<'a> ForceFacade<'a> {
             bodies,
             colliders,
             narrow_phase,
-            frame_log,
+            body_log,
             pending_forces,
             friction_work,
             max_reynolds: 0.0,
         }
+    }
+
+    /// Get or create a BodyForceLog entry for the given handle (O(1) direct index lookup).
+    #[inline]
+    fn log_entry(&mut self, handle: RigidBodyHandle) -> &mut BodyForceLog {
+        let idx = handle.into_raw_parts().0 as usize;
+        if idx >= self.body_log.len() {
+            self.body_log.resize_with(idx + 1, || None);
+        }
+        self.body_log[idx].get_or_insert_with(BodyForceLog::default)
     }
 
     // ---- force application ----
@@ -380,11 +391,7 @@ impl<'a> ForceFacade<'a> {
             return true; // no-op but not an error
         }
         body.add_force(force, true);
-        self.frame_log
-            .entry(handle)
-            .or_default()
-            .forces
-            .push((source, force));
+        self.log_entry(handle).forces.push((source, force));
         true
     }
 
@@ -402,11 +409,7 @@ impl<'a> ForceFacade<'a> {
             return true;
         }
         body.add_torque(torque, true);
-        self.frame_log
-            .entry(handle)
-            .or_default()
-            .torques
-            .push((source, torque));
+        self.log_entry(handle).torques.push((source, torque));
         true
     }
 
@@ -425,11 +428,7 @@ impl<'a> ForceFacade<'a> {
             return true;
         }
         body.add_force_at_point(force, point, true);
-        self.frame_log
-            .entry(handle)
-            .or_default()
-            .forces
-            .push((source, force));
+        self.log_entry(handle).forces.push((source, force));
         true
     }
 
@@ -439,7 +438,7 @@ impl<'a> ForceFacade<'a> {
     ///
     /// Use when iterating `bodies.iter_mut()` to avoid a second handle lookup.
     pub fn push_force(
-        log: &mut HashMap<RigidBodyHandle, BodyForceLog>,
+        log: &mut Vec<Option<BodyForceLog>>,
         body: &mut rapier3d::dynamics::RigidBody,
         handle: RigidBodyHandle,
         force: Vector,
@@ -449,12 +448,14 @@ impl<'a> ForceFacade<'a> {
             return;
         }
         body.add_force(force, true);
-        log.entry(handle).or_default().forces.push((source, force));
+        let idx = handle.into_raw_parts().0 as usize;
+        if idx >= log.len() { log.resize_with(idx + 1, || None); }
+        log[idx].get_or_insert_with(BodyForceLog::default).forces.push((source, force));
     }
 
     /// Apply typed torque directly to an already-referenced body.
     pub fn push_torque(
-        log: &mut HashMap<RigidBodyHandle, BodyForceLog>,
+        log: &mut Vec<Option<BodyForceLog>>,
         body: &mut rapier3d::dynamics::RigidBody,
         handle: RigidBodyHandle,
         torque: Vector,
@@ -464,7 +465,9 @@ impl<'a> ForceFacade<'a> {
             return;
         }
         body.add_torque(torque, true);
-        log.entry(handle).or_default().torques.push((source, torque));
+        let idx = handle.into_raw_parts().0 as usize;
+        if idx >= log.len() { log.resize_with(idx + 1, || None); }
+        log[idx].get_or_insert_with(BodyForceLog::default).torques.push((source, torque));
     }
 
     // ---- Reynolds number ----
@@ -483,37 +486,34 @@ impl<'a> ForceFacade<'a> {
             ..Default::default()
         };
 
-        // P6 fix: use a fixed-size array indexed by force-law-type discriminant
-        // instead of allocating a BTreeMap per body per frame.
         const NUM_FORCE_TYPES: usize = 32;
-        let drained = std::mem::take(self.frame_log);
-        for (_handle, log) in drained {
-            // Accumulate per-type totals for this body into a fixed array
-            // Use [None; N] — requires Option<KahanVec3> to be Copy for this to work
-            let mut body_totals: [Option<KahanVec3>; NUM_FORCE_TYPES] = [None; NUM_FORCE_TYPES];
-            for (source, f) in &log.forces {
-                let idx = force_law_type_idx(*source);
-                body_totals[idx].get_or_insert_with(KahanVec3::default).add(
-                    crate::rapier::ffi::Vec3 { x: f.x, y: f.y, z: f.z },
-                );
-            }
-            for (source, f) in &log.torques {
-                let idx = force_law_type_idx(*source);
-                body_totals[idx].get_or_insert_with(KahanVec3::default).add(
-                    crate::rapier::ffi::Vec3 { x: f.x, y: f.y, z: f.z },
-                );
-            }
-            // Push per-type totals into the report (one body_count per type per body)
-            for (tag, maybe_kahan) in body_totals.iter().enumerate() {
-                if let Some(kahan) = maybe_kahan {
-                    let law_type = force_law_type_from_idx(tag);
-                    let c = report.contributions.entry(law_type).or_default();
-                    c.total_force = crate::rapier::ffi::Vec3 {
-                        x: c.total_force.x + kahan.value().x,
-                        y: c.total_force.y + kahan.value().y,
-                        z: c.total_force.z + kahan.value().z,
-                    };
-                    c.body_count += 1;
+        let mut drained = std::mem::take(self.body_log);
+        for log_opt in drained.iter_mut() {
+            if let Some(log) = log_opt {
+                let mut body_totals: [Option<KahanVec3>; NUM_FORCE_TYPES] = [None; NUM_FORCE_TYPES];
+                for (source, f) in &log.forces {
+                    let idx = force_law_type_idx(*source);
+                    body_totals[idx].get_or_insert_with(KahanVec3::default).add(
+                        crate::rapier::ffi::Vec3 { x: f.x, y: f.y, z: f.z },
+                    );
+                }
+                for (source, f) in &log.torques {
+                    let idx = force_law_type_idx(*source);
+                    body_totals[idx].get_or_insert_with(KahanVec3::default).add(
+                        crate::rapier::ffi::Vec3 { x: f.x, y: f.y, z: f.z },
+                    );
+                }
+                for (tag, maybe_kahan) in body_totals.iter().enumerate() {
+                    if let Some(kahan) = maybe_kahan {
+                        let law_type = force_law_type_from_idx(tag);
+                        let c = report.contributions.entry(law_type).or_default();
+                        c.total_force = crate::rapier::ffi::Vec3 {
+                            x: c.total_force.x + kahan.value().x,
+                            y: c.total_force.y + kahan.value().y,
+                            z: c.total_force.z + kahan.value().z,
+                        };
+                        c.body_count += 1;
+                    }
                 }
             }
         }
@@ -781,7 +781,7 @@ mod tests {
         bodies: &'a mut RigidBodySet,
         colliders: &'a mut ColliderSet,
         narrow_phase: &'a NarrowPhase,
-        log: &'a mut HashMap<RigidBodyHandle, BodyForceLog>,
+        log: &'a mut Vec<Option<BodyForceLog>>,
         pending: &'a mut SmallVec<[crate::rapier::events::PendingForce; 128]>,
         friction: &'a mut Vec<(RigidBodyHandle, RigidBodyHandle, Vector)>,
     ) -> ForceFacade<'a> {
@@ -801,7 +801,7 @@ mod tests {
         let mut bodies = RigidBodySet::new();
         let mut colliders = ColliderSet::new();
         let narrow_phase = NarrowPhase::new();
-        let mut log = HashMap::new();
+        let mut log: Vec<Option<BodyForceLog>> = Vec::new();
         let mut pending = SmallVec::new();
         let mut friction = Vec::new();
         let mut facade = make_facade(&mut bodies, &mut colliders, &narrow_phase, &mut log, &mut pending, &mut friction);
@@ -827,7 +827,7 @@ mod tests {
         let mut bodies = RigidBodySet::new();
         let mut colliders = ColliderSet::new();
         let narrow_phase = NarrowPhase::new();
-        let mut log = HashMap::new();
+        let mut log: Vec<Option<BodyForceLog>> = Vec::new();
         let mut pending = SmallVec::new();
         let mut friction = Vec::new();
         let mut facade = make_facade(&mut bodies, &mut colliders, &narrow_phase, &mut log, &mut pending, &mut friction);
@@ -887,7 +887,7 @@ mod tests {
         let mut bodies = RigidBodySet::new();
         let mut colliders = ColliderSet::new();
         let narrow_phase = NarrowPhase::new();
-        let mut log = HashMap::new();
+        let mut log: Vec<Option<BodyForceLog>> = Vec::new();
 
         // Insert a dynamic body
         let builder = RigidBodyBuilder::dynamic().translation(Vector::new(0.0, 0.0, 0.0));
@@ -918,7 +918,7 @@ mod tests {
         let mut bodies = RigidBodySet::new();
         let mut colliders = ColliderSet::new();
         let narrow_phase = NarrowPhase::new();
-        let mut log = HashMap::new();
+        let mut log: Vec<Option<BodyForceLog>> = Vec::new();
 
         let builder = RigidBodyBuilder::fixed();
         let handle = bodies.insert(builder.build());
