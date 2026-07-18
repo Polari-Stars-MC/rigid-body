@@ -67,6 +67,7 @@ public final class JniSmokeTest {
         assertSafeWrappersCoverCommonJniFeatures();
         assertSpaceFormulaWrappers();
         assertInvalidInputsAreRejected();
+        assertSharedArenaZeroJni();
 
         System.out.println("JNI smoke test passed on Java " + javaVersion);
     }
@@ -494,6 +495,99 @@ public final class JniSmokeTest {
     private static void assertClose(double expected, double actual, String label) {
         if (Math.abs(expected - actual) > EPSILON) {
             throw new AssertionError(label + ": expected " + expected + ", got " + actual);
+        }
+    }
+
+    /** Verify shared arena zero-JNI read/write and DirectByteBuffer integration. */
+    private static void assertSharedArenaZeroJni() {
+        long world = RigidBodyNative.worldCreate(0.0, -9.81, 0.0);
+        if (world == 0L) throw new AssertionError("worldCreate returned null for arena test");
+
+        try {
+            // 1. Create arena
+            long[] addrSize = new long[2];
+            if (!RigidBodyNative.worldCreateSharedArena(world, 16, 0, 256, 256, addrSize)) {
+                throw new AssertionError("worldCreateSharedArena failed");
+            }
+            if (addrSize[0] == 0 || addrSize[1] == 0) {
+                throw new AssertionError("arena returned null address or zero size");
+            }
+
+            // 2. Get the DirectByteBuffer
+            java.nio.ByteBuffer buf = RigidBodyNative.worldGetArenaDirectByteBuffer(world);
+            if (buf == null || !buf.isDirect()) {
+                throw new AssertionError("worldGetArenaDirectByteBuffer returned null or non-direct buffer");
+            }
+
+            // 3. Create the arena helper
+            SharedPhysicsArena arena = SharedPhysicsArena.fromDirectBuffer(buf);
+            if (arena.getMaxBodies() < 1 || arena.getMaxCommands() < 1) {
+                throw new AssertionError("arena capacities invalid");
+            }
+
+            // 4. Insert a body
+            long b1 = RigidBodyNative.rigidBodyBuilderCreate(0 /* Dynamic */);
+            if (b1 == 0L) throw new AssertionError("rigidBodyBuilderCreate failed");
+
+            RigidBodyNative.rigidBodyBuilderSetTranslation(b1, 10.0, 20.0, 30.0);
+            RigidBodyNative.rigidBodyBuilderSetLinvel(b1, 1.0, 2.0, 3.0);
+            RigidBodyNative.rigidBodyBuilderSetAdditionalMass(b1, 5.0);
+            long body1 = RigidBodyNative.rigidBodyBuilderBuild(b1);
+
+            long handle1 = RigidBodyNative.worldInsertRigidBody(world, body1);
+            if (handle1 == 0L) throw new AssertionError("worldInsertRigidBody failed");
+
+            // 5. Step — arena is flushed after step
+            RigidBodyNative.worldStep(world, 1.0 / 60.0);
+
+            // 6. Read body state from arena (ZERO JNI calls from here)
+            int bodyCount = arena.getBodyCount();
+            if (bodyCount != 1) {
+                throw new AssertionError("arena bodyCount should be 1, got " + bodyCount);
+            }
+
+            long gen = arena.getBodyGeneration(0);
+            if (gen == 0) {
+                throw new AssertionError("body generation should be non-zero after step");
+            }
+
+            assertClose(10.0, arena.getBodyPosX(0), "arena body pos X");
+            assertClose(20.0, arena.getBodyPosY(0), "arena body pos Y");
+            assertClose(30.0, arena.getBodyPosZ(0), "arena body pos Z");
+
+            // 7. Safe read with generation check
+            double[] safePos = new double[3];
+            if (!arena.safeReadBodyPosition(0, safePos)) {
+                throw new AssertionError("safeReadBodyPosition failed");
+            }
+            assertClose(10.0, safePos[0], "safe arena body pos X");
+            assertClose(20.0, safePos[1], "safe arena body pos Y");
+
+            // 8. Write commands via arena (ZERO JNI)
+            arena.commandAddForce(0, 100.0, 0.0, 0.0);
+            arena.commandWakeUp(0);
+
+            // 9. Step again — Rust should process commands
+            RigidBodyNative.worldStep(world, 1.0 / 60.0);
+            int count2 = arena.getBodyCount();
+            if (count2 != 1) {
+                throw new AssertionError("arena bodyCount after 2nd step should be 1, got " + count2);
+            }
+
+            // 10. Event read via arena events
+            int eventCount = arena.getEventCount();
+            if (eventCount < 0) {
+                throw new AssertionError("arena eventCount should be >= 0, got " + eventCount);
+            }
+
+            // 11. Cleanup
+            RigidBodyNative.worldResetSharedArenaEvents(world);
+            if (arena.getEventCount() != 0) {
+                throw new AssertionError("arena eventCount should be 0 after reset, got " + arena.getEventCount());
+            }
+        } finally {
+            RigidBodyNative.worldDestroySharedArena(world);
+            RigidBodyNative.worldDestroy(world);
         }
     }
 }

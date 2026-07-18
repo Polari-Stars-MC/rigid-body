@@ -338,6 +338,427 @@ pub(crate) fn apply_body_interactions(
         .set_last_custom_physics_report(report);
 }
 
+/// Facade-based wrapper: applies legacy unregistered body interactions through
+/// the facade so the frame-log captures them with correct ForceLawType tags.
+///
+/// This is a temporary shim — once all force sources are registered as ForceLaw
+/// impls, this function and `apply_body_interactions` will be removed.
+pub(crate) fn apply_body_interactions_with_facade(
+    force_registry: &ForceRegistry,
+    custom: &crate::rapier::events::CustomPhysicsState,
+    facade: &mut crate::rapier::forces::ForceFacade<'_>,
+) {
+    use crate::rapier::forces::ForceLawType;
+
+    // 1. Newtonian pairwise gravity
+    if let Some(gravity_law) = custom.newton_gravity {
+        if gravity_law.enabled.0 != 0 {
+            let registered = !force_registry
+                .find_by_type(ForceLawType::NewtonianGravity)
+                .is_empty();
+            if !registered {
+                // Use a temporary ForceLaw instance
+                let law = NewtonianGravityForceLaw {
+                    gravitational_constant: gravity_law.gravitational_constant,
+                    min_distance: gravity_law.min_distance,
+                    max_distance: gravity_law.max_distance,
+                    enabled: true,
+                };
+                law.apply(facade);
+            }
+        }
+    }
+
+    // 2. Coulomb friction from contact data
+    if let Some(friction_law) = custom.coulomb_friction {
+        if friction_law.enabled.0 != 0 {
+            let registered = !force_registry
+                    .find_by_type(ForceLawType::CoulombFriction)
+                    .is_empty();
+            if !registered {
+                apply_coulomb_friction_forces_with_facade(
+                    facade.narrow_phase,
+                    CoulombFrictionParams {
+                        static_coefficient: friction_law.static_coefficient,
+                        dynamic_coefficient: friction_law.dynamic_coefficient,
+                        velocity_threshold: friction_law.velocity_threshold,
+                        enabled: true,
+                    },
+                    facade,
+                );
+            }
+        }
+    }
+
+    // 3. Per-body air drag
+    if let Some(drag_law) = custom.air_drag {
+        if drag_law.enabled.0 != 0 {
+            let registered = !force_registry
+                .find_by_type(ForceLawType::AirDrag)
+                .is_empty();
+            if !registered {
+                let law = AirDragForceLaw {
+                    fluid_velocity: vec3_to_rapier(drag_law.fluid_velocity),
+                    density: drag_law.density,
+                    dynamic_viscosity: drag_law.dynamic_viscosity,
+                    characteristic_length: drag_law.characteristic_length,
+                    reference_area: drag_law.reference_area,
+                    drag_coefficient: drag_law.drag_coefficient,
+                    reynolds_stokes_limit: drag_law.reynolds_stokes_limit,
+                    enabled: true,
+                };
+                law.apply(facade);
+            }
+        }
+    }
+}
+
+/// Coulomb friction via facade — writes typed force records.
+fn apply_coulomb_friction_forces_with_facade(
+    narrow_phase: &NarrowPhase,
+    params: CoulombFrictionParams,
+    facade: &mut crate::rapier::forces::ForceFacade<'_>,
+) {
+    if !params.enabled {
+        return;
+    }
+
+    let static_mu = params.static_coefficient.max(0.0);
+    let dynamic_mu = params.dynamic_coefficient.max(0.0);
+    let threshold = params.velocity_threshold.max(0.0);
+
+    let mut friction_work: Vec<(_, _, Vector)> = Vec::new();
+
+    for contact_pair in narrow_phase.contact_pairs() {
+        let ch1 = contact_pair.collider1;
+        let ch2 = contact_pair.collider2;
+        let Some(collider1) = facade.colliders.get(ch1) else {
+            continue;
+        };
+        let Some(collider2) = facade.colliders.get(ch2) else {
+            continue;
+        };
+        let Some(rb_handle1) = collider1.parent() else { continue };
+        let Some(rb_handle2) = collider2.parent() else { continue };
+        let Some(body1) = facade.bodies.get(rb_handle1) else { continue };
+        let Some(body2) = facade.bodies.get(rb_handle2) else { continue };
+        if !body1.is_dynamic() && !body2.is_dynamic() {
+            continue;
+        }
+
+        for manifold in &contact_pair.manifolds {
+            let normal = manifold.data.normal;
+            for contact in &manifold.points {
+                let p1_world = body1.position() * contact.local_p1;
+                let p2_world = body2.position() * contact.local_p2;
+                let point = (p1_world + p2_world) * 0.5;
+                let r1 = point - body1.translation();
+                let r2 = point - body2.translation();
+                let v1 = body1.linvel() + body1.angvel().cross(r1);
+                let v2 = body2.linvel() + body2.angvel().cross(r2);
+                let rel_vel = v1 - v2;
+
+                let normal_speed = rel_vel.dot(normal);
+                let tangential_vel = rel_vel - normal * normal_speed;
+                let tangential_speed = tangential_vel.length();
+
+                if tangential_speed < 1.0e-12 {
+                    continue;
+                }
+
+                let mu = if tangential_speed <= threshold {
+                    static_mu
+                } else {
+                    dynamic_mu
+                };
+
+                let normal_force_mag = contact.data.impulse;
+                let friction_mag = mu * normal_force_mag;
+                let friction_force = -tangential_vel / tangential_speed * friction_mag;
+
+                friction_work.push((rb_handle1, rb_handle2, friction_force));
+            }
+        }
+    }
+
+    use crate::rapier::forces::ForceLawType;
+    for (rb1, rb2, force) in &friction_work {
+        facade.add_force(*rb1, *force, ForceLawType::CoulombFriction);
+        facade.add_force(*rb2, -*force, ForceLawType::CoulombFriction);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ForceLaw impls — registry-compatible wrappers
+// ---------------------------------------------------------------------------
+
+use crate::rapier::forces::{ForceFacade, ForceLaw, ForceLawType, ForceRegistry};
+use rapier3d::prelude::{ColliderSet, NarrowPhase, RigidBodyHandle, RigidBodySet};
+use smallvec::SmallVec;
+
+/// Newtonian pairwise gravity as a registered force law.
+pub(crate) struct NewtonianGravityForceLaw {
+    pub gravitational_constant: f64,
+    pub min_distance: f64,
+    pub max_distance: f64,
+    pub enabled: bool,
+}
+
+impl ForceLaw for NewtonianGravityForceLaw {
+    fn law_type(&self) -> ForceLawType {
+        ForceLawType::NewtonianGravity
+    }
+
+    fn enabled(&self) -> bool {
+        self.enabled
+    }
+
+    fn apply(&self, facade: &mut ForceFacade<'_>) {
+        let g = self.gravitational_constant;
+        let min_dist = self.min_distance;
+        let max_dist_sq = if self.max_distance > 0.0 {
+            self.max_distance * self.max_distance
+        } else {
+            f64::MAX
+        };
+        let source = self.law_type();
+
+        // Collect only dynamic bodies with mass > 0
+        let body_data: SmallVec<[(RigidBodyHandle, f64, Vector); 64]> = facade
+            .bodies
+            .iter()
+            .filter(|(_, b)| b.is_dynamic())
+            .filter_map(|(h, b)| {
+                let mass = b.mass();
+                if mass > 0.0 {
+                    Some((h, mass, b.translation()))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        if body_data.len() < 2 {
+            return;
+        }
+
+        // Newton III: compute F_ij = -F_ji, only upper triangle
+        // Use SmallVec for force accumulator (stack-allocated for ≤64 bodies)
+        let n = body_data.len();
+        let mut forces: SmallVec<[(RigidBodyHandle, Vector); 64]> = SmallVec::new();
+        for (h, _, _) in &body_data {
+            forces.push((*h, Vector::ZERO));
+        }
+
+        for i in 0..n {
+            let (_hi, mi, pi) = (body_data[i].0, body_data[i].1, body_data[i].2);
+            for j in (i + 1)..n {
+                let (hj, mj, pj) = (body_data[j].0, body_data[j].1, body_data[j].2);
+                let offset = pj - pi;
+                let dist_sq = offset.length_squared();
+                if dist_sq > max_dist_sq {
+                    continue;
+                }
+                let dist = dist_sq.sqrt().max(min_dist);
+                let force_mag = g * mi * mj / (dist_sq * dist);
+                let f_ij = offset * force_mag;
+                forces[i].1 += f_ij;
+                forces[j].1 -= f_ij;
+            }
+        }
+
+        // Single pass: apply accumulated forces
+        for (handle, force) in &forces {
+            if *force != Vector::ZERO {
+                facade.add_force(*handle, *force, source);
+            }
+        }
+    }
+
+    fn clone_box(&self) -> Box<dyn ForceLaw> {
+        Box::new(Self {
+            gravitational_constant: self.gravitational_constant,
+            min_distance: self.min_distance,
+            max_distance: self.max_distance,
+            enabled: self.enabled,
+        })
+    }
+}
+
+/// Air drag as a registered force law.
+pub(crate) struct AirDragForceLaw {
+    pub fluid_velocity: Vector,
+    pub density: f64,
+    pub dynamic_viscosity: f64,
+    pub characteristic_length: f64,
+    pub reference_area: f64,
+    pub drag_coefficient: f64,
+    pub reynolds_stokes_limit: f64,
+    pub enabled: bool,
+}
+
+impl ForceLaw for AirDragForceLaw {
+    fn law_type(&self) -> ForceLawType {
+        ForceLawType::AirDrag
+    }
+
+    fn enabled(&self) -> bool {
+        self.enabled
+    }
+
+    fn apply(&self, facade: &mut ForceFacade<'_>) {
+        let source = self.law_type();
+
+        // Phase 1: compute forces + max reynolds (immutable body read)
+        let mut work: SmallVec<[(RigidBodyHandle, Vector); 64]> = SmallVec::new();
+        let mut max_re = 0.0f64;
+        for (handle, body) in facade.bodies.iter() {
+            if !body.is_dynamic() {
+                continue;
+            }
+
+            let relative_velocity = body.linvel() - self.fluid_velocity;
+            let speed = relative_velocity.length();
+            if speed <= 1.0e-12 {
+                continue;
+            }
+
+            let reynolds = self.density * speed * self.characteristic_length / self.dynamic_viscosity;
+            max_re = max_re.max(reynolds);
+
+            let drag_magnitude = if reynolds <= self.reynolds_stokes_limit {
+                3.0 * std::f64::consts::PI * self.dynamic_viscosity * self.characteristic_length * speed
+            } else {
+                0.5 * self.density * speed * speed * self.drag_coefficient * self.reference_area
+            };
+
+            let force = -relative_velocity / speed * drag_magnitude;
+            work.push((handle, force));
+        }
+
+        // Phase 2: update facade + apply forces
+        facade.update_reynolds(max_re);
+        for (handle, force) in work {
+            facade.add_force(handle, force, source);
+        }
+    }
+
+    fn clone_box(&self) -> Box<dyn ForceLaw> {
+        Box::new(Self {
+            fluid_velocity: self.fluid_velocity,
+            density: self.density,
+            dynamic_viscosity: self.dynamic_viscosity,
+            characteristic_length: self.characteristic_length,
+            reference_area: self.reference_area,
+            drag_coefficient: self.drag_coefficient,
+            reynolds_stokes_limit: self.reynolds_stokes_limit,
+            enabled: self.enabled,
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CelestialGravityForceLaw — adaptively selects best gravity model
+// ---------------------------------------------------------------------------
+
+/// Celestial gravity force law with automatic model selection.
+///
+/// Chooses the most accurate gravity model based on distance and available data:
+///
+/// | Distance | Has SH coeffs | Model                |
+/// |----------|---------------|----------------------|
+/// | < 2·R    | Yes           | Ellipsoid + J2       |
+/// | < 2·R    | No            | Ellipsoid only       |
+/// | 2R–10R   | Yes           | Spherical harmonics  |
+/// | 2R–10R   | No            | Zonal harmonics J2–J6|
+/// | > 10R    | Any           | J2 zonal + centrifugal|
+/// | > 100R   | Any           | Point mass           |
+pub(crate) struct CelestialGravityForceLaw {
+    pub body: &'static crate::rapier::celestial_data::CelestialBody,
+    pub max_sh_degree: u32,
+    pub enabled: bool,
+}
+
+impl ForceLaw for CelestialGravityForceLaw {
+    fn law_type(&self) -> ForceLawType {
+        ForceLawType::CelestialGravity
+    }
+
+    fn enabled(&self) -> bool {
+        self.enabled
+    }
+
+    fn apply(&self, facade: &mut ForceFacade<'_>) {
+        let gm = self.body.gm;
+        let r_eq = self.body.equatorial_radius;
+
+        // Collect body data
+        let body_data: Vec<_> = facade
+            .bodies
+            .iter()
+            .filter(|(_, b)| b.is_dynamic())
+            .map(|(h, b)| (h, b.translation()))
+            .collect();
+
+        for (handle, translation) in &body_data {
+            let pos = crate::rapier::ffi::vec3_from_rapier(*translation);
+            let r = translation.length();
+            let normalized_altitude = r / r_eq;
+
+            let accel = if normalized_altitude < 2.0 && self.body.flattening > 0.0 {
+                // Near surface of oblate body → ellipsoid model
+                crate::rapier::gravitational_models::ellipsoid_gravity(pos, self.body)
+            } else if normalized_altitude < 10.0 && self.max_sh_degree >= 2 && !self.body.c_coeffs.is_empty() {
+                // Medium orbit → spherical harmonics
+                crate::rapier::gravitational_models::spherical_harmonics_acceleration(
+                    pos, self.body, self.max_sh_degree.min(self.body.max_degree),
+                )
+            } else if normalized_altitude < 100.0 {
+                // High orbit → J2–J6 zonal harmonics (fast)
+                let jn: [f64; 5] = [self.body.j2, self.body.j3, self.body.j4, self.body.j5, self.body.j6];
+                let jn_filtered: Vec<f64> = jn.iter().copied().filter(|&j| j != 0.0).collect();
+                crate::rapier::gravitational_models::zonal_harmonics_acceleration(
+                    pos, gm, r_eq, &jn_filtered,
+                )
+            } else {
+                // Far away → point mass with J2 (minimal overhead)
+                let jn = if self.body.j2 != 0.0 {
+                    vec![self.body.j2]
+                } else {
+                    vec![]
+                };
+                crate::rapier::gravitational_models::zonal_harmonics_acceleration(
+                    pos, gm, r_eq, &jn,
+                )
+            };
+
+            let force = crate::rapier::ffi::vec3_to_rapier(accel);
+            // P2 fix: single get_mut() instead of get() + get_mut() double lookup
+            if let Some(body) = facade.bodies.get_mut(*handle) {
+                let mass = body.mass();
+                if mass > 0.0 {
+                    let force = force * mass;
+                    ForceFacade::push_force(
+                        facade.body_log,
+                        body,
+                        *handle,
+                        force,
+                        self.law_type(),
+                    );
+                }
+            }
+        }
+    }
+
+    fn clone_box(&self) -> Box<dyn ForceLaw> {
+        Box::new(Self {
+            body: self.body,
+            max_sh_degree: self.max_sh_degree,
+            enabled: self.enabled,
+        })
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------

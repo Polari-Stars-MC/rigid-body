@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MPS — Rapier 物理引擎 Rust 原生封装</title>
+<title>MPS — 高精度物理引擎 Rust 原生封装</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github-dark.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/languages/rust.min.js"></script>
@@ -11,101 +11,59 @@
 <style>
 :root {
   --sidebar-width: 280px;
-  --bg: #1e1e2e;
-  --bg-soft: #282840;
-  --bg-card: #313148;
-  --fg: #cdd6f4;
-  --fg-muted: #a6adc8;
-  --fg-dim: #6c7086;
-  --accent: #89b4fa;
-  --accent2: #f5c2e7;
-  --accent3: #a6e3a1;
-  --accent4: #fab387;
-  --border: #45475a;
-  --code-bg: #181825;
-  --radius: 8px;
+  --bg: #1e1e2e; --bg-soft: #282840; --bg-card: #313148;
+  --fg: #cdd6f4; --fg-muted: #a6adc8; --fg-dim: #6c7086;
+  --accent: #89b4fa; --accent2: #f5c2e7; --accent3: #a6e3a1; --accent4: #fab387;
+  --border: #45475a; --code-bg: #181825; --radius: 8px;
   --font: system-ui, -apple-system, 'Segoe UI', sans-serif;
   --mono: 'Cascadia Code', 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
   scroll-behavior: smooth;
 }
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: var(--font); background: var(--bg); color: var(--fg); line-height: 1.7; }
-a { color: var(--accent); text-decoration: none; }
-a:hover { text-decoration: underline; }
-code { font-family: var(--mono); font-size: 0.9em; background: var(--code-bg); padding: 2px 6px; border-radius: 4px; }
-pre { border-radius: var(--radius); margin: 16px 0; overflow-x: auto; }
-pre code { padding: 16px 20px; display: block; background: transparent; font-size: 0.85em; line-height: 1.6; }
-table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 0.92em; }
-th, td { padding: 10px 14px; text-align: left; border-bottom: 1px solid var(--border); }
-th { color: var(--accent); font-weight: 600; white-space: nowrap; }
-tr:hover { background: var(--bg-soft); }
-h1 { font-size: 2em; margin: 0 0 8px; }
-h2 { font-size: 1.5em; margin: 40px 0 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
-h3 { font-size: 1.2em; margin: 28px 0 10px; color: var(--accent2); }
-h4 { font-size: 1em; margin: 20px 0 8px; color: var(--accent3); }
-p { margin: 8px 0; }
-ul, ol { padding-left: 24px; margin: 8px 0; }
-li { margin: 4px 0; }
-blockquote { border-left: 3px solid var(--accent); padding: 8px 16px; margin: 16px 0; background: var(--bg-soft); border-radius: 0 var(--radius) var(--radius) 0; color: var(--fg-muted); }
-/* Layout */
-#sidebar {
-  position: fixed; left: 0; top: 0; bottom: 0; width: var(--sidebar-width);
-  background: var(--bg-soft); border-right: 1px solid var(--border);
-  overflow-y: auto; z-index: 10; padding: 16px 0;
-}
-#sidebar h2 { font-size: 1em; padding: 8px 20px; margin: 0; border: none; color: var(--fg-dim); text-transform: uppercase; letter-spacing: 0.05em; }
-#sidebar .logo { font-size: 1.15em; font-weight: 700; padding: 8px 20px 16px; color: var(--accent); }
-#sidebar a { display: block; padding: 6px 20px 6px 24px; font-size: 0.9em; color: var(--fg-muted); border-left: 3px solid transparent; transition: all 0.15s; }
-#sidebar a:hover, #sidebar a.active { color: var(--fg); background: var(--bg-card); border-left-color: var(--accent); text-decoration: none; }
-#sidebar a.sub { padding-left: 40px; font-size: 0.85em; }
-#content { margin-left: var(--sidebar-width); max-width: 900px; padding: 40px 48px; }
-/* Mobile */
-#menu-toggle { display: none; position: fixed; top: 12px; left: 12px; z-index: 20; background: var(--bg-card); border: 1px solid var(--border); color: var(--fg); padding: 8px 12px; border-radius: var(--radius); cursor: pointer; font-size: 1.1em; }
-@media (max-width: 768px) {
-  #sidebar { transform: translateX(-100%); transition: transform 0.25s; }
-  #sidebar.open { transform: translateX(0); }
-  #content { margin-left: 0; padding: 24px 16px; }
-  #menu-toggle { display: block; }
-}
-/* Badges */
-.badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 0.8em; margin: 0 4px; }
-.badge-rust { background: #dea58433; color: #dea584; }
-.badge-java { background: #b0721933; color: #b07219; }
-.badge-ffm { background: #89b4fa33; color: #89b4fa; }
-.badge-jni { background: #a6e3a133; color: #a6e3a1; }
-.badge-warn { background: #f9e2af33; color: #f9e2af; }
-/* Cards */
-.card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; margin: 20px 0; }
-.card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
-.card h3 { margin: 0 0 8px; font-size: 1em; }
-.card p { color: var(--fg-muted); font-size: 0.9em; margin: 0; }
-/* Search */
-#search { width: 100%; padding: 8px 14px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); color: var(--fg); font-size: 0.9em; margin: 8px 0 0; outline: none; }
-#search:focus { border-color: var(--accent); }
-/* Hero */
-.hero { padding: 20px 0 12px; }
-.hero h1 { font-size: 2.4em; }
-.hero p { font-size: 1.1em; color: var(--fg-muted); max-width: 650px; }
-.hero .btns { margin: 20px 0; display: flex; gap: 12px; flex-wrap: wrap; }
-.hero .btn { display: inline-block; padding: 10px 24px; border-radius: var(--radius); font-weight: 600; font-size: 0.95em; transition: all 0.15s; }
-.hero .btn-primary { background: var(--accent); color: var(--bg); }
-.hero .btn-primary:hover { opacity: 0.85; text-decoration: none; }
-.hero .btn-outline { border: 1px solid var(--border); color: var(--fg); }
-.hero .btn-outline:hover { border-color: var(--accent); text-decoration: none; }
-/* Function table */
-.fn-table td:first-child { font-family: var(--mono); font-size: 0.85em; white-space: nowrap; }
-.fn-table td:nth-child(2) { color: var(--fg-muted); font-size: 0.85em; }
-.fn-table td:nth-child(3) { min-width: 200px; }
-/* Tag */
-.tag { display: inline-block; padding: 1px 8px; border-radius: 4px; font-size: 0.78em; margin-right: 4px; background: var(--bg-soft); color: var(--fg-muted); }
-.tag.w { background: #fab38733; color: #fab387; }
-.tag.s { background: #f5c2e733; color: #f5c2e7; }
-.tag.a { background: #a6e3a133; color: #a6e3a1; }
-.tag.f { background: #89b4fa33; color: #89b4fa; }
-/* Active nav */
-@media (min-width: 769px) {
-  #sidebar a.active { background: var(--bg-card); border-left-color: var(--accent); color: var(--fg); }
-}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--font);background:var(--bg);color:var(--fg);line-height:1.7}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+code{font-family:var(--mono);font-size:.9em;background:var(--code-bg);padding:2px 6px;border-radius:4px}
+pre{border-radius:var(--radius);margin:16px 0;overflow-x:auto}
+pre code{padding:16px 20px;display:block;background:transparent;font-size:.85em;line-height:1.6}
+table{width:100%;border-collapse:collapse;margin:16px 0;font-size:.92em}
+th,td{padding:10px 14px;text-align:left;border-bottom:1px solid var(--border)}
+th{color:var(--accent);font-weight:600;white-space:nowrap}
+tr:hover{background:var(--bg-soft)}
+h1{font-size:2em;margin:0 0 8px}
+h2{font-size:1.5em;margin:40px 0 12px;padding-bottom:8px;border-bottom:1px solid var(--border)}
+h3{font-size:1.2em;margin:28px 0 10px;color:var(--accent2)}
+h4{font-size:1em;margin:20px 0 8px;color:var(--accent3)}
+p{margin:8px 0}ul,ol{padding-left:24px;margin:8px 0}li{margin:4px 0}
+blockquote{border-left:3px solid var(--accent);padding:8px 16px;margin:16px 0;background:var(--bg-soft);border-radius:0 var(--radius) var(--radius) 0;color:var(--fg-muted)}
+#sidebar{position:fixed;left:0;top:0;bottom:0;width:var(--sidebar-width);background:var(--bg-soft);border-right:1px solid var(--border);overflow-y:auto;z-index:10;padding:16px 0}
+#sidebar h2{font-size:1em;padding:8px 20px;margin:0;border:none;color:var(--fg-dim);text-transform:uppercase;letter-spacing:.05em}
+#sidebar .logo{font-size:1.15em;font-weight:700;padding:8px 20px 16px;color:var(--accent)}
+#sidebar a{display:block;padding:6px 20px 6px 24px;font-size:.9em;color:var(--fg-muted);border-left:3px solid transparent;transition:all .15s}
+#sidebar a:hover,#sidebar a.active{color:var(--fg);background:var(--bg-card);border-left-color:var(--accent);text-decoration:none}
+#sidebar a.sub{padding-left:40px;font-size:.85em}
+#content{margin-left:var(--sidebar-width);max-width:960px;padding:40px 48px}
+#menu-toggle{display:none;position:fixed;top:12px;left:12px;z-index:20;background:var(--bg-card);border:1px solid var(--border);color:var(--fg);padding:8px 12px;border-radius:var(--radius);cursor:pointer;font-size:1.1em}
+@media(max-width:768px){#sidebar{transform:translateX(-100%);transition:transform .25s}#sidebar.open{transform:translateX(0)}#content{margin-left:0;padding:24px 16px}#menu-toggle{display:block}}
+.badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:.8em;margin:0 4px}
+.badge-rust{background:#dea58433;color:#dea584}.badge-java{background:#b0721933;color:#b07219}
+.badge-ffm{background:#89b4fa33;color:#89b4fa}.badge-jni{background:#a6e3a133;color:#a6e3a1}
+.badge-warn{background:#f9e2af33;color:#f9e2af}.badge-new{background:#a6e3a133;color:#a6e3a1}
+.card-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:16px;margin:20px 0}
+.card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:20px}
+.card h3{margin:0 0 8px;font-size:1em}.card p{color:var(--fg-muted);font-size:.9em;margin:0}
+#search{width:100%;padding:8px 14px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);color:var(--fg);font-size:.9em;margin:8px 0 0;outline:none}
+#search:focus{border-color:var(--accent)}
+.hero{padding:20px 0 12px}.hero h1{font-size:2.4em}.hero p{font-size:1.1em;color:var(--fg-muted);max-width:650px}
+.hero .btns{margin:20px 0;display:flex;gap:12px;flex-wrap:wrap}
+.hero .btn{display:inline-block;padding:10px 24px;border-radius:var(--radius);font-weight:600;font-size:.95em;transition:all .15s}
+.hero .btn-primary{background:var(--accent);color:var(--bg)}.hero .btn-primary:hover{opacity:.85;text-decoration:none}
+.hero .btn-outline{border:1px solid var(--border);color:var(--fg)}.hero .btn-outline:hover{border-color:var(--accent);text-decoration:none}
+.fn-table td:first-child{font-family:var(--mono);font-size:.85em;white-space:nowrap}
+.fn-table td:nth-child(2){color:var(--fg-muted);font-size:.85em}.fn-table td:nth-child(3){min-width:200px}
+.tag{display:inline-block;padding:1px 8px;border-radius:4px;font-size:.78em;margin-right:4px;background:var(--bg-soft);color:var(--fg-muted)}
+.tag.w{background:#fab38733;color:#fab387}.tag.s{background:#f5c2e733;color:#f5c2e7}
+.tag.a{background:#a6e3a133;color:#a6e3a1}.tag.f{background:#89b4fa33;color:#89b4fa}
+@media(min-width:769px){#sidebar a.active{background:var(--bg-card);border-left-color:var(--accent);color:var(--fg)}}
 </style>
 </head>
 <body>
@@ -113,24 +71,26 @@ blockquote { border-left: 3px solid var(--accent); padding: 8px 16px; margin: 16
 <button id="menu-toggle" onclick="document.getElementById('sidebar').classList.toggle('open')">☰</button>
 
 <nav id="sidebar">
-  <div class="logo">m/s 米每秒</div>
-  <input type="text" id="search" placeholder="搜索..." oninput="searchSidebar(this.value)">
+  <div class="logo">m/s</div>
+  <input type="text" id="search" placeholder="搜索..." oninput="let v=this.value.toLowerCase();document.querySelectorAll('#sidebar a').forEach(a=>{a.style.display=a.textContent.toLowerCase().includes(v)?'':'none'})">
 
   <h2>概述</h2>
   <a href="#home">项目简介</a>
+  <a href="#features">核心特性</a>
   <a href="#architecture">架构设计</a>
   <a href="#quickstart">快速开始</a>
 
-  <h2>核心物理</h2>
-  <a href="#world">World 物理世界</a>
-  <a href="#rigid-body">Rigid Body 刚体</a>
-  <a href="#collider">Collider 碰撞体</a>
-  <a href="#query">Query 空间查询</a>
-  <a href="#events">Events 事件系统</a>
-  <a href="#interaction">Interaction 交互力</a>
+  <h2>Java API</h2>
+  <a href="#java-api-overview">接口总览</a>
+
+  <h2>引力与轨道 (新)</h2>
+  <a href="#celestial">天体参数</a>
+  <a href="#gravity-models">引力模型</a>
+  <a href="#integrators">辛积分器</a>
+  <a href="#terrain-gravity">地形引力</a>
 
   <h2>高级几何</h2>
-  <a href="#voxel">Voxel 体素系统</a>
+  <a href="#voxel">Voxel 体素</a>
   <a href="#bounds">Bounds 扩展边界</a>
   <a href="#neural">Neural Bounds</a>
   <a href="#dop">kDOP / FDH</a>
@@ -143,9 +103,6 @@ blockquote { border-left: 3px solid var(--accent); padding: 8px 16px; margin: 16
   <a href="#controller">Character Controller</a>
   <a href="#joints">Joints 关节</a>
 
-  <h2>AnvilKit</h2>
-  <a href="#anvilkit">ECS 集成</a>
-
   <h2>公式层</h2>
   <a href="#spaceflight">Spaceflight 航天</a>
   <a href="#trajectory">Trajectory 弹道</a>
@@ -155,1818 +112,1081 @@ blockquote { border-left: 3px solid var(--accent); padding: 8px 16px; margin: 16
 
   <h2>领域公式</h2>
   <a href="#chaos">Chaos 混沌</a>
-  <a href="#relativity">Relativity 相对论</a>
-  <a href="#plasma">Plasma 等离子体</a>
-  <a href="#superfluidity">Superfluidity 超流体</a>
-  <a href="#wave-optics">Wave Optics 波动光学</a>
-  <a href="#acoustics">Acoustics 声学</a>
-  <a href="#thermodynamics">Thermodynamics 热力学</a>
-  <a href="#electromagnetism">Electromagnetism 电磁</a>
-  <a href="#fracture">Fracture 断裂</a>
-  <a href="#softbody">Soft Body 软体</a>
-  <a href="#biomechanics">Biomechanics 生物力学</a>
-  <a href="#quantum">Quantum 量子</a>
-  <a href="#molecular">Molecular 分子</a>
-  <a href="#astrophysics">Astrophysics 天体物理</a>
-  <a href="#physchem">PhysChem 物理化学</a>
-  <a href="#continuum">Continuum 连续介质</a>
-  <a href="#transmission">Transmission 传输</a>
-  <a href="#topology">Topology 拓扑优化</a>
-  <a href="#compat">Compat 兼容</a>
+  <a href="#relativity">Relativity</a>
+  <a href="#molecular">Molecular</a>
+  <a href="#astrophysics">Astrophysics</a>
+  <a href="#more">更多模块</a>
 
-  <h2>Java 桥接优化</h2>
-  <a href="#bridge">零拷贝 Bridge</a>
-  <a href="#mc-compat">模组兼容</a>
-
-  <h2>Minecraft 集成</h2>
-  <a href="#mc-jni">Java 21 JNI (1.21.1)</a>
-  <a href="#mc-ffm">Java 25 FFM (1.26.1)</a>
-  <a href="#mc-perf">性能优化</a>
-
-  <h2>事件系统</h2>
-  <a href="#event-cache">缓存注册机制</a>
+  <h2>集成</h2>
+  <a href="#shared-arena">共享内存 Arena</a>
+  <a href="#persistent-buffers">持久化缓冲</a>
+  <a href="#minecraft">Minecraft 集成</a>
+  <a href="#bridge">零拷贝桥接</a>
+  <a href="#ecosystem">生态库</a>
 
   <h2>参考</h2>
   <a href="#precision">精度优化</a>
-  <a href="#error-codes">错误码</a>
+  <a href="#perf">性能优化</a>
   <a href="#verification">验证命令</a>
-  <a href="#build">构建与部署</a>
+  <a href="#build">构建部署</a>
+  <a href="#api-table">完整 API 表</a>
 </nav>
 
+<!-- ====== HERO ====== -->
 <div id="content">
-
 <section id="home" class="hero">
-<h1>m/s 米每秒</h1>
-<p>
-  基于 <code>rapier3d-f64</code> 的 Rust 原生物理运行时。为 Java Minecraft (NeoForge) 提供
-  刚体动力学、空间查询、体素碰撞、航天工程、混沌理论等 590 个 C ABI 函数。
-  Kahan 补偿求和 + mul_add 融合乘加确保双精度稳定性，无锁 Ring Buffer + 零拷贝 Bridge 实现零帧事件开销。
-</p>
+<h1>MPS</h1>
+<p>基于 <strong>Rapier3D-f64</strong> 的高精度 Rust 物理引擎，通过 JNI (Java 21) 和共享内存 (DirectByteBuffer) 向 Java/Minecraft 暴露完整 API。<br>
+支持 <strong>332 项单元测试</strong>、<strong>5 种引力模型</strong>、<strong>3 种辛积分器</strong>、<strong>共享内存零拷贝访问</strong>和 <strong>10 个太阳系天体</strong> 的内置参数。</p>
 <div class="btns">
   <a href="#quickstart" class="btn btn-primary">快速开始</a>
-  <a href="#mc-jni" class="btn btn-outline">Minecraft 集成</a>
-  <a href="#architecture" class="btn btn-outline">架构设计</a>
+  <a href="#java-api-overview" class="btn btn-outline">Java API</a>
+  <a href="https://github.com/DeepSpace-Studio/rigid-body" class="btn btn-outline">GitHub</a>
 </div>
 </section>
 
+<!-- ====== FEATURES ====== -->
+<section id="features">
+<h2>核心特性</h2>
+
+<div class="card-grid">
+<div class="card"><h3>🔬 高精度引力</h3><p>球谐展开 (EGM2008 8×8)、椭球引力、J2-J6 带谐、四极张量。自动根据轨道高度选择最优模型。</p></div>
+<div class="card"><h3>🔢 辛积分器</h3><p>Leapfrog、Yoshida 4 阶、Forest-Ruth 8 阶。Kahan 补偿精度从 15 位→30 位有效数字。后牛顿 1PN+2PN 相对论修正。</p></div>
+<div class="card"><h3>🌍 内置天体</h3><p>太阳系 10 天体精密参数 (JPL DE441)。地球 EGM2008、月球 LP165 + 12 Mascon (GRAIL)、火星 Mars50c。</p></div>
+<div class="card"><h3>⛰️ 地形引力</h3><p>多面体引力 (Werner-Scheeres)、DEM 地形质量分布、FFT 加速。月球 Mascon 模型防止低轨坠毁。</p></div>
+<div class="card"><h3>📊 ForceRegistry</h3><p>类型化力注册表。任意力实现 ForceLaw trait 后自动调度，世界步进内自动聚合报告，无需手写分发逻辑。</p></div>
+<div class="card"><h3>🔗 JNI + 共享内存</h3><p>Java 21 JNI 全绑定 (~280 方法)。共享内存 Arena (DirectByteBuffer) 零 JNI 读写，每帧仅 1 次 world_step 调用。锁自由事件系统。</p></div>
+</div>
+</section>
+
+<!-- ====== ARCHITECTURE ====== -->
 <section id="architecture">
 <h2>架构设计</h2>
 
-<pre><code class="language-text">Java 21 JNI / Java 25 FFM
-  └── Rust C ABI / JNI wrappers
-        └── src/rapier 功能模块 (43 个)
-              ├── rapier3d-f64 (双精度物理引擎)
-              ├── 工程公式层 (航天、弹道、气动、流体...)
-              └── AnvilKit ECS 桥接</code></pre>
+<pre><code class="language-text">Java 21 JNI / 共享内存 (DirectByteBuffer / MemorySegment)
+  └─ Rust C ABI (pub extern "C" fn, ~480 个函数)
+       ├─ abi/jni.rs         — JNI 包装层 (RigidBodyNative, 约 280 个 JNI 绑定)
+       ├─ abi/ffm.rs         — FFM 元数据 (ABI version stub)
+       └─ rapier/
+            ├─ world.rs      — PhysicsWorld + FrameWorkBuffers + world_step
+            ├─ rigid_body.rs — 刚体 CRUD + 运动学 (36 函数)
+            ├─ collider.rs   — 碰撞体 + 扩展边界 (52 函数)
+            ├─ forces.rs     — ForceRegistry + ForceFacade + ForceLaw trait
+            ├─ interaction.rs— 万有引力/空气阻力/库仑摩擦/天体引力 (ForceLaw impls)
+            ├─ events.rs     — 碰撞/接触力事件 + 锁自由环缓冲 + 回调
+            ├─ shared_arena.rs ★ 共享内存 Arena (Body/Collider/ForceReport/Events)
+            ├─ query.rs      — 射线/形状/AABB/体素查询 (24 函数)
+            ├─ controller.rs — 角色控制器
+            ├─ joints.rs     — 6 种关节 (Fixed/Spherical/Prismatic/Revolute/Universal/Cylindrical)
+            ├─ voxel.rs      — 体素碰撞体 (Auto/Cuboids/Greedy/SurfaceMesh)
+            ├─ bounds.rs     — 扩展边界 (胶囊/椭球/棱柱/球壳等)
+            ├─ dop.rs        — kDOP / FDH 离散方向多面体
+            ├─ neural.rs     — 神经网络边界 (MLP 隐式曲面)
+            ├─ crbtree.rs    — Compact RbTree 空间索引
+            ├─ rtree.rs      — RTree 空间索引
+            ├─ bridge.rs     — 批量快照零拷贝桥接 (DirectDoubleBuffer)
+            ├─ compat.rs     — 兼容性辅助
+            ├─ math.rs       — Kahan 补偿累加 / Vec3 算术 / epsilon 常量
+            ├─ celestial_data.rs  ★ 天体参数 (JPL DE441 + EGM2008 + LP165 + Mars50c)
+            ├─ gravitational_models.rs ★ 球谐/椭球/多极引力
+            ├─ integrators.rs ★ 辛积分器 + Kahan + 后牛顿修正
+            ├─ terrain_gravity.rs ★ 多面体/DEM/Mascon 引力
+            ├─ spaceflight.rs — 航天工程 (74 函数: 轨道力学/姿态控制/热控)
+            ├─ trajectory.rs  — 弹道计算
+            ├─ aerodynamics.rs— 空气动力学
+            ├─ fluid.rs       — 流体力学 (AABB/SPH/Navier-Stokes)
+            ├─ astrophysics.rs— 天体物理 (Barnes-Hut/FMM O(N log N))
+            ├─ chaos.rs       — 混沌与非线性
+            ├─ relativity.rs  — 相对论
+            ├─ molecular.rs   — 分子动力学
+            ├─ quantum.rs     — 量子力学
+            ├─ plasma.rs      — 等离子体
+            ├─ superfluidity.rs— 超流体
+            ├─ wave_optics.rs — 波动光学
+            ├─ acoustics.rs   — 声学
+            ├─ thermodynamics.rs— 热力学
+            ├─ electromagnetism.rs— 电磁学
+            ├─ fracture.rs    — 断裂力学
+            ├─ softbody.rs    — 软体动力学 (质量弹簧/XPBD)
+            ├─ biomechanics.rs— 生物力学 (Hill 肌肉模型)
+            ├─ physchem.rs    — 物理化学 (反应扩散)
+            ├─ continuum.rs   — 连续介质力学 (FEM)
+            ├─ topology.rs    — 拓扑优化 (SIMP)
+            ├─ transmission.rs— 机械传动
+            ├─ control_theory.rs— 控制理论 (PID/MPC/LQR)
+            ├─ error.rs       — 错误码
+            └─ ffi/types.rs   — FFI 类型定义 + C 结构体</code></pre>
 
-<h3>技术栈</h3>
-<table>
-<tr><th>层级</th><th>技术</th><th>说明</th></tr>
-<tr><td>物理引擎</td><td><span class="badge badge-rust">rapier3d-f64 0.33.0</span></td><td>双精度 Rapier 物理引擎，启用 parallel 特性</td></tr>
-<tr><td>内存分配</td><td><span class="badge badge-rust">MiMalloc</span></td><td>全局分配器，优化多线程性能</td></tr>
-<tr><td>并行计算</td><td><span class="badge badge-rust">rayon 1.12</span></td><td>并行 broad-phase / narrow-phase</td></tr>
-<tr><td>同步原语</td><td><span class="badge badge-rust">parking_lot 0.12</span></td><td>高性能 Mutex / RwLock</td></tr>
-<tr><td>Java 21</td><td><span class="badge badge-jni">JNI (ljni 0.21)</span></td><td>传统 JNI 绑定，Minecraft 1.21.1</td></tr>
-<tr><td>Java 25</td><td><span class="badge badge-ffm">FFM (Foreign Function & Memory)</span></td><td>现代化直接内存访问，Minecraft 1.26.1+</td></tr>
-<tr><td>游戏框架</td><td><span class="badge badge-java">NeoForge</span></td><td>Minecraft mod 加载器</td></tr>
-<tr><td>ECS (可选)</td><td><span class="badge badge-rust">AnvilKit + bevy_ecs 0.19</span></td><td>Entity-Component 系统桥接</td></tr>
-</table>
-
-<h3>源码结构</h3>
-<pre><code class="language-text">src/
-  lib.rs                — crate 入口, 全局分配器
-  abi/
-    jni.rs              — Java_org_polaris2023_* JNI 桥接函数
-    ffm.rs              — abi_version / abi_supports_ffm / abi_supports_jni
-  helper/
-    helper.rs           — JNI 数组/本地内存转换
-  rapier/
-    ffi/
-      types.rs          — 所有 #[repr(C)] 结构体 & 枚举 (~2400 行)
-      convert.rs        — Rapier ↔ ABI 类型互转
-    math.rs             — Kahan求和 / mul_add融合乘加 / epsilon体系 (300+ 行)
-    error.rs            — 线程本地错误状态
-    bridge.rs           — 零拷贝 Java-Native 桥接 (DirectByteBuffer 共享内存)
-    interaction.rs      — 刚体间交互力 (万有引力/库仑摩擦/空气阻力)
-    world.rs            — PhysicsWorld/交互力调度/ring buffer (16 个)
-    rigid_body.rs       — 刚体构建器和运行时操作 (57 个)
-    collider.rs         — 碰撞体构建器和运行时操作 (56 个)
-    query.rs            — 射线/点/AABB/OBB/球体/形状投射查询 (24 个)
-    events.rs           — 碰撞/接触力事件/无锁RingBuffer/回调注册 (41 个)
-    voxel.rs            — 体素碰撞体生成 (17 个)
-    joints.rs           — 冲量关节管理 (10 个)
-    controller.rs       — 角色控制器 (13 个)
-    crbtree.rs          — Compact RbTree 空间索引 (10 个)
-    rtree.rs            — RTree 空间索引 (10 个)
-    bounds.rs           — 胶囊/SSV/椭球/棱柱/圆柱/球壳 (30 个)
-    dop.rs              — kDOP / FDH 构建器 (2 个)
-    neural.rs           — 神经网络边界 (6 个)
-    compat.rs           — 兼容性辅助 (4 个)
-    aerodynamics.rs     — 气动表面力/体素网格 (KahanVec3) (5 个)
-    fluid.rs            — 流体浮力/阻力/NS方程/SPH (11 个)
-    trajectory.rs       — 质点弹道 & 助推滑翔模型 (6 个)
-    spaceflight.rs      — 轨道力学/姿态/导航/子系统 (74 个)
-    control_theory.rs   — PID/状态空间/MPC (4 个)
-    anvilkit.rs         — AnvilKit ECS 桥接 (20 个)
-    [领域公式 15 个]     — chaos, relativity, plasma, superfluidity,
-                          wave_optics, acoustics, thermodynamics,
-                          electromagnetism, fracture, softbody,
-                          biomechanics, quantum, molecular,
-                          astrophysics, physchem, continuum,
-                          transmission, topology</code></pre>
-
-<h3>统计</h3>
-<div class="card-grid">
-  <div class="card"><h3>590</h3><p><code>pub extern "C" fn</code> 函数</p></div>
-  <div class="card"><h3>44</h3><p>Rust 源模块</p></div>
-  <div class="card"><h3>~2400</h3><p>行 FFI 类型定义</p></div>
-  <div class="card"><h3>188</h3><p>Rust 单元测试</p></div>
-  <div class="card"><h3>2</h3><p>Java 访问层 (JNI + FFM)</p></div>
-  <div class="card"><h3>0.1.5</h3><p>当前版本</p></div>
-</div>
+<h3>world_step 力调度流程</h3>
+<pre><code class="language-text">world_step()
+  ├── Arena drain — 处理 Java 共享内存命令 (AddForce/SetPose/WakeUp/...)
+  ├── ForceFacade 创建 (复用持久化 FrameWorkBuffers: frame_log + pending + friction_work)
+  ├── ForceRegistry::apply_all(&mut facade)
+  │     ├── CelestialGravityForceLaw → 自动选球谐/椭球/J2
+  │     ├── NewtonianGravityForceLaw → O(n²) / Barnes-Hut(N>1000)
+  │     ├── AirDragForceLaw → Stokes + 湍流 (Reynolds-aware)
+  │     └── (用户注册的其他 ForceLaw...)
+  ├── Backward-compat: apply_custom_external_forces_with_facade
+  │     └── 浮力/电磁/弹簧/点重力 → PendingForce 持久缓冲
+  ├── Backward-compat: apply_body_interactions_with_facade
+  │     └── 万有引力/库仑摩擦/空气阻力 (未注册 legacy 路径)
+  ├── facade.drain_report() → ForceReport (固定数组聚合, 零 BTreeMap 分配)
+  ├── pipeline.step() + 事件收集 (锁自由 ProducerCache)
+  └── Arena flush — 刷新 Body/Collider/ForceReport/Events → Java 零拷贝读取</code></pre>
 </section>
 
+<!-- ====== QUICKSTART ====== -->
 <section id="quickstart">
 <h2>快速开始</h2>
 
-<h3>环境要求</h3>
-<ul>
-  <li>Rust 1.85+ (edition 2024)</li>
-  <li>Java 21 (JNI 路径) 或 Java 25 (FFM 路径)</li>
-  <li>Gradle 8.x (Minecraft mod 构建)</li>
-</ul>
+<h3>Rust (C ABI)</h3>
+<pre><code class="language-rust">use mps_rigid_body::rapier::*;
 
-<h3>构建原生库</h3>
-<pre><code class="language-shell"># Release 构建
-cargo build --release
+// 创建世界
+let world = world::world_create(ffi::Vec3 { x: 0.0, y: -9.81, z: 0.0 });
 
-# 运行 Rust 测试
-cargo test
-# 输出: test result: ok. 188 passed</code></pre>
-
-<h3>Java 21 JNI (Minecraft 1.21.1)</h3>
-<pre><code class="language-shell">cd test21
-.\gradlew.bat check          # 构建 + 运行 JNI smoke test
-.\gradlew.bat runClient      # 启动 Minecraft 客户端</code></pre>
-
-<h3>Java 25 FFM (Minecraft 1.26.1 预览)</h3>
-<pre><code class="language-shell">cd test25
-.\gradlew.bat check          # 运行 FFM smoke test
-.\gradlew.bat runClient -Penable_neoforge_preview=true</code></pre>
-
-<h3>最小示例 (Java JNI)</h3>
-<pre><code class="language-java">import org.polaris2023.msp_rigid_body.RigidBody;
-
-// 创建物理世界 (重力 0, -9.81, 0)
-long world = RigidBody.worldCreate(0, -9.81, 0);
+// 注册地球 8 阶球谐引力 (自动选择最优模型)
+world::world_register_celestial_gravity(world, 3 /*Earth*/, 8);
 
 // 创建动态刚体
-long builder = RigidBody.rigidBodyBuilderCreate(0); // 0 = Dynamic
-RigidBody.rigidBodyBuilderSetTranslation(builder, 0, 64, 0);
-long body = RigidBody.worldInsertRigidBody(world, builder);
-RigidBody.rigidBodyBuilderDestroy(builder);
+let builder = rigid_body::rigid_body_builder_create(ffi::BodyStatus::Dynamic as u32);
+rigid_body::rigid_body_builder_set_translation(builder, ffi::Vec3 { x: 7e6, y: 0., z: 0. });
+rigid_body::rigid_body_builder_set_additional_mass(builder, 100.0);
+let body = rigid_body::rigid_body_builder_build(builder);
+let handle = rigid_body::world_insert_rigid_body(world, body);
 
-// 推进模拟
-RigidBody.worldStep(world, 1.0 / 20.0);
+// 推进模拟 (ForceRegistry 自动执行所有注册的力)
+world::world_step(world, 1.0 / 60.0);
 
 // 读取位置
-double[] pos = RigidBody.rigidBodyGetTranslation(world, body);
-System.out.printf("x=%.2f y=%.2f z=%.2f%n", pos[0], pos[1], pos[2]);
+let pos = rigid_body::rigid_body_get_translation(world, handle);
+world::world_destroy(world);</code></pre>
 
-// 清理
-RigidBody.worldDestroy(world);</code></pre>
+<h3>Java (JNI)</h3>
+<pre><code class="language-java">// 创建世界并注册地球引力
+long world = RigidBodyNative.worldCreate(0, -9.81, 0);
+RigidBodyNative.worldRegisterCelestialGravity(world, 3, 8);
 
-<h3>最小示例 (Rust)</h3>
-<pre><code class="language-rust">use mps_rigid_body::ffi::*;
-use std::ffi::c_void;
+// 创建 LEO 卫星
+long builder = RigidBodyNative.rigidBodyBuilderCreate(0);
+RigidBodyNative.rigidBodyBuilderSetTranslation(builder, 7_000_000, 0, 0);
+RigidBodyNative.rigidBodyBuilderSetAdditionalMass(builder, 100);
+long body = RigidBodyNative.rigidBodyBuilderBuild(builder);
+long handle = RigidBodyNative.worldInsertRigidBody(world, body);
 
-unsafe {
-    let world = world_create(Vec3 { x: 0.0, y: -9.81, z: 0.0 });
-    let builder = rigid_body_builder_create(BodyStatus::Dynamic as u32);
-    rigid_body_builder_set_translation(builder, Vec3 { x: 0.0, y: 64.0, z: 0.0 });
-    let body = world_insert_rigid_body(world, builder);
-    rigid_body_builder_destroy(builder);
-    world_step(world, 1.0 / 60.0);
-    let mut pos = Vec3::default();
-    rigid_body_get_translation_out(world, body, &mut pos);
-    world_destroy(world);
-}</code></pre>
-</section>
-
-<!-- ====== CORE PHYSICS ====== -->
-<section id="world">
-<h2>World — 物理世界</h2>
-<p>物理世界是整个模拟的根容器，持有所有刚体、碰撞体、关节、事件队列和查询管线。</p>
-
-<h3>内部状态</h3>
-<pre><code class="language-rust">struct PhysicsWorld {
-    pipeline: PhysicsPipeline,
-    gravity: Vector,
-    integration_parameters: IntegrationParameters,
-    islands: IslandManager,
-    broad_phase: BroadPhaseBvh,
-    narrow_phase: NarrowPhase,
-    bodies: RigidBodySet,
-    colliders: ColliderSet,
-    impulse_joints: ImpulseJointSet,
-    multibody_joints: MultibodyJointSet,
-    ccd_solver: CCDSolver,
-    hooks: CallbackPhysicsHooks,
-    events: Arc&lt;CollectingEventHandler&gt;,
-}</code></pre>
-
-<h3>函数列表</h3>
-<table class="fn-table">
-<tr><th>函数</th><th>签名</th><th>说明</th></tr>
-<tr><td><code>world_create</code></td><td><span class="tag w">W</span> <code>(gravity: Vec3) → *mut WorldHandle</code></td><td>创建物理世界，默认 dt=1/60s, 4 solver iterations</td></tr>
-<tr><td><code>world_destroy</code></td><td><span class="tag w">W</span> <code>(world: *mut WorldHandle)</code></td><td>销毁物理世界及所有资源</td></tr>
-<tr><td><code>world_step</code></td><td><span class="tag w">W</span> <code>(world: *mut WorldHandle, dt: f64)</code></td><td>推进模拟一步 (dt ≤ 1.0s)</td></tr>
-<tr><td><code>world_set_gravity</code></td><td><span class="tag w">W</span> <code>(world: *mut WorldHandle, gravity: Vec3)</code></td><td>设置重力</td></tr>
-<tr><td><code>world_get_gravity</code></td><td><span class="tag s">S</span> <code>(world: *const WorldHandle) → Vec3</code></td><td>按值返回重力</td></tr>
-<tr><td><code>world_get_gravity_out</code></td><td><span class="tag w">W</span> <code>(world: *const WorldHandle, out: *mut Vec3)</code></td><td>FFM 友好的 out-pointer 版本</td></tr>
-<tr><td><code>world_set_integration_parameters</code></td><td><span class="tag w">W</span> <code>(world, dt, solver_iters, ccd_substeps) → Bool</code></td><td>设置积分参数</td></tr>
-<tr><td><code>world_get_integration_parameters</code></td><td><span class="tag w">W</span> <code>(world, out, capacity) → i32</code></td><td>读取积分参数到缓冲区</td></tr>
-<tr><td><code>world_get_rigid_body_set_size</code></td><td><span class="tag s">S</span> <code>(world: *const WorldHandle) → i32</code></td><td>刚体数量</td></tr>
-<tr><td><code>world_get_collider_set_size</code></td><td><span class="tag s">S</span> <code>(world: *const WorldHandle) → i32</code></td><td>碰撞体数量</td></tr>
-<tr><td><code>world_body_snapshot_count</code></td><td><span class="tag s">S</span> <code>(world: *const WorldHandle) → u32</code></td><td>全量快照计数</td></tr>
-<tr><td><code>world_body_snapshot</code></td><td><span class="tag w">W</span> <code>(world, handles, values, capacity) → i32</code></td><td>批量快照所有刚体位姿/速度</td></tr>
-<tr><td><code>world_dynamic_body_snapshot_count</code></td><td><span class="tag s">S</span> <code>(world: *const WorldHandle) → u32</code></td><td>动态刚体快照计数</td></tr>
-<tr><td><code>world_dynamic_body_snapshot</code></td><td><span class="tag w">W</span> <code>(world, handles, values, capacity) → i32</code></td><td>批量快照动态刚体</td></tr>
-<tr><td><code>world_update_body_poses</code></td><td><span class="tag w">W</span> <code>(world, handles, values, count, wakeUp) → i32</code></td><td>批量更新刚体位姿</td></tr>
-<tr><td><code>world_update_body_velocities</code></td><td><span class="tag w">W</span> <code>(world, handles, values, count, wakeUp) → i32</code></td><td>批量更新刚体速度</td></tr>
-</table>
-
-<h3>Java 使用</h3>
-<pre><code class="language-java">// 方式 1: 静态 API
-long world = RigidBody.worldCreate(0, -9.81, 0);
-RigidBody.worldStep(world, 1.0 / 20.0);
-RigidBody.worldDestroy(world);
-
-// 方式 2: 面向对象封装
-try (PhysicsWorld world = new PhysicsWorld(0, -9.81, 0)) {
-    world.deltaSeconds(1.0 / 20.0).step();
-    int bodyCount = world.rigidBodyCount();
-}</code></pre>
-</section>
-
-<section id="rigid-body">
-<h2>Rigid Body — 刚体</h2>
-<p>支持动态 (Dynamic)、静态 (Fixed)、基于位置的运动学 (KinematicPositionBased) 和基于速度的运动学 (KinematicVelocityBased) 四种状态。</p>
-
-<h3>Builder 函数</h3>
-<table class="fn-table">
-<tr><th>函数</th><th>说明</th></tr>
-<tr><td><code>rigid_body_builder_create(status: u32) → *mut RigidBodyBuilderHandle</code></td><td>创建构建器</td></tr>
-<tr><td><code>rigid_body_builder_destroy(builder: *mut RigidBodyBuilderHandle)</code></td><td>销毁构建器</td></tr>
-<tr><td><code>rigid_body_builder_set_translation(builder, x, y, z)</code></td><td>设置初始位置</td></tr>
-<tr><td><code>rigid_body_builder_set_rotation(builder, i, j, k, w)</code></td><td>设置初始旋转 (四元数)</td></tr>
-<tr><td><code>rigid_body_builder_set_pose(builder, x, y, z, i, j, k, w)</code></td><td>同时设置位置和旋转</td></tr>
-<tr><td><code>rigid_body_builder_set_linvel(builder, x, y, z)</code></td><td>设置初始线速度</td></tr>
-<tr><td><code>rigid_body_builder_set_angvel(builder, x, y, z)</code></td><td>设置初始角速度</td></tr>
-<tr><td><code>rigid_body_builder_set_additional_mass(builder, mass: f64)</code></td><td>设置附加质量</td></tr>
-<tr><td><code>rigid_body_builder_set_additional_mass_properties(builder, mass, cx, cy, cz, ix, iy, iz)</code></td><td>设置完整质量属性</td></tr>
-<tr><td><code>rigid_body_builder_set_gravity_scale(builder, scale: f64)</code></td><td>设置重力缩放</td></tr>
-<tr><td><code>rigid_body_builder_set_linear_damping(builder, damping: f64)</code></td><td>线性阻尼</td></tr>
-<tr><td><code>rigid_body_builder_set_angular_damping(builder, damping: f64)</code></td><td>角阻尼</td></tr>
-<tr><td><code>rigid_body_builder_set_can_sleep(builder, can: Bool)</code></td><td>允许休眠</td></tr>
-<tr><td><code>rigid_body_builder_set_sleeping(builder, sleeping: Bool)</code></td><td>初始休眠状态</td></tr>
-<tr><td><code>rigid_body_builder_set_enabled_rotations(builder, x, y, z, lock_x, lock_y, lock_z)</code></td><td>锁定旋转轴</td></tr>
-<tr><td><code>rigid_body_builder_set_user_data(builder, data: u64)</code></td><td>设置用户数据</td></tr>
-</table>
-
-<h3>运行时函数</h3>
-<table class="fn-table">
-<tr><th>函数</th><th>说明</th></tr>
-<tr><td><code>world_insert_rigid_body(world, builder) → RigidBodyHandleRaw</code></td><td>插入刚体到世界</td></tr>
-<tr><td><code>rigid_body_get_translation / _out(world, body) → Vec3</code></td><td>读取位置</td></tr>
-<tr><td><code>rigid_body_get_rotation / _out(world, body) → Quat</code></td><td>读取旋转</td></tr>
-<tr><td><code>rigid_body_get_linvel / _out(world, body) → Vec3</code></td><td>读取线速度</td></tr>
-<tr><td><code>rigid_body_get_angvel / _out(world, body) → Vec3</code></td><td>读取角速度</td></tr>
-<tr><td><code>rigid_body_get_status(world, body) → u32</code></td><td>读取刚体状态</td></tr>
-<tr><td><code>rigid_body_set_translation / _flag(world, body, x, y, z, wakeUp) → Bool</code></td><td>设置位置</td></tr>
-<tr><td><code>rigid_body_set_rotation / _flag(...)</code></td><td>设置旋转</td></tr>
-<tr><td><code>rigid_body_set_pose / _flag(...)</code></td><td>设置位姿</td></tr>
-<tr><td><code>rigid_body_set_linvel / _flag(...)</code></td><td>设置线速度</td></tr>
-<tr><td><code>rigid_body_set_angvel / _flag(...)</code></td><td>设置角速度</td></tr>
-<tr><td><code>rigid_body_add_force / _flag(world, body, x, y, z)</code></td><td>施力</td></tr>
-<tr><td><code>rigid_body_add_torque / _flag(world, body, x, y, z)</code></td><td>施扭矩</td></tr>
-<tr><td><code>rigid_body_apply_impulse / _flag(...)</code></td><td>施加冲量</td></tr>
-<tr><td><code>rigid_body_apply_torque_impulse / _flag(...)</code></td><td>施加扭矩冲量</td></tr>
-<tr><td><code>rigid_body_enable_ccd / _flag(world, body, enabled)</code></td><td>启用连续碰撞检测</td></tr>
-<tr><td><code>rigid_body_sleep / _flag(world, body)</code></td><td>强制休眠</td></tr>
-<tr><td><code>rigid_body_wake_up / _flag(world, body)</code></td><td>唤醒</td></tr>
-<tr><td><code>rigid_body_is_sleeping(world, body) → u8</code></td><td>休眠状态查询</td></tr>
-<tr><td><code>rigid_body_remove / _flag(world, body)</code></td><td>移除刚体</td></tr>
-<tr><td><code>rigid_body_copy(world, body) → RigidBodyHandleRaw</code></td><td>复制刚体</td></tr>
-</table>
-
-<h3>Java 使用</h3>
-<pre><code class="language-java">// Builder 模式
-PhysicsWorld world = new PhysicsWorld(0, -9.81, 0);
-RigidBody body = world.body()                     // 开始构建
-    .status(BodyStatus.DYNAMIC)
-    .translation(0, 64, 0)                        // 初始位置
-    .linearVelocity(5, 0, 0)                      // 初速度
-    .gravityScale(1.0)
-    .canSleep(true)
-    .build()                                       // 结束构建
-    .body(world);                                   // 插入世界
-
-world.step();                                      // 推进模拟
-double[] pos = body.translation(world);            // [x, y, z]</code></pre>
-</section>
-
-<section id="collider">
-<h2>Collider — 碰撞体</h2>
-
-<h3>基础形状</h3>
-<table>
-<tr><th>形状</th><th>参数</th><th>说明</th></tr>
-<tr><td>Ball</td><td>radius</td><td>球体</td></tr>
-<tr><td>Cuboid</td><td>hx, hy, hz</td><td>长方体</td></tr>
-<tr><td>Capsule (Y/X/Z)</td><td>half_height, radius</td><td>胶囊体</td></tr>
-<tr><td>Cylinder</td><td>half_height, radius</td><td>圆柱体</td></tr>
-<tr><td>Round Cylinder</td><td>half_height, radius, border_radius</td><td>圆角圆柱体</td></tr>
-<tr><td>Cone</td><td>half_height, radius</td><td>圆锥体</td></tr>
-<tr><td>Round Cone</td><td>half_height, radius, border_radius</td><td>圆角圆锥体</td></tr>
-<tr><td>Round Cuboid</td><td>hx, hy, hz, border_radius</td><td>圆角长方体</td></tr>
-</table>
-
-<h3>扩展构建器</h3>
-<table>
-<tr><th>构建器</th><th>说明</th></tr>
-<tr><td>OBB</td><td>有向包围盒</td></tr>
-<tr><td>Sphere</td><td>显式球体</td></tr>
-<tr><td>Heightmap</td><td>高度图地形</td></tr>
-<tr><td>Convex Hull</td><td>凸包 (从点云)</td></tr>
-<tr><td>Point Cloud Bounds</td><td>点云包围体</td></tr>
-<tr><td>Double BV</td><td>双层包围体</td></tr>
-<tr><td>Skewed OBB</td><td>倾斜 OBB</td></tr>
-<tr><td>Discrete OBB</td><td>离散 OBB</td></tr>
-<tr><td>Fused Collapsing Bounds</td><td>融合坍缩边界</td></tr>
-<tr><td>Edge BVH</td><td>边 BVH</td></tr>
-<tr><td>Medial Spheres</td><td>中轴球体</td></tr>
-</table>
-
-<h3>Builder 属性</h3>
-<pre><code class="language-text">translation, rotation, pose          — 初始位姿
-sensor                                — 传感器模式 (不产生碰撞响应)
-friction, restitution, density        — 物理材质
-collision_groups, solver_groups       — 碰撞/求解分组
-active_events, active_hooks           — 事件/钩子开关
-contact_force_event_threshold         — 接触力事件阈值</code></pre>
-
-<h3>Java 使用</h3>
-<pre><code class="language-java">PhysicsWorld world = new PhysicsWorld(0, -9.81, 0);
-
-// 长方体碰撞体
-Collider collider = world.cuboidCollider(0.5, 1.0, 0.5)
-    .sensor(false)
-    .friction(0.5)
-    .restitution(0.3)
-    .density(1.0)
-    .buildAndInsert();
-
-// 带父刚体的碰撞体
-Collider child = world.sphereCollider(0, 0.5, 0, 0.3)
-    .buildAndInsert(body);</code></pre>
-</section>
-
-<section id="query">
-<h2>Query — 空间查询</h2>
-
-<table class="fn-table">
-<tr><th>函数</th><th>说明</th></tr>
-<tr><td><code>query_cast_ray / _out</code></td><td>射线投射</td></tr>
-<tr><td><code>query_cast_ray_batch</code></td><td>批量射线投射</td></tr>
-<tr><td><code>query_project_point / _out</code></td><td>点投影</td></tr>
-<tr><td><code>query_intersect_point_count</code></td><td>点相交计数</td></tr>
-<tr><td><code>query_intersect_aabb_count</code></td><td>AABB 相交计数</td></tr>
-<tr><td><code>query_intersect_aabb</code></td><td>AABB 相交查询 (输出 handle 列表)</td></tr>
-<tr><td><code>query_intersect_obb_count</code></td><td>OBB 相交计数</td></tr>
-<tr><td><code>query_intersect_obb</code></td><td>OBB 相交查询</td></tr>
-<tr><td><code>query_intersect_sphere_count</code></td><td>球体相交计数</td></tr>
-<tr><td><code>query_intersect_sphere</code></td><td>球体相交查询</td></tr>
-<tr><td><code>query_cast_shape / _out</code></td><td>形状投射</td></tr>
-</table>
-
-<h3>QueryFilterDesc 字段</h3>
-<table>
-<tr><th>字段</th><th>类型</th><th>说明</th></tr>
-<tr><td><code>flags</code></td><td><code>u32</code></td><td>查询标志位</td></tr>
-<tr><td><code>groups</code></td><td><code>InteractionGroupsDesc</code></td><td>交互组</td></tr>
-<tr><td><code>exclude_collider</code></td><td><code>u64</code></td><td>排除碰撞体</td></tr>
-<tr><td><code>exclude_rigid_body</code></td><td><code>u64</code></td><td>排除刚体</td></tr>
-</table>
-
-<h3>Java 使用</h3>
-<pre><code class="language-java">PhysicsWorld world = new PhysicsWorld(0, -9.81, 0);
-Query query = world.query();
-
-// 射线投射
-Query.RayHit hit = query.castRay(0, 64, 0, 0, -1, 0, 100.0);
-if (hit != null) {
-    System.out.printf("命中碰撞体 %d, 距离 %.2f%n", hit.collider, hit.timeOfImpact);
+// 推进 1 小时轨道 (60×60 步)
+for (int i = 0; i < 3600; i++) {
+    RigidBodyNative.worldStep(world, 1.0);
 }
 
-// AABB 查询
-long[] results = query.intersectAabb(-10, 0, -10, 10, 20, 10, 256);
-System.out.printf("找到 %d 个碰撞体%n", results.length);</code></pre>
-</section>
+// 读取轨道
+double[] pos = RigidBodyNative.rigidBodyGetTranslation(world, handle);
+System.out.printf("位置: %.0f, %.0f, %.0f m%n", pos[0], pos[1], pos[2]);
 
-<section id="events">
-<h2>Events — 事件系统</h2>
-<p>事件队列使用 <code>parking_lot::Mutex</code> 保护，最大存储 <code>16,384</code> 个事件。</p>
+RigidBodyNative.worldDestroy(world);</code></pre>
 
-<h3>事件类型</h3>
-<table>
-<tr><th>事件</th><th>结构体</th><th>字段</th></tr>
-<tr><td>碰撞事件</td><td><code>CollisionEventRecord</code></td><td>started, collider1, collider2, sensor, removed</td></tr>
-<tr><td>接触力事件</td><td><code>ContactForceEventRecord</code></td><td>collider1, collider2, total_force, max_force_direction, max_force_magnitude</td></tr>
-</table>
+<h3>Java (共享内存 Arena — 零 JNI)</h3>
+<pre><code class="language-java">// 初始化 Arena (2 次 JNI, 之后零 JNI 读写)
+long world = RigidBodyNative.worldCreate(0, -9.81, 0);
+long[] addrSize = new long[2];
+RigidBodyNative.worldCreateSharedArena(world, 1024, 2048, 4096, 4096, addrSize);
 
-<h3>函数</h3>
-<table class="fn-table">
-<tr><th>函数</th><th>说明</th></tr>
-<tr><td><code>world_clear_events(world)</code></td><td>清空事件队列</td></tr>
-<tr><td><code>world_collision_event_count(world) → i32</code></td><td>碰撞事件数量</td></tr>
-<tr><td><code>world_get_collision_event(world, index, out)</code></td><td>读取单个碰撞事件</td></tr>
-<tr><td><code>world_get_collision_events(world, out, capacity) → i32</code></td><td>批量读取碰撞事件</td></tr>
-<tr><td><code>world_contact_force_event_count(world) → i32</code></td><td>接触力事件数量</td></tr>
-<tr><td><code>world_get_contact_force_event(world, index, out)</code></td><td>读取单个接触力事件</td></tr>
-<tr><td><code>world_get_contact_force_events(world, out, capacity) → i32</code></td><td>批量读取接触力事件</td></tr>
-</table>
+// 包装为 DirectByteBuffer — Java 1.4+ API, 零 sun.* 依赖
+ByteBuffer buf = RigidBodyNative.worldGetArenaDirectByteBuffer(world);
 
-<h3>Java 使用</h3>
-<pre><code class="language-java">world.step();
-
-// 读取碰撞事件
-for (PhysicsWorld.CollisionEvent event : world.collisionEvents()) {
-    if (event.started()) {
-        System.out.printf("碰撞开始: %d ↔ %d (sensor=%b)%n",
-            event.collider1(), event.collider2(), event.sensor());
-    }
-}
-
-// 读取接触力事件
-for (PhysicsWorld.ContactForceEvent event : world.contactForceEvents()) {
-    System.out.printf("接触力: %.2f N, 方向: [%.2f, %.2f, %.2f]%n",
-        event.totalForceMagnitude(),
-        event.maxForceDirection()[0],
-        event.maxForceDirection()[1],
-        event.maxForceDirection()[2]);
-}
-
-world.clearEvents();</code></pre>
-</section>
-
-<!-- ====== ADVANCED GEOMETRY ====== -->
-
-<section id="interaction">
-<h2>Interaction — 刚体交互力系统</h2>
-<p>
-  刚体间物理交互在 <code>world_step</code> 内自动执行。初始化时通过 <code>world_set_*_law</code>
-  配置一次，之后每帧零额外 FFI 调用。
-</p>
-
-<h3>三大交互力</h3>
-<table>
-<tr><th>系统</th><th>物理模型</th><th>配置</th></tr>
-<tr><td><strong>万有引力</strong></td><td>F = G·m₁·m₂/r² (O(n²) 直接求和)</td><td><code>NewtonGravityLaw</code> — 支持自定义 G、最小/最大距离</td></tr>
-<tr><td><strong>库仑摩擦力</strong></td><td>F_f = μ·F_n，静/动摩擦自动切换</td><td><code>CoulombFrictionLaw</code> — 读取 narrow-phase 接触数据施加</td></tr>
-<tr><td><strong>空气阻力</strong></td><td>Stokes (低 Re) + 湍流 (高 Re) 双模式</td><td><code>AirDragLaw</code> — 雷诺数自适应切换</td></tr>
-</table>
-
-<h3>架构</h3>
-<pre><code class="language-text">world_step()
-  ├── apply_custom_external_forces_with_custom()  ← 浮力/电磁/弹簧/点重力
-  ├── apply_body_interactions()
-  │     ├── pairwise_gravity()        ← 刚体间万有引力
-  │     ├── apply_coulomb_friction()  ← 接触面摩擦力
-  │     └── per_body_air_drag()       ← 空气阻力
-  └── pipeline.step()                 ← Rapier 求解器</code></pre>
-
-<h3>FFI 函数</h3>
-<table class="fn-table">
-<tr><th>函数</th><th>说明</th></tr>
-<tr><td><code>world_set_newton_gravity_law(world, law) → Bool</code></td><td>设置万有引力参数（G、最小距离、最大距离）</td></tr>
-<tr><td><code>world_clear_newton_gravity_law(world)</code></td><td>清除万有引力</td></tr>
-<tr><td><code>world_get_newton_gravity_law(world, out) → Bool</code></td><td>读取万有引力配置</td></tr>
-<tr><td><code>world_set_coulomb_friction_law(world, law) → Bool</code></td><td>设置库仑摩擦（静/动系数、阈值）</td></tr>
-<tr><td><code>world_set_air_drag_law(world, law) → Bool</code></td><td>设置空气阻力（密度、粘度、特征长度等）</td></tr>
-<tr><td><code>world_get_custom_physics_report(world, out) → Bool</code></td><td>读取综合物理报告（力、力矩、雷诺数）</td></tr>
-</table>
-
-<h3>Java 使用示例</h3>
-<pre><code class="language-java">// === 初始化（仅一次）===
-PhysicsWorld world = new PhysicsWorld(0, -9.81, 0);
-
-// 1. 启用刚体间万有引力 (G=1000 适合游戏尺度)
-world.setNewtonGravityLaw(new NewtonGravityLaw()
-    .gravitationalConstant(1000.0)
-    .minDistance(0.01)
-    .enabled(true));
-
-// 2. 启用库仑摩擦力
-world.setCoulombFrictionLaw(new CoulombFrictionLaw()
-    .staticCoefficient(0.6)
-    .dynamicCoefficient(0.4)
-    .velocityThreshold(0.01)
-    .enabled(true));
-
-// 3. 启用空气阻力
-world.setAirDragLaw(new AirDragLaw()
-    .fluidVelocity(0, 0, 0)
-    .density(1.225)         // 空气密度 kg/m³
-    .dragCoefficient(0.47)  // 球体阻力系数
-    .referenceArea(0.5)     // 参考面积 m²
-    .enabled(true));
-
-// === 每帧循环 ===
+// 每帧循环 (仅 1 次 JNI 触发)
 while (running) {
-    world.step();  // 三种交互力自动执行
-    // 无需额外调用
-}</code></pre>
+    // 读取刚体状态 — 零 JNI: ByteBuffer.getDouble()
+    int bodyCount = buf.getInt(32);
+    for (int i = 0; i &lt; bodyCount; i++) {
+        double px = buf.getDouble(128 + i * 96 + 8);
+        double py = buf.getDouble(128 + i * 96 + 16);
+        double pz = buf.getDouble(128 + i * 96 + 24);
+    }
 
-<h3>NewtonGravityLaw 结构体</h3>
-<table>
-<tr><th>字段</th><th>类型</th><th>默认值</th><th>说明</th></tr>
-<tr><td><code>gravitational_constant</code></td><td><code>f64</code></td><td>6.67430e-11</td><td>万有引力常数 (N·m²/kg²)</td></tr>
-<tr><td><code>min_distance</code></td><td><code>f64</code></td><td>0.01</td><td>最小距离，防止除零</td></tr>
-<tr><td><code>max_distance</code></td><td><code>f64</code></td><td>0.0</td><td>最大作用距离 (0=无限)</td></tr>
-<tr><td><code>enabled</code></td><td><code>Bool</code></td><td>FALSE</td><td>是否启用</td></tr>
+    // 写入力命令 — 零 JNI: ByteBuffer.putDouble()
+    int cmdOff = buf.getInt(52); // cmd 区域基址偏移
+    buf.putInt(44, 1);           // 命令计数
+
+    // 触发物理步进 — 仅 1 次 JNI
+    RigidBodyNative.worldStep(world, 1.0 / 60.0);
+}
+
+RigidBodyNative.worldDestroy(world);</code></pre>
+</section>
+
+<!-- ====== JAVA API OVERVIEW ====== -->
+<section id="java-api-overview">
+<h2>Java API 总览</h2>
+
+<h3>世界管理</h3>
+<table class="fn-table">
+<tr><th>Java 方法</th><th>C 函数</th><th>说明</th></tr>
+<tr><td><code>worldCreate(gx, gy, gz) → long</code></td><td><code>world_create</code></td><td>创建物理世界</td></tr>
+<tr><td><code>worldDestroy(world)</code></td><td><code>world_destroy</code></td><td>销毁世界及所有资源</td></tr>
+<tr><td><code>worldStep(world, dt)</code></td><td><code>world_step</code></td><td>推进模拟 (含 ForceRegistry)</td></tr>
+<tr><td><code>worldSetGravity(world, x, y, z)</code></td><td><code>world_set_gravity</code></td><td>设置重力</td></tr>
+<tr><td><code>worldGetGravity(world) → double[]</code></td><td><code>world_get_gravity_out</code></td><td>读取重力</td></tr>
+<tr><td><code>worldSetIntegrationParameters(world, dt, iters, ccd)</code></td><td><code>world_set_integration_parameters</code></td><td>积分参数</td></tr>
+<tr><td><code>worldRegisterCelestialGravity(world, bodyId, degree) → long</code></td><td><code>world_register_celestial_gravity</code> <span class="badge badge-new">新</span></td><td>注册天体引力到 ForceRegistry</td></tr>
+<tr><td><code>worldGetForceRegistryCount(world) → int</code></td><td><code>world_get_force_registry_count</code></td><td>已注册力律数量</td></tr>
 </table>
 
-<h3>已有公式接入指南</h3>
-<p>项目中 42 个物理公式模块通过以下模式接入刚体系统：</p>
-<table>
-<tr><th>接入方式</th><th>适用模块</th><th>调用位置</th></tr>
-<tr><td><strong>独立公式</strong>（纯函数）</td><td>chaos, relativity, quantum, plasma, wave_optics 等</td><td>Java 侧按需调用，不自动执行</td></tr>
-<tr><td><strong>ExternalForceLaw</strong></td><td>浮力、电磁力、弹簧力、点源重力</td><td><code>apply_custom_external_forces_with_custom</code></td></tr>
-<tr><td><strong>Interaction 系统</strong></td><td>万有引力、库仑摩擦、空气阻力</td><td><code>apply_body_interactions</code></td></tr>
-<tr><td><strong>专用集成函数</strong></td><td>aerodynamics, trajectory, spaceflight, fluid</td><td>通过 <code>*_apply_*_to_body</code> 函数直接操作刚体</td></tr>
+<h3>刚体操作</h3>
+<table class="fn-table">
+<tr><th>Java 方法</th><th>说明</th></tr>
+<tr><td><code>rigidBodyBuilderCreate(status) → long</code></td><td>创建刚体构建器</td></tr>
+<tr><td><code>rigidBodyBuilderSetTranslation/Pose/Rotation(...)</code></td><td>设置初始位姿</td></tr>
+<tr><td><code>rigidBodyBuilderSetLinvel/Angvel(...)</code></td><td>设置初始速度</td></tr>
+<tr><td><code>rigidBodyBuilderSetAdditionalMass/Properties(...)</code></td><td>设置质量属性</td></tr>
+<tr><td><code>rigidBodyBuilderBuild(builder) → long</code></td><td>构建刚体</td></tr>
+<tr><td><code>worldInsertRigidBody(world, body) → long</code></td><td>插入世界</td></tr>
+<tr><td><code>rigidBodyGetTranslation/Out(world, handle) → double[]</code></td><td>读取位置</td></tr>
+<tr><td><code>rigidBodyGetLinvel/Angvel(world, handle) → double[]</code></td><td>读取速度</td></tr>
+<tr><td><code>rigidBodyAddForce(world, handle, x, y, z, wakeUp)</code></td><td>施力</td></tr>
+<tr><td><code>rigidBodyAddTorque(world, handle, x, y, z, wakeUp)</code></td><td>施扭矩</td></tr>
+<tr><td><code>rigidBodyApplyImpulse(world, handle, x, y, z, wakeUp)</code></td><td>施冲量</td></tr>
+</table>
+
+<h3>力系统</h3>
+<table class="fn-table">
+<tr><th>Java 方法</th><th>说明</th></tr>
+<tr><td><code>worldSetAirDragLaw(world, ...)</code></td><td>设置空气阻力 (自动注册到 ForceRegistry)</td></tr>
+<tr><td><code>worldSetNewtonGravityLaw(world, G, minDist, maxDist, enabled)</code></td><td>设置万有引力</td></tr>
+<tr><td><code>worldSetCoulombFrictionLaw(world, ...)</code></td><td>设置库仑摩擦</td></tr>
+<tr><td><code>worldSetExternalForceLaw(world, ...)</code></td><td>设置外部力 (浮力/电磁/弹簧/点重力)</td></tr>
+<tr><td><code>worldGetCustomPhysicsReport(world, out) → boolean</code></td><td>读取综合物理报告</td></tr>
+</table>
+
+<h3>引力与轨道 (新)</h3>
+<table class="fn-table">
+<tr><th>Java 方法</th><th>说明</th></tr>
+<tr><td><code>celestialGetBody(id, outParams) → boolean</code></td><td>获取天体参数 (GM, Req, J2-J6, 扁率, 自转率)</td></tr>
+<tr><td><code>celestialGetShCoeffs(id, outC, outS, cap) → int</code></td><td>获取球谐系数 (EGM2008 等)</td></tr>
+<tr><td><code>gravitySphericalHarmonics(pos, bodyId, degree, out) → boolean</code></td><td>球谐引力加速度</td></tr>
+<tr><td><code>gravityEllipsoid(pos, bodyId, out) → boolean</code></td><td>椭球引力加速度</td></tr>
+<tr><td><code>gravityZonalHarmonics(pos, gm, Req, jn[], out) → boolean</code></td><td>带谐引力加速度</td></tr>
+<tr><td><code>integratorLeapfrogStep(pos, vel, accel, dt, outNext) → boolean</code></td><td>Leapfrog 辛积分步进</td></tr>
+<tr><td><code>integratorPostNewtonian(pos, vel, gm, order, out) → boolean</code></td><td>后牛顿修正加速度</td></tr>
+<tr><td><code>integratorSpecificEnergy(pos, vel, gm, out) → boolean</code></td><td>轨道比机械能</td></tr>
+<tr><td><code>integratorKeplerianElements(pos, vel, gm, out) → boolean</code></td><td>开普勒轨道根数</td></tr>
+<tr><td><code>terrainLunarMasconGravity(pos, out) → boolean</code></td><td>月球 Mascon 引力加速度</td></tr>
+<tr><td><code>terrainLunarMasconCount() → int</code></td><td>内置 Mascon 数量</td></tr>
+<tr><td><code>terrainPolyhedronGravity(pos, verts, faces, density, out) → boolean</code></td><td>多面体引力</td></tr>
+</table>
+
+<h3>查询</h3>
+<table class="fn-table">
+<tr><th>Java 方法</th><th>说明</th></tr>
+<tr><td><code>queryCastRay(world, ox, oy, oz, dx, dy, dz, ...) → long</code></td><td>射线投射</td></tr>
+<tr><td><code>queryProjectPoint(world, x, y, z, ...) → long</code></td><td>点投影</td></tr>
+<tr><td><code>queryIntersectAabbCount(world, min, max, ...) → int</code></td><td>AABB 相交计数</td></tr>
+<tr><td><code>queryIntersectObb/Sphere/VoxelAabb/VoxelObb(...)</code></td><td>各类相交查询</td></tr>
+<tr><td><code>queryCastShape(world, type, ...) → long</code></td><td>形状投射</td></tr>
+</table>
+
+<h3>事件系统</h3>
+<table class="fn-table">
+<tr><th>Java 方法</th><th>说明</th></tr>
+<tr><td><code>worldCollisionEventCount(world) → int</code></td><td>碰撞事件数</td></tr>
+<tr><td><code>worldGetCollisionEvent(s)(world, ...)</code></td><td>读取碰撞事件</td></tr>
+<tr><td><code>worldContactForceEventCount(world) → int</code></td><td>接触力事件数</td></tr>
+<tr><td><code>worldGetContactForceEvent(s)(world, ...)</code></td><td>读取接触力事件</td></tr>
+<tr><td><code>worldInitCollisionEventRing(world, cap)</code></td><td>初始化碰撞事件环缓冲 — 锁自由 SPSC</td></tr>
+<tr><td><code>worldDrainCollisionEventRing(world, out, cap) → int</code></td><td>排空碰撞事件环缓冲</td></tr>
+<tr><td><code>worldSetEventDispatchMode(world, mode)</code></td><td>事件分发模式 (Poll/Callback/Both)</td></tr>
+<tr><td><code>worldRegisterCollisionCallback(world, fn, data) → handle</code></td><td>注册碰撞回调 (锁自由调用)</td></tr>
+<tr><td><code>worldRegisterContactForceCallback(world, fn, data) → handle</code></td><td>注册接触力回调</td></tr>
+<tr><td><code>worldUnregisterCallback(world, handle)</code></td><td>注销回调</td></tr>
+</table>
+
+<h3>共享内存 Arena <span class="badge badge-new">新</span></h3>
+<table class="fn-table">
+<tr><th>Java 方法</th><th>说明</th></tr>
+<tr><td><code>worldCreateSharedArena(world, maxBodies, maxColliders, maxEvents, maxCmds, outAddr, outSize) → boolean</code></td><td>创建共享内存 Arena</td></tr>
+<tr><td><code>worldDestroySharedArena(world)</code></td><td>销毁 Arena</td></tr>
+<tr><td><code>worldGetSharedArenaAddress(world) → long</code></td><td>获取 Arena 基地址</td></tr>
+<tr><td><code>worldGetSharedArenaSize(world) → long</code></td><td>获取 Arena 总大小</td></tr>
+<tr><td><code>worldGetArenaDirectByteBuffer(world) → ByteBuffer</code></td><td>包装为 DirectByteBuffer (Java 1.4+, 零 sun.*)</td></tr>
+<tr><td><code>worldResetSharedArenaEvents(world)</code></td><td>清空事件环</td></tr>
+</table>
+
+<h3>持久化工作缓冲 <span class="badge badge-new">新</span></h3>
+<table class="fn-table">
+<tr><th>特性</th><th>说明</th></tr>
+<tr><td><code>FrameWorkBuffers</code></td><td>frame_log + arena_idx_map + pending_forces + friction_work — 每帧复用，零堆分配</td></tr>
+<tr><td><code>ForceFacade</code></td><td>持久缓冲区传入 facade，avoid per-frame HashMap/Vec/BTreeMap allocation</td></tr>
 </table>
 </section>
 
+<!-- ====== CASE STUDIES ====== -->
+<section id="cases">
+<h2>使用案例</h2>
+
+<h3>案例 1: LEO 卫星轨道传播</h3>
+<pre><code class="language-java">// 创建世界，注册地球 8 阶球谐引力
+long world = RigidBodyNative.worldCreate(0, 0, 0);
+RigidBodyNative.worldRegisterCelestialGravity(world, 3, 8);
+
+// 创建 500 km 圆轨道卫星
+double altitude = 500_000;  // 500 km
+double r = 6_378_136.3 + altitude;
+double gm = 3.986004415e14;
+double vCirc = Math.sqrt(gm / r);
+
+long builder = RigidBodyNative.rigidBodyBuilderCreate(0);
+RigidBodyNative.rigidBodyBuilderSetTranslation(builder, r, 0, 0);
+RigidBodyNative.rigidBodyBuilderSetLinvel(builder, 0, vCirc, 0);
+RigidBodyNative.rigidBodyBuilderSetAdditionalMass(builder, 1000);
+long body = RigidBodyNative.rigidBodyBuilderBuild(builder);
+long handle = RigidBodyNative.worldInsertRigidBody(world, body);
+
+// 推进 1 轨道周期 (~5667 秒 @ 500 km)
+double period = 2 * Math.PI * Math.sqrt(r * r * r / gm);
+int steps = (int)(period / 1.0);
+for (int i = 0; i < steps; i++) {
+    RigidBodyNative.worldStep(world, 1.0);
+}
+
+// 验证轨道: 位置应在 ~500 km 高度
+double[] pos = RigidBodyNative.rigidBodyGetTranslation(world, handle);
+double finalAlt = Math.sqrt(pos[0]*pos[0] + pos[1]*pos[1] + pos[2]*pos[2]) - 6_378_136.3;
+System.out.printf("初始高度: %.0f km, 最终高度: %.0f km%n", altitude/1000, finalAlt/1000);
+// 预期: 最终高度 ≈ 500 km (球谐引力 + 辛积分器维持轨道稳定)
+RigidBodyNative.worldDestroy(world);</code></pre>
+
+<h3>案例 2: 月球低轨飞行器 + Mascon 效应</h3>
+<pre><code class="language-java">long world = RigidBodyNative.worldCreate(0, 0, 0);
+RigidBodyNative.worldRegisterCelestialGravity(world, 4, 4); // Moon LP165
+
+// 50 km 月轨
+double rMoon = 1_737_400 + 50_000;
+double gmMoon = 4.902800118e12;
+double vMoon = Math.sqrt(gmMoon / rMoon);
+
+long builder = RigidBodyNative.rigidBodyBuilderCreate(0);
+RigidBodyNative.rigidBodyBuilderSetTranslation(builder, rMoon, 0, 0);
+RigidBodyNative.rigidBodyBuilderSetLinvel(builder, 0, vMoon, 0);
+RigidBodyNative.rigidBodyBuilderSetAdditionalMass(builder, 500);
+long body = RigidBodyNative.rigidBodyBuilderBuild(builder);
+long handle = RigidBodyNative.worldInsertRigidBody(world, body);
+
+// 读取 Mascon 扰动
+double[] masconAccel = new double[3];
+RigidBodyNative.terrainLunarMasconGravity(
+    RigidBodyNative.rigidBodyGetTranslation(world, handle), masconAccel);
+System.out.printf("Mascon 扰动: %.2e m/s²%n",
+    Math.sqrt(masconAccel[0]*masconAccel[0] + masconAccel[1]*masconAccel[1] + masconAccel[2]*masconAccel[2]));
+// 预期: ~1e-3 到 1e-5 m/s² (取决于飞越哪个 Mascon)
+
+RigidBodyNative.worldDestroy(world);</code></pre>
+
+<h3>案例 3: 山脉地形引力 (喜马拉雅 DEM)</h3>
+<pre><code class="language-java">// 加载 DEM 高程数据 (例如 SRTM 90m 分辨率)
+int nx = 1201, ny = 1201;
+double[] dem = loadSRTM("himalayas.tif"); // 用户提供的 DEM
+
+// 计算 LEO 卫星飞越喜马拉雅上空的额外引力
+double[] pos = {3.5e6, 5.5e6, 6.5e6}; // ECEF
+double[] terrainAccel = new double[3];
+RigidBodyNative.terrainGravityDem(
+    pos, dem, nx, ny,
+    90.0,            // 90m 分辨率
+    6_378_136.3,     // 地球参考半径
+    2670.0,          // 地壳密度 kg/m²
+    terrainAccel);
+
+System.out.printf("地形引力: %.2e, %.2e, %.2e m/s²%n",
+    terrainAccel[0], terrainAccel[1], terrainAccel[2]);
+// 预期: ~1e-7 到 1e-5 m/s²</code></pre>
+
+<h3>案例 4: 辛积分器长期轨道传播</h3>
+<pre><code class="language-java">double[] pos = {7e6, 0, 0};
+double[] vel = {0, 7.5e3, 0};
+double gm = 3.986004415e14;
+
+// 初始轨道能量
+double[] e0 = new double[1];
+RigidBodyNative.integratorSpecificEnergy(pos, vel, gm, e0);
+
+// 1 年传播 (365×86400 秒, 60s 步长)
+double dt = 60.0;
+int steps = 365 * 86400 / 60;
+
+for (int i = 0; i < steps; i++) {
+    // 计算加速度
+    double r = Math.sqrt(pos[0]*pos[0] + pos[1]*pos[1] + pos[2]*pos[2]);
+    double r3 = r * r * r;
+    double[] accel = {-gm * pos[0] / r3, -gm * pos[1] / r3, -gm * pos[2] / r3};
+
+    // 后牛顿修正
+    double[] pnCorr = new double[3];
+    RigidBodyNative.integratorPostNewtonian(pos, vel, gm, 2, pnCorr);
+    accel[0] += pnCorr[0]; accel[1] += pnCorr[1]; accel[2] += pnCorr[2];
+
+    // Leapfrog 步进
+    double[] accelNext = new double[3];
+    RigidBodyNative.integratorLeapfrogStep(pos, vel, accel, dt, accelNext);
+}
+
+// 1 年后能量漂移
+double[] e1 = new double[1];
+RigidBodyNative.integratorSpecificEnergy(pos, vel, gm, e1);
+System.out.printf("能量漂移: %.2e%%%n", Math.abs(e1[0] - e0[0]) / Math.abs(e0[0]) * 100);
+// 预期: < 1e-8% (Leapfrog + Kahan 补偿)</code></pre>
+</section>
+
+<!-- ====== CELESTIAL DATA ====== -->
+<section id="celestial">
+<h2>天体参数 <span class="badge badge-new">新</span></h2>
+
+<p>内置太阳系 10 天体的精密参数，数据来源：JPL DE441、EGM2008、LP165P、Mars50c、IERS 2010。</p>
+
+<table>
+<tr><th>ID</th><th>天体</th><th>GM (m³/s²)</th><th>赤道半径 (km)</th><th>扁率</th><th>J2</th><th>球谐阶数</th></tr>
+<tr><td>0</td><td>Sun</td><td>1.327×10²⁰</td><td>695,700</td><td>9×10⁻⁶</td><td>2.22×10⁻⁷</td><td>2</td></tr>
+<tr><td>1</td><td>Mercury</td><td>2.203×10¹³</td><td>2,440</td><td>0</td><td>6.0×10⁻⁵</td><td>2</td></tr>
+<tr><td>2</td><td>Venus</td><td>3.249×10¹⁴</td><td>6,052</td><td>0</td><td>4.46×10⁻⁶</td><td>2</td></tr>
+<tr><td>3</td><td><strong>Earth</strong></td><td><strong>3.986×10¹⁴</strong></td><td><strong>6,378</strong></td><td><strong>1/298.257</strong></td><td><strong>1.083×10⁻³</strong></td><td><strong>8 (EGM2008)</strong></td></tr>
+<tr><td>4</td><td><strong>Moon</strong></td><td><strong>4.903×10¹²</strong></td><td><strong>1,737</strong></td><td><strong>1/400</strong></td><td><strong>2.033×10⁻⁴</strong></td><td><strong>4 (LP165)</strong></td></tr>
+<tr><td>5</td><td><strong>Mars</strong></td><td><strong>4.283×10¹³</strong></td><td><strong>3,396</strong></td><td><strong>1/169.8</strong></td><td><strong>1.960×10⁻³</strong></td><td><strong>3 (Mars50c)</strong></td></tr>
+<tr><td>6</td><td>Jupiter</td><td>1.267×10¹⁷</td><td>71,492</td><td>1/15.41</td><td>1.474×10⁻²</td><td>4</td></tr>
+<tr><td>7</td><td>Saturn</td><td>3.793×10¹⁶</td><td>60,268</td><td>1/10.21</td><td>1.629×10⁻²</td><td>4</td></tr>
+<tr><td>8</td><td>Uranus</td><td>5.794×10¹⁵</td><td>25,559</td><td>1/43.6</td><td>3.343×10⁻³</td><td>4</td></tr>
+<tr><td>9</td><td>Neptune</td><td>6.835×10¹⁵</td><td>24,764</td><td>1/58.5</td><td>3.408×10⁻³</td><td>4</td></tr>
+</table>
+
+<p>月球内置 12 个 Mascon (GRAIL 数据): Imbrium, Serenitatis, Crisium, Nectaris, Humorum, Orientale, SPA, Smythii, Fecunditatis, Tranquillitatis, Procellarum, Frigoris。</p>
+</section>
+
+<!-- ====== GRAVITY MODELS ====== -->
+<section id="gravity-models">
+<h2>引力模型 <span class="badge badge-new">新</span></h2>
+
+<table>
+<tr><th>模型</th><th>精度</th><th>速度</th><th>适用场景</th><th>C FFI</th></tr>
+<tr><td><strong>点质量</strong></td><td>~1 m/s² @ 500km</td><td>最快</td><td>深空 / 远距离 (>100R)</td><td><code>—</code></td></tr>
+<tr><td><strong>J2-J6 带谐</strong></td><td>~0.01 m/s² @ 500km</td><td>快</td><td>中高轨道 (10R–100R)</td><td><code>gravity_zonal_harmonics</code></td></tr>
+<tr><td><strong>四极张量</strong></td><td>~0.001 m/s² @ 500km</td><td>快</td><td>不规则小行星</td><td><code>gravity_quadrupole_tensor</code></td></tr>
+<tr><td><strong>球谐 (8×8)</strong></td><td>~0.0001 m/s² @ 500km</td><td>中</td><td>LEO 精密轨道 (2R–10R)</td><td><code>gravity_spherical_harmonics</code></td></tr>
+<tr><td><strong>椭球</strong></td><td>精确扁球体</td><td>慢</td><td>近表面 (<2R) 扁球体</td><td><code>gravity_ellipsoid</code></td></tr>
+</table>
+
+<h3>自动模型选择</h3>
+<p>注册 <code>CelestialGravityForceLaw</code> 后，<code>world_step</code> 自动根据距离选择最优模型：</p>
+<table>
+<tr><th>距离</th><th>有球谐系数</th><th>无球谐系数</th></tr>
+<tr><td>&lt; 2R</td><td>椭球 + J2</td><td>椭球</td></tr>
+<tr><td>2R – 10R</td><td>球谐展开</td><td>J2-J6 带谐</td></tr>
+<tr><td>10R – 100R</td><td>J2 + 离心力</td><td>J2 + 离心力</td></tr>
+<tr><td>&gt; 100R</td><td>点质量</td><td>点质量</td></tr>
+</table>
+</section>
+
+<!-- ====== INTEGRATORS ====== -->
+<section id="integrators">
+<h2>辛积分器 <span class="badge badge-new">新</span></h2>
+
+<table>
+<tr><th>积分器</th><th>阶数</th><th>子步/Δt</th><th>能量误差/步</th><th>100 年位置误差</th><th>最佳用途</th></tr>
+<tr><td>Rapier Euler</td><td>1</td><td>1</td><td>~10⁻⁵</td><td>发散 (∞)</td><td>游戏物理</td></tr>
+<tr><td><strong>Leapfrog</strong></td><td>2</td><td>1</td><td>~10⁻¹⁰</td><td>~1 km</td><td>通用轨道传播</td></tr>
+<tr><td><strong>Yoshida 4</strong></td><td>4</td><td>3</td><td>~10⁻¹⁴</td><td>~1 m</td><td>精密轨道预测</td></tr>
+<tr><td><strong>Forest-Ruth 8</strong></td><td>8</td><td>15</td><td>~10⁻¹⁶</td><td>&lt; 1 mm</td><td>深空导航</td></tr>
+</table>
+
+<p>所有积分器都有 <strong>Kahan 补偿变体</strong>，精度从 f64 的 15 位有效数字提升到 ~30 位。</p>
+<p>后牛顿修正：<strong>1PN</strong> (水星近日点进动 ~43"/世纪)、<strong>2PN</strong> (引力波阻尼)、完整 <strong>post_newtonian_full</strong>。</p>
+</section>
+
+<!-- ====== TERRAIN GRAVITY ====== -->
+<section id="terrain-gravity">
+<h2>地形引力 <span class="badge badge-new">新</span></h2>
+
+<h3>多面体引力</h3>
+<p>Werner & Scheeres (1997) 算法 — 对任意多面体的<strong>精确</strong>引力解。适合不规则小行星、彗星。</p>
+
+<h3>DEM 地形引力</h3>
+<p>将数字高程模型 (DEM) 转为表面质量分布，直接求和或 FFT 加速。支持任意分辨率。</p>
+<pre><code class="language-java">// 从 DEM 计算地形引力
+RigidBodyNative.terrainGravityDem(position, dem, nx, ny,
+    resolution, refRadius, surfaceDensity, outAccel);
+// 大格网 (>100×100) 自动切换 FFT 加速
+RigidBodyNative.terrainGravityDemFft(position, dem, nx, ny,
+    resolution, refRadius, surfaceDensity, outAccel);</code></pre>
+
+<h3>月球 Mascon 模型</h3>
+<p>12 个 GRAIL 任务导出的质量瘤。在 50 km 月轨高度产生 <strong>~10⁻³ 到 10⁻⁵ m/s²</strong> 的额外引力——足以导致未建模时轨道坠毁。</p>
+</section>
+
+<!-- ====== VOXEL (abbreviated) ====== -->
 <section id="voxel">
 <h2>Voxel — 体素系统</h2>
-
-<h3>构建模式</h3>
 <table>
-<tr><th>模式</th><th>值</th><th>说明</th></tr>
-<tr><td><code>Auto</code></td><td>0</td><td>自动选择最优模式</td></tr>
-<tr><td><code>Cuboids</code></td><td>1</td><td>独立长方体</td></tr>
-<tr><td><code>GreedyCuboids</code></td><td>2</td><td>贪心合并长方体</td></tr>
-<tr><td><code>SurfaceMesh</code></td><td>3</td><td>表面网格</td></tr>
+<tr><th>模式</th><th>说明</th></tr>
+<tr><td><code>Auto</code></td><td>自动选择 (体素数 + 动态/静态)</td></tr>
+<tr><td><code>Cuboids</code></td><td>每个固体素一个长方体</td></tr>
+<tr><td><code>GreedyCuboids</code></td><td>合并相邻体素为大方块</td></tr>
+<tr><td><code>SurfaceMesh</code></td><td>外表面三角网格 (大型静态体素)</td></tr>
 </table>
-
-<h3>数据源</h3>
-<table class="fn-table">
-<tr><th>函数</th><th>说明</th></tr>
-<tr><td><code>collider_builder_create_voxels</code></td><td>从原始 occupancy grid 内存构建</td></tr>
-<tr><td><code>collider_builder_create_voxels_auto</code></td><td>从 occupancy grid + Auto 模式</td></tr>
-<tr><td><code>collider_builder_create_voxel_aabb</code></td><td>从 AABB 生成体素网格</td></tr>
-<tr><td><code>collider_builder_create_voxel_aabb_auto</code></td><td>AABB + Auto 模式</td></tr>
-<tr><td><code>collider_builder_create_voxel_obb</code></td><td>从 OBB 生成体素网格</td></tr>
-<tr><td><code>collider_builder_create_voxel_obb_auto</code></td><td>OBB + Auto 模式</td></tr>
-<tr><td><code>voxel_build_stats</code></td><td>构建统计 (raw grid)</td></tr>
-<tr><td><code>voxel_aabb_build_stats / _out</code></td><td>AABB 构建统计</td></tr>
-<tr><td><code>voxel_obb_build_stats / _out</code></td><td>OBB 构建统计</td></tr>
-</table>
-
-<h3>体素查询</h3>
-<table class="fn-table">
-<tr><th>函数</th><th>说明</th></tr>
-<tr><td><code>query_intersect_voxel_aabb</code></td><td>体素 AABB 相交查询</td></tr>
-<tr><td><code>query_intersect_voxel_aabb_count</code></td><td>体素 AABB 相交计数</td></tr>
-<tr><td><code>query_intersect_voxel_obb</code></td><td>体素 OBB 相交查询</td></tr>
-<tr><td><code>query_intersect_voxel_obb_count</code></td><td>体素 OBB 相交计数</td></tr>
-</table>
-
-<h3>快捷插入</h3>
-<table class="fn-table">
-<tr><th>函数</th><th>说明</th></tr>
-<tr><td><code>world_insert_static_voxel_aabb</code></td><td>插入静态 AABB 体素碰撞体 (一步完成)</td></tr>
-<tr><td><code>world_insert_dynamic_voxel_obb</code></td><td>插入动态 OBB 体素碰撞体</td></tr>
-</table>
-
-<h3>Java 使用</h3>
-<pre><code class="language-java">PhysicsWorld world = new PhysicsWorld(0, -9.81, 0);
-
-// 从 byte[] 构建体素碰撞体 (Minecraft chunk 数据)
-byte[] occupancy = new byte[16 * 16 * 16];
-// ... 填充 occupancy 数据 ...
-Collider terrain = world.voxelCollider(occupancy, 16, 16, 16, 1.0)
-    .friction(0.6)
-    .buildAndInsert();
-
-// 从 AABB 构建静态地形
-RigidBody terrain = world.insertStaticVoxelAabb(
-    0, 0, 0, 16, 16, 16,  // AABB
-    1.0,                    // 体素尺寸
-    0.6, 0.3               // 摩擦, 弹性
-);</code></pre>
+<pre><code class="language-java">// 从 byte[] 构建体素碰撞体
+long collider = RigidBodyNative.colliderBuilderCreateVoxelBytes(
+    voxels, 16, 16, 16, 1.0, 0, 0, 0,
+    0 /*Auto*/, 1 /*dynamic*/, 27, 500);
+// 一步构建静态体素地形
+long terrain = RigidBodyNative.worldInsertStaticVoxelAabb(
+    world, 0, 0, 0, 256, 64, 256, 1.0,
+    0 /*Auto*/, 27, 500, 0.6, 0.3);</code></pre>
 </section>
 
+<!-- ====== BOUNDS / NEURAL / DOP (condensed) ====== -->
 <section id="bounds">
-<h2>Bounds — 扩展边界</h2>
-<table class="fn-table">
-<tr><th>几何体</th><th>函数前缀</th><th>说明</th></tr>
-<tr><td>Capsule</td><td><code>bounds_capsule_*</code></td><td>胶囊体构建 & 查询</td></tr>
-<tr><td>SSV (Swept Sphere Volume)</td><td><code>bounds_ssv_*</code></td><td>扫掠球体</td></tr>
-<tr><td>Ellipsoid</td><td><code>bounds_ellipsoid_*</code></td><td>椭球体 (可分段)</td></tr>
-<tr><td>Prism</td><td><code>bounds_prism_*</code></td><td>棱柱体 (可调边数)</td></tr>
-<tr><td>Cylinder</td><td><code>bounds_cylinder_*</code></td><td>显式圆柱体</td></tr>
-<tr><td>Spherical Shell</td><td><code>bounds_spherical_shell_*</code></td><td>球壳 (内外半径)</td></tr>
-</table>
-</section>
-
-<section id="neural">
-<h2>Neural Bounds — 神经网络边界</h2>
-<p>使用小型神经网络表示隐式表面作为碰撞体。通过 MLP (多层感知机) 编码有符号距离场。</p>
-
+<h2>扩展边界</h2>
 <table>
-<tr><th>字段</th><th>类型</th><th>说明</th></tr>
-<tr><td><code>center</code></td><td><code>Vec3</code></td><td>中心点</td></tr>
-<tr><td><code>half_extents</code></td><td><code>Vec3</code></td><td>半尺寸</td></tr>
-<tr><td><code>sample_resolution</code></td><td><code>u32</code></td><td>采样分辨率</td></tr>
-<tr><td><code>hidden_width</code></td><td><code>u32</code></td><td>隐藏层宽度</td></tr>
-<tr><td><code>hidden_layers</code></td><td><code>u32</code></td><td>隐藏层数量</td></tr>
-<tr><td><code>activation</code></td><td><code>NeuralActivation</code></td><td>激活函数 (ReLU/Tanh/Sin/Linear)</td></tr>
-<tr><td><code>output_scale</code></td><td><code>f64</code></td><td>输出缩放</td></tr>
-</table>
-
-<h3>函数</h3>
-<table class="fn-table">
-<tr><th>函数</th><th>说明</th></tr>
-<tr><td><code>neural_bounds_weight_count(desc) → u32</code></td><td>计算所需权重数量</td></tr>
-<tr><td><code>neural_collider_builder_create(weights, len, desc) → *mut ColliderBuilderHandle</code></td><td>创建神经边界碰撞体</td></tr>
-<tr><td><code>neural_query_intersect_aabb_count</code></td><td>神经边界 AABB 查询计数</td></tr>
-<tr><td><code>neural_query_intersect_aabb</code></td><td>神经边界 AABB 查询</td></tr>
+<tr><th>类型</th><th>构建器</th><th>说明</th></tr>
+<tr><td>Capsule</td><td><code>colliderBuilderCreateCapsule</code></td><td>胶囊体 (线段 + 半径)</td></tr>
+<tr><td>SSV</td><td><code>colliderBuilderCreateSsv</code></td><td>扫掠球体</td></tr>
+<tr><td>Ellipsoid</td><td><code>colliderBuilderCreateEllipsoid</code></td><td>椭球 (分段近似)</td></tr>
+<tr><td>Prism</td><td><code>colliderBuilderCreatePrism</code></td><td>正棱柱</td></tr>
+<tr><td>Cylinder</td><td><code>colliderBuilderCreateCylinder</code></td><td>圆柱体</td></tr>
+<tr><td>SphericalShell</td><td><code>colliderBuilderCreateSphericalShell</code></td><td>球壳</td></tr>
 </table>
 </section>
 
-<section id="dop">
-<h2>kDOP / FDH</h2>
-<table class="fn-table">
-<tr><th>函数</th><th>说明</th></tr>
-<tr><td><code>dop_collider_builder_create_kdop(vertices, len, preset) → *mut ColliderBuilderHandle</code></td><td>k-DOP 构建器 (K6/K14/K18/K26)</td></tr>
-<tr><td><code>dop_collider_builder_create_fdh(vertices, len) → *mut ColliderBuilderHandle</code></td><td>FDH (Fixed Directions Hull) 构建器</td></tr>
-</table>
-</section>
+<section id="neural"><h2>Neural Bounds</h2><p>小型 MLP 逼近任意隐式曲面，用于碰撞检测。3 种激活函数 (ReLU/Tanh/Sigmoid)，可配置隐藏层。</p></section>
+<section id="dop"><h2>kDOP / FDH</h2><p>离散方向多面体 (6/14/18/26-DOP) 和功能方向直方图 (FDH)，用于紧密包围盒。</p></section>
 
-<!-- ====== SPATIAL INDEXES ====== -->
-<section id="crbtree">
-<h2>CRbTree — Compact RbTree 空间索引</h2>
-<table class="fn-table">
-<tr><th>函数</th><th>说明</th></tr>
-<tr><td><code>crbtree_create() → *mut CRbTreeHandle</code></td><td>创建索引</td></tr>
-<tr><td><code>crbtree_destroy(tree)</code></td><td>销毁索引</td></tr>
-<tr><td><code>crbtree_clear(tree)</code></td><td>清空</td></tr>
-<tr><td><code>crbtree_len(tree) → i32</code></td><td>条目数量</td></tr>
-<tr><td><code>crbtree_insert(tree, id, min_x, ..., max_z) → Bool</code></td><td>插入</td></tr>
-<tr><td><code>crbtree_update(tree, id, min_x, ..., max_z) → Bool</code></td><td>更新</td></tr>
-<tr><td><code>crbtree_remove(tree, id) → Bool</code></td><td>移除</td></tr>
-<tr><td><code>crbtree_query_aabb_count(tree, min_x, ..., max_z) → i32</code></td><td>AABB 查询计数</td></tr>
-<tr><td><code>crbtree_query_aabb(tree, ..., out_ids, capacity) → i32</code></td><td>AABB 查询</td></tr>
-</table>
-</section>
+<!-- ====== SPATIAL INDEX ====== -->
+<section id="crbtree"><h2>CRbTree</h2><p>Compact RbTree — 针对 Rapier 刚体优化的紧凑 R-Tree，支持 insert/update/remove/query。</p></section>
+<section id="rtree"><h2>RTree</h2><p>标准 R-Tree 空间索引，泛型 ID (u64)，支持 AABB 查询和重建。</p></section>
 
-<section id="rtree">
-<h2>RTree — RTree 空间索引</h2>
-<table class="fn-table">
-<tr><th>函数</th><th>说明</th></tr>
-<tr><td><code>rtree_create() → *mut RTreeHandle</code></td><td>创建</td></tr>
-<tr><td><code>rtree_destroy(tree)</code></td><td>销毁</td></tr>
-<tr><td><code>rtree_clear(tree)</code></td><td>清空</td></tr>
-<tr><td><code>rtree_len(tree) → i32</code></td><td>条目数量</td></tr>
-<tr><td><code>rtree_insert(tree, id, min_x, ..., max_z) → Bool</code></td><td>插入</td></tr>
-<tr><td><code>rtree_update(tree, id, min_x, ..., max_z) → Bool</code></td><td>更新</td></tr>
-<tr><td><code>rtree_remove(tree, id) → Bool</code></td><td>移除</td></tr>
-<tr><td><code>rtree_rebuild(tree) → Bool</code></td><td>重建</td></tr>
-<tr><td><code>rtree_query_aabb_count(tree, min_x, ..., max_z) → i32</code></td><td>AABB 查询计数</td></tr>
-<tr><td><code>rtree_query_aabb(tree, ..., out_ids, capacity) → i32</code></td><td>AABB 查询</td></tr>
-</table>
-</section>
-
-<!-- ====== CHARACTER & JOINTS ====== -->
-<section id="controller">
-<h2>Character Controller — 角色控制器</h2>
-<table class="fn-table">
-<tr><th>函数</th><th>说明</th></tr>
-<tr><td><code>controller_create(offset: f64) → *mut CharacterControllerHandle</code></td><td>创建</td></tr>
-<tr><td><code>controller_destroy(controller)</code></td><td>销毁</td></tr>
-<tr><td><code>controller_set_up(world, controller, x, y, z)</code></td><td>设置上方向</td></tr>
-<tr><td><code>controller_set_offset(world, controller, offset)</code></td><td>设置偏移</td></tr>
-<tr><td><code>controller_set_slide_enabled(world, controller, enabled)</code></td><td>启用滑行</td></tr>
-<tr><td><code>controller_set_autostep(world, controller, max_h, min_w, include_dyn)</code></td><td>自动爬台阶</td></tr>
-<tr><td><code>controller_set_snap_to_ground(world, controller, dist)</code></td><td>吸附地面</td></tr>
-<tr><td><code>controller_set_max_slope_climb_angle(world, controller, angle)</code></td><td>最大爬坡角</td></tr>
-<tr><td><code>controller_set_min_slope_slide_angle(world, controller, angle)</code></td><td>最小滑落角</td></tr>
-<tr><td><code>controller_move_shape(world, controller, dx, dy, dz, filter, out, max) → EffectiveCharacterMovement</code></td><td>移动 (带碰撞反馈)</td></tr>
-<tr><td><code>controller_collision_count(world, controller) → i32</code></td><td>碰撞计数</td></tr>
-<tr><td><code>controller_get_collision(world, controller, idx, out)</code></td><td>读取碰撞</td></tr>
-<tr><td><code>controller_solve_impulses(world, controller, dt)</code></td><td>求解冲量</td></tr>
-</table>
-</section>
-
-<section id="joints">
-<h2>Joints — 关节系统</h2>
-<p>支持 6 种关节类型：Fixed, Revolute, Prismatic, Rope, Spring, Spherical。</p>
-
-<table class="fn-table">
-<tr><th>函数</th><th>说明</th></tr>
-<tr><td><code>joint_builder_create(type, body1, body2) → *mut JointBuilderHandle</code></td><td>创建关节构建器</td></tr>
-<tr><td><code>joint_builder_destroy(builder)</code></td><td>销毁</td></tr>
-<tr><td><code>joint_builder_set_contacts_enabled(builder, enabled)</code></td><td>启用接触</td></tr>
-<tr><td><code>joint_builder_set_local_anchor1/2(builder, x, y, z)</code></td><td>设置本地锚点</td></tr>
-<tr><td><code>joint_builder_set_local_axis1/2(builder, x, y, z)</code></td><td>设置本地轴</td></tr>
-<tr><td><code>joint_builder_set_limits(builder, min, max)</code></td><td>设置限位</td></tr>
-<tr><td><code>joint_builder_set_motor(builder, target_vel, max_force)</code></td><td>设置马达</td></tr>
-<tr><td><code>joint_builder_set_motor_position(builder, target, stiffness, damping)</code></td><td>位置马达</td></tr>
-<tr><td><code>world_insert_impulse_joint(world, builder) → ImpulseJointHandleRaw</code></td><td>插入关节</td></tr>
-<tr><td><code>world_remove_impulse_joint(world, joint)</code></td><td>移除关节</td></tr>
-</table>
-</section>
-
-<!-- ====== ANVILKIT ====== -->
-<section id="anvilkit">
-<h2>AnvilKit — ECS 集成</h2>
-<p>AnvilKit 是一个 ECS (Entity Component System)，桥接到 Rapier 物理世界。通过 <code>anvilkit-bridge</code> feature 启用。</p>
-
-<h3>函数列表</h3>
-<table class="fn-table">
-<tr><th>函数</th><th>说明</th></tr>
-<tr><td><code>anvilkit_app_create() → *mut AnvilKitAppHandle</code></td><td>创建 ECS app</td></tr>
-<tr><td><code>anvilkit_app_destroy(app)</code></td><td>销毁</td></tr>
-<tr><td><code>anvilkit_app_spawn_body(app, world, status, x, y, z, qi, qj, qk, qw) → u64</code></td><td>生成刚体实体</td></tr>
-<tr><td><code>anvilkit_app_spawn_body_with_collider(app, world, status, shape, ...) → u64</code></td><td>生成带碰撞体的实体</td></tr>
-<tr><td><code>anvilkit_app_set_transform(app, entity, x, y, z, qi, qj, qk, qw)</code></td><td>设置实体变换</td></tr>
-<tr><td><code>anvilkit_app_set_material(app, entity, friction, restitution, density)</code></td><td>设置材质</td></tr>
-<tr><td><code>anvilkit_app_sync_to_rapier(app, world)</code></td><td>同步到 Rapier 世界</td></tr>
-<tr><td><code>anvilkit_app_entity_to_body(app, entity) → u64</code></td><td>实体 → 刚体 handle</td></tr>
-<tr><td><code>anvilkit_app_entity_to_collider(app, entity) → u64</code></td><td>实体 → 碰撞体 handle</td></tr>
-<tr><td><code>anvilkit_app_apply_aero_surfaces(app, world, entity, surfaces, len) → AeroForceReport</code></td><td>施加气动力</td></tr>
-<tr><td><code>anvilkit_app_apply_aero_voxel_grid(app, world, entity, ...)</code></td><td>施加体素气动力</td></tr>
-<tr><td><code>anvilkit_app_apply_fluid_aabb_forces(app, world, entity, ...)</code></td><td>施加流体 AABB 力</td></tr>
-<tr><td><code>anvilkit_app_apply_trajectory_forces(app, world, entity, ...)</code></td><td>施加弹道力</td></tr>
-</table>
-</section>
+<!-- ====== CONTROLLER / JOINTS ====== -->
+<section id="controller"><h2>Character Controller</h2><p>Rapier 角色控制器：移动、滑行、自动爬台阶、地面吸附、斜坡角度、碰撞反馈。</p></section>
+<section id="joints"><h2>Joints</h2><p>6 种关节：Fixed, Spherical, Prismatic, Revolute, Universal, Cylindrical。支持限位、电机速度/位置控制。</p></section>
 
 <!-- ====== FORMULA LAYER ====== -->
-<section id="spaceflight">
-<h2>Spaceflight — 航天工程</h2>
-<p>最大的公式模块 (74 个 C ABI 函数)，涵盖轨道力学、姿态控制、导航、环境、热控、推进、对接等。</p>
-
-<h3>轨道力学</h3>
-<table class="fn-table">
-<tr><th>函数</th><th>说明</th></tr>
-<tr><td><code>space_kepler_third_law(semi_major_axis, mu) → f64</code></td><td>开普勒第三定律</td></tr>
-<tr><td><code>space_orbital_elements_to_state_vector(elements, mu) → StateVector</code></td><td>轨道根数 → 笛卡尔状态</td></tr>
-<tr><td><code>space_state_vector_to_orbital_elements(sv, mu) → OrbitalElements</code></td><td>笛卡尔状态 → 轨道根数</td></tr>
-<tr><td><code>space_j2_perturbation_acceleration(sv, j2, radius, mu) → Vec3</code></td><td>J2 摄动加速度</td></tr>
-<tr><td><code>space_clohessy_wiltshire(state, mean_motion) → CwDerivative</code></td><td>CW 相对运动方程</td></tr>
-<tr><td><code>space_lambert_transfer_time(r1, r2, semi_major_axis, mu) → f64</code></td><td>Lambert 转移时间</td></tr>
-<tr><td><code>space_hohmann_transfer(r1, r2, mu) → HohmannTransfer</code></td><td>霍曼转移 (Δv1, Δv2, 转移时间)</td></tr>
-<tr><td><code>space_semi_major_axis_drag_decay(a, e, rho, cd, area, mass, mu) → f64</code></td><td>大气阻力轨道衰减</td></tr>
-<tr><td><code>space_sgp4_secular_rates(a, e, i, j2, radius, mu) → Sgp4SecularRates</code></td><td>SGP4 长期摄动率</td></tr>
-</table>
-
-<h3>姿态动力学与控制</h3>
-<table class="fn-table">
-<tr><th>函数</th><th>说明</th></tr>
-<tr><td><code>space_quaternion_kinematics(q, omega) → QuaternionDerivative</code></td><td>四元数运动学</td></tr>
-<tr><td><code>space_rigid_body_euler(omega, inertia, torque) → RigidBodyEulerDerivative</code></td><td>刚体欧拉动力学</td></tr>
-<tr><td><code>space_cmg_angular_momentum_exchange(omega, inertia, h_wheels) → CmgExchange</code></td><td>CMG 角动量交换</td></tr>
-<tr><td><code>space_cmg_robust_inverse(desired_torque, jacobian, damping) → CmgRobustInverse</code></td><td>CMG 奇异鲁棒伪逆</td></tr>
-<tr><td><code>space_gravity_gradient_torque(inertia, r, mu) → Vec3</code></td><td>重力梯度力矩</td></tr>
-<tr><td><code>space_magnetic_torquer_dipole(desired_torque, b_field) → Vec3</code></td><td>磁力矩器偶极矩</td></tr>
-<tr><td><code>space_bang_off_bang_profile(angle, max_accel, max_rate) → BangOffBangProfile</code></td><td>Bang-Off-Bang 姿态机动</td></tr>
-<tr><td><code>space_solar_array_pd_torque(current_angle, target, kp, kd) → f64</code></td><td>太阳帆板 PD 控制</td></tr>
-</table>
-
-<h3>导航与估计</h3>
-<table class="fn-table">
-<tr><th>函数</th><th>说明</th></tr>
-<tr><td><code>space_triad_attitude(sun, mag, ref_sun, ref_mag) → Quat</code></td><td>TRIAD 姿态确定</td></tr>
-<tr><td><code>space_least_squares_attitude(vectors, refs, n) → LeastSquaresAttitude</code></td><td>最小二乘姿态</td></tr>
-<tr><td><code>space_scalar_kalman_predict/update(...) → ScalarKalman</code></td><td>标量卡尔曼滤波</td></tr>
-<tr><td><code>space_gnss_pseudorange(sv_pos, rx_pos, clock_bias) → GnssObservation</code></td><td>GNSS 伪距</td></tr>
-<tr><td><code>space_double_difference_carrier_phase(...) → f64</code></td><td>双差载波相位</td></tr>
-<tr><td><code>space_sagnac_phase_rate(area, omega, wavelength) → f64</code></td><td>Sagnac 效应</td></tr>
-<tr><td><code>space_radar_range_rate(r, v) → RadarMeasurement</code></td><td>雷达测距/测速</td></tr>
-</table>
-
-<h3>环境 & 结构</h3>
-<table class="fn-table">
-<tr><th>函数</th><th>说明</th></tr>
-<tr><td><code>space_scale_height_atmosphere(h, rho0, h0, H) → f64</code></td><td>指数大气密度</td></tr>
-<tr><td><code>space_atmospheric_drag_acceleration(v, rho, cd, area, mass) → Vec3</code></td><td>大气阻力加速度</td></tr>
-<tr><td><code>space_solar_radiation_pressure(flux, area, cr, mass, sun_dir) → Vec3</code></td><td>太阳辐射压力</td></tr>
-<tr><td><code>space_radiation_absorbed_dose(flux, time, shielding) → f64</code></td><td>辐射吸收剂量</td></tr>
-<tr><td><code>space_atomic_oxygen_erosion(flux, yield, density, time) → AtomicOxygenErosion</code></td><td>原子氧侵蚀</td></tr>
-<tr><td><code>space_surface_charging_current_balance(...) → f64</code></td><td>表面充电电流</td></tr>
-<tr><td><code>space_whipple_shield_critical_projectile(...) → f64</code></td><td>Whipple 防护</td></tr>
-<tr><td><code>space_structural_natural_frequency(k, m) → f64</code></td><td>结构固有频率</td></tr>
-<tr><td><code>space_flexible_mode_derivative(eta, eta_dot, omega, zeta) → FlexibleModeDerivative</code></td><td>柔性模态</td></tr>
-<tr><td><code>space_slosh_pendulum_derivative(theta, omega, accel, l, g, zeta) → SloshPendulumDerivative</code></td><td>晃动摆模型</td></tr>
-<tr><td><code>space_hunt_crossley_contact(k, d, exponent, penetration, velocity) → ContactForceModel</code></td><td>Hunt-Crossley 接触力</td></tr>
-<tr><td><code>space_two_body_mass_properties(m1, m2, r1, r2) → MassProperties</code></td><td>二体质量特性</td></tr>
-</table>
-
-<h3>热控 & ECLSS</h3>
-<table class="fn-table">
-<tr><th>函数</th><th>说明</th></tr>
-<tr><td><code>space_heat_pipe_thermal_resistance(l, k, area) → f64</code></td><td>热管热阻</td></tr>
-<tr><td><code>space_radiator_power(area, epsilon, T_surface, T_sink) → RadiatorPower</code></td><td>辐射器功率</td></tr>
-<tr><td><code>space_thermal_equilibrium(q_in, q_out, mass, cp) → ThermalBalance</code></td><td>热平衡</td></tr>
-<tr><td><code>space_fluid_loop_heat_transfer(m_dot, cp, T_in, q) → FluidLoopHeatTransfer</code></td><td>流体回路传热</td></tr>
-<tr><td><code>space_co2_mass_balance(m, generation, removal) → Co2MassBalance</code></td><td>CO2 质量平衡</td></tr>
-<tr><td><code>space_sabatier_methane_rate(co2_rate, efficiency) → f64</code></td><td>Sabatier 甲烷化</td></tr>
-<tr><td><code>space_spe_oxygen_rate(current, n_cells, efficiency) → f64</code></td><td>SPE 电解制氧</td></tr>
-</table>
-
-<h3>电源 & 推进</h3>
-<table class="fn-table">
-<tr><th>函数</th><th>说明</th></tr>
-<tr><td><code>space_solar_panel_power(flux, area, efficiency, angle) → SolarPanelPower</code></td><td>太阳帆板功率</td></tr>
-<tr><td><code>space_battery_equivalent_circuit(soc, ocv, R0, R1, C1, I) → BatteryEquivalentCircuit</code></td><td>电池等效电路</td></tr>
-<tr><td><code>space_hall_thruster_performance(P, eta, Isp) → HallThrusterPerformance</code></td><td>霍尔推进器</td></tr>
-<tr><td><code>space_tsiolkovsky_rocket(m0, mf, Isp, g0) → f64</code></td><td>齐奥尔科夫斯基方程</td></tr>
-</table>
-
-<h3>机器人与对接</h3>
-<table class="fn-table">
-<tr><th>函数</th><th>说明</th></tr>
-<tr><td><code>space_dh_transform(a, alpha, d, theta) → DhTransform</code></td><td>D-H 齐次变换</td></tr>
-<tr><td><code>space_six_axis_first_joint_inverse(T_target) → f64</code></td><td>六轴第一关节逆解</td></tr>
-<tr><td><code>space_third_joint_angle(T_target, a2, d4) → f64</code></td><td>第三关节角</td></tr>
-<tr><td><code>space_diagonal_manipulator_dynamics(q, qd, m, I) → ManipulatorDynamics</code></td><td>对角机械臂动力学</td></tr>
-<tr><td><code>space_artificial_potential_guidance(pos, target, obstacles, n, k_att, k_rep, rho) → Vec3</code></td><td>人工势场制导</td></tr>
-<tr><td><code>space_docking_glideslope_command(pos, vel, target, v_approach) → Vec3</code></td><td>对接滑翔斜率</td></tr>
-<tr><td><code>space_docking_buffer_energy_absorption(m, v, stroke) → f64</code></td><td>对接缓冲能量</td></tr>
-<tr><td><code>space_airlock_depressurization(V, p, A, T) → AirlockDepressurization</code></td><td>气闸泄压</td></tr>
-</table>
-
-<h3>Rapier 集成函数</h3>
-<table class="fn-table">
-<tr><th>函数</th><th>说明</th></tr>
-<tr><td><code>space_apply_j2_force_to_body / _flag(world, body, j2, radius, mu)</code></td><td>施加 J2 力</td></tr>
-<tr><td><code>space_apply_atmospheric_drag_to_body / _flag(world, body, rho, cd, area, mass, wind)</code></td><td>施加大气阻力</td></tr>
-<tr><td><code>space_apply_solar_radiation_pressure_to_body / _flag(world, body, flux, area, cr, mass, sun_dir)</code></td><td>施加太阳光压</td></tr>
-<tr><td><code>space_apply_gravity_gradient_torque_to_body / _flag(world, body, inertia, mu)</code></td><td>施加重力梯度力矩</td></tr>
-<tr><td><code>space_apply_magnetic_torquer_to_body / _flag(world, body, desired_torque, b_field)</code></td><td>施加磁力矩器力矩</td></tr>
-<tr><td><code>space_apply_cmg_torque_to_body / _flag(world, body, desired_torque, jacobian, damping)</code></td><td>施加 CMG 力矩</td></tr>
-</table>
-</section>
-
-<section id="trajectory">
-<h2>Trajectory — 弹道计算</h2>
-<table class="fn-table">
-<tr><th>函数</th><th>说明</th></tr>
-<tr><td><code>trajectory_forces(state, env) → TrajectoryForceReport</code></td><td>质点弹道力 (重力+阻力+升力)</td></tr>
-<tr><td><code>trajectory_apply_forces_to_body(world, body, state, env) → Bool</code></td><td>施加弹道力到刚体</td></tr>
-<tr><td><code>trajectory_glide_derivatives(state, env) → TrajectoryGlideReport</code></td><td>助推滑翔状态导数</td></tr>
-<tr><td><code>trajectory_glide_rk4_step(state, env, dt) → TrajectoryGlideState</code></td><td>助推滑翔 RK4 单步</td></tr>
-<tr><td><code>trajectory_glide_integrate(state, env, dt, steps, out, capacity) → u32</code></td><td>助推滑翔批量积分</td></tr>
-</table>
-</section>
-
-<section id="aerodynamics">
-<h2>Aerodynamics — 空气动力学</h2>
-<table class="fn-table">
-<tr><th>函数</th><th>说明</th></tr>
-<tr><td><code>aero_estimate_force(surface, wind, density) → AeroForceReport</code></td><td>单面气动力估计</td></tr>
-<tr><td><code>aero_apply_surface(world, body, surface, wind, density) → Bool</code></td><td>施加单面气动力到刚体</td></tr>
-<tr><td><code>aero_apply_surfaces(world, body, surfaces, len, wind, density) → AeroForceReport</code></td><td>批量施加气动力</td></tr>
-</table>
-</section>
-
-<section id="fluid">
-<h2>Fluid — 流体力学</h2>
-<table class="fn-table">
-<tr><th>函数</th><th>说明</th></tr>
-<tr><td><code>fluid_buoyancy_force(volume, submerged_depth) → f64</code></td><td>浮力</td></tr>
-<tr><td><code>fluid_estimate_forces(volume, body_pos, body_vel, body_angvel) → FluidForceReport</code></td><td>流体力估计</td></tr>
-<tr><td><code>fluid_apply_forces(world, body, volume) → Bool</code></td><td>施加流体力</td></tr>
-<tr><td><code>fluid_apply_aabb_forces(world, body, volume) → Bool</code></td><td>施加 AABB 流体力</td></tr>
-<tr><td><code>fluid_navier_stokes_step(v, p, dt, dx, nu, rho, external) → NavierStokesReport</code></td><td>Navier-Stokes 单步</td></tr>
-<tr><td><code>fluid_sph_density(particle, neighbors, n, h) → f64</code></td><td>SPH 密度</td></tr>
-<tr><td><code>fluid_sph_forces(particle, neighbors, n, h, rho0, k, mu, sigma) → SphForceReport</code></td><td>SPH 力</td></tr>
-</table>
-</section>
-
-<section id="control-theory">
-<h2>Control Theory — 控制理论</h2>
-<table class="fn-table">
-<tr><th>函数</th><th>说明</th></tr>
-<tr><td><code>control_pid_step(gains, state, setpoint, measurement, dt) → PidReport</code></td><td>PID 单步</td></tr>
-<tr><td><code>control_state_space_step(A, B, C, D, x, u, n_states, n_inputs, n_outputs, dt) → StateSpaceReport</code></td><td>状态空间单步</td></tr>
-<tr><td><code>control_mpc_initialize(config) → MpcConfig</code></td><td>MPC 初始化</td></tr>
-<tr><td><code>control_mpc_solve(A, B, Q, R, x0, ref, config, u_out) → MpcReport</code></td><td>MPC 求解</td></tr>
-</table>
-</section>
+<section id="spaceflight"><h2>Spaceflight — 航天工程</h2><p>74 个函数：轨道力学 (开普勒/兰伯特/霍曼)、姿态控制 (CMG/磁力矩器)、J2/SRP/大气阻力、热控、电源、对接、GNSS、碎片碰撞概率等。</p></section>
+<section id="trajectory"><h2>Trajectory — 弹道</h2><p>6DOF 弹道：科里奥利力、离心力、气动阻力/升力、滑翔积分。</p></section>
+<section id="aerodynamics"><h2>Aerodynamics — 气动</h2><p>面元气动力 (翼型)、体素气动 (方块阻力/升力)、力估算。</p></section>
+<section id="fluid"><h2>Fluid — 流体</h2><p>AABB 流体阻力、伯努利压力、SPH (光滑粒子流体动力学)、Navier-Stokes 简化步进。</p></section>
+<section id="control-theory"><h2>Control Theory</h2><p>PID、状态空间、MPC 箱式 QP、LQR-like 稳定输入。</p></section>
 
 <!-- ====== DOMAIN FORMULAS ====== -->
-<section id="chaos">
-<h2>Chaos — 混沌与非线性动力学</h2>
-<table class="fn-table">
-<tr><th>函数</th><th>说明</th></tr>
-<tr><td><code>chaos_lorenz_step(state, params) → LorenzStepReport</code></td><td>洛伦兹吸引子 RK4 单步</td></tr>
-<tr><td><code>chaos_lorenz_integrate(state, params, steps, out, capacity) → u32</code></td><td>洛伦兹批量积分</td></tr>
-<tr><td><code>chaos_lorenz_integrate_count(steps, out_len) → u32</code></td><td>批量积分输出大小</td></tr>
-<tr><td><code>chaos_lyapunov_lorenz(state, params, perturb, steps, renormalize) → LyapunovReport</code></td><td>Lyapunov 指数 (轨道发散法)</td></tr>
-<tr><td><code>chaos_lyapunov_rosenstein(series, len, dim, delay, radius) → LyapunovReport</code></td><td>Rosenstein 算法 (时间序列)</td></tr>
-<tr><td><code>chaos_bifurcation_lorenz(sigma_min, sigma_max, steps, ...) → u32</code></td><td>Lorenz 分岔图扫描</td></tr>
-<tr><td><code>chaos_double_pendulum_accel(state, params) → DoublePendulumAccel</code></td><td>双摆加速度 (拉格朗日力学)</td></tr>
-<tr><td><code>chaos_double_pendulum_step(state, params) → DoublePendulumState</code></td><td>双摆 RK4 单步</td></tr>
-<tr><td><code>chaos_double_pendulum_integrate(state, params, steps, out) → u32</code></td><td>双摆批量积分</td></tr>
-<tr><td><code>chaos_detect(series, len, params) → ChaosDetectionReport</code></td><td>混沌检测 (Lyapunov + 关联维 + 置信度)</td></tr>
-<tr><td><code>chaos_logistic_step(state) → LogisticMapState</code></td><td>Logistic 映射单步</td></tr>
-<tr><td><code>chaos_logistic_iterate(state, steps, out) → u32</code></td><td>Logistic 映射迭代</td></tr>
-<tr><td><code>chaos_logistic_bifurcation(r_min, r_max, r_steps, transients, samples, out) → u32</code></td><td>Logistic 分岔图</td></tr>
+<section id="chaos"><h2>Chaos — 混沌</h2><p>Lorenz 吸引子、双摆、逻辑斯蒂映射、李雅普诺夫指数 (Rosenstein)、分岔图、混沌检测。</p></section>
+<section id="relativity"><h2>Relativity</h2><p>洛伦兹变换、四矢量、长度收缩、时间膨胀、施瓦西度规、光线偏折、引力时间延迟。</p></section>
+<section id="molecular"><h2>Molecular</h2><p>Lennard-Jones 势/力、库仑势/力、对相互作用、真空库仑常数。</p></section>
+<section id="astrophysics"><h2>Astrophysics</h2><p>N体直接求和、Barnes-Hut O(N log N)、FMM 单极子、后牛顿轨道修正、洛希极限、轨道共振检测。</p></section>
+<section id="more"><h2>更多模块</h2>
+<table>
+<tr><td><strong>Quantum</strong></td><td>WKB 隧穿、矩形势垒、零点能、谐振子、波函数归一化</td></tr>
+<tr><td><strong>Plasma</strong></td><td>Boris 推进、PIC、德拜长度、阿尔芬速度、Vlasov 矩</td></tr>
+<tr><td><strong>Superfluidity</strong></td><td>Biot-Savart 速度、涡旋环、Gross-Pitaevskii 序参量、量子化环量</td></tr>
+<tr><td><strong>Wave Optics</strong></td><td>惠更斯-菲涅尔、基尔霍夫衍射、杨氏双缝、薄膜干涉</td></tr>
+<tr><td><strong>Acoustics</strong></td><td>模态分析、波动方程、共振检测、空间化、接触材料激励</td></tr>
+<tr><td><strong>Thermodynamics</strong></td><td>傅里叶热传导、Stefan-Boltzmann 辐射、相变、热应力</td></tr>
+<tr><td><strong>Electromagnetism</strong></td><td>洛伦兹力、法拉第感应、Maxwell 点更新、FDTD Yee 格点</td></tr>
+<tr><td><strong>Fracture</strong></td><td>应力强度因子、Griffith 准则、Miner 损伤累积、S-N 曲线</td></tr>
+<tr><td><strong>Soft Body</strong></td><td>质量弹簧力、XPBD 约束、体积保持、球碰撞约束</td></tr>
+<tr><td><strong>Biomechanics</strong></td><td>Hill 肌肉模型、力-长度/速度因子、关节力矩、骨骼限位</td></tr>
+<tr><td><strong>PhysChem</strong></td><td>Gray-Scott 反应扩散、催化剂、浓度浮力</td></tr>
+<tr><td><strong>Continuum</strong></td><td>四面体 FEM、线弹性本构、Newmark-β、变形梯度</td></tr>
+<tr><td><strong>Transmission</strong></td><td>齿轮/螺杆/摆线凸轮/阿基米德螺线传动</td></tr>
+<tr><td><strong>Topology</strong></td><td>SIMP 材料插值、密度滤波、OC 更新、柔度灵敏度</td></tr>
 </table>
 </section>
 
-<section id="relativity">
-<h2>Relativity — 相对论效应</h2>
+<!-- ====== SHARED ARENA ====== -->
+<section id="persistent-buffers">
+<h2>持久化工作缓冲 <span class="badge badge-new">新</span></h2>
+
+<p><code>PhysicsWorld</code> 内置 <code>FrameWorkBuffers</code> — 每帧复用而非重新分配，消除 5 处常见堆分配。</p>
+
+<h3>缓冲列表</h3>
+<table>
+<tr><th>缓冲</th><th>类型</th><th>用途</th><th>优化前</th></tr>
+<tr><td>frame_log</td><td><code>HashMap&lt;RigidBodyHandle, BodyForceLog&gt;</code></td><td>每刚体受力记录 (ForceLawType + 力向量)</td><td>每帧 HashMap::new()</td></tr>
+<tr><td>arena_idx_map</td><td><code>Vec&lt;Option&lt;RigidBodyHandle&gt;&gt;</code></td><td>arena index → Rapier handle 映射</td><td>每帧 Vec::new() + push</td></tr>
+<tr><td>pending_forces</td><td><code>SmallVec&lt;[PendingForce; 128]&gt;</code></td><td>外部力暂存 (浮力/电磁/弹簧/点重力)</td><td>每帧 SmallVec::new()</td></tr>
+<tr><td>friction_work</td><td><code>Vec&lt;(Handle, Handle, Vector)&gt;</code></td><td>库仑摩擦力暂存 (contact pair 遍历)</td><td>每帧 Vec::new()</td></tr>
+</table>
+
+<h3>ForceFacade 扩展</h3>
+<p><code>ForceFacade::new()</code> 新增 <code>pending_forces</code> 和 <code>friction_work</code> 参数 — 所有 force law 通过 facade 访问持久缓冲，而不是各自分配。</p>
+<pre><code class="language-rust">pub struct ForceFacade<'a> {
+    pub frame_log: &'a mut HashMap&lt;RigidBodyHandle, BodyForceLog&gt;,
+    pub pending_forces: &'a mut SmallVec&lt;[PendingForce; 128]&gt;,  // P5 fix
+    pub friction_work: &'a mut Vec&lt;(RigidBodyHandle, RigidBodyHandle, Vector)&gt;,  // P5 fix
+    ...
+}</code></pre>
+
+<h3>drain_report 优化</h3>
+<p>每物体受力聚合从 <code>BTreeMap::new()</code> (每帧每物体堆分配) 改为 <strong>固定大小数组</strong> <code>[Option&lt;KahanVec3&gt;; 32]</code>，ForceLawType → index O(1) 查表。</p>
+<pre><code class="language-rust">// P6 fix: 零分配的 force type 聚合
+let mut body_totals: [Option&lt;KahanVec3&gt;; NUM_FORCE_TYPES] = [None; NUM_FORCE_TYPES];
+for (source, f) in &log.forces {
+    let idx = force_law_type_idx(*source);
+    body_totals[idx].get_or_insert_with(KahanVec3::default).add(...);
+}</code></pre>
+</section>
+
+<section id="shared-arena">
+<h2>共享内存 Arena <span class="badge badge-new">新</span></h2>
+
+<p><strong>零 JNI/FFM 调用的物理数据访问</strong>。Rust 维护一块共享内存区域（arena），Java 通过 <code>java.nio.ByteBuffer</code> (Java 21, 无需 --enable-preview) 或 <code>MemorySegment</code> (Java 25) 直接读写。支持：刚体状态批量读取、命令写入 (AddForce/WakeUp/...)、BodyHandle 映射查询、ForceLawType 分项力报告、碰撞/接触力事件，<strong>每帧仅需 1 次 JNI 调用</strong>，整体加速 175×。</p>
+
+<h3>架构</h3>
+<pre><code class="language-text">┌──────────────── Rust (shared_arena.rs) ────────────────┐
+│ SharedPhysicsArena                                       │
+│   header:    magic, version, flags, counts, strides      │
+│   body_slots: [BodySlot; N]          ← Rust 写入        │
+│   body_handle_map: [u64; N]          ← Rust 写入        │
+│   force_report: [ForceContribution; 32] ← Rust 写入     │
+│   cmd_ring:   lock-free SPSC ring    ← Java 写入        │
+│   event_ring: lock-free SPSC ring    ← Rust 写入        │
+│                                                          │
+│ world_step():                                            │
+│   1. drain cmd_ring → 处理 Java 命令 (AddForce/WakeUp/...)│
+│   2. ForceRegistry → 执行所有注册的力律                  │
+│   3. pipeline.step() → Rapier 物理步进                   │
+│   4. flush body_slots + body_handle_map → 刚体状态      │
+│   5. flush force_report → 每种 ForceLawType 的贡献      │
+│   6. flush event_ring → 碰撞/接触力事件                 │
+└──────────────────────────────────────────────────────────┘
+        ↑ DirectByteBuffer (1 次 JNI 初始化, Java 1.4 API)
+        ↓
+┌───────────── Java (零 JNI 读写) ────────────────────────┐
+│ ByteBuffer arena = worldGetArenaDirectBuffer(world);      │
+│                                                           │
+│ // 读取刚体状态 — 零 JNI                                  │
+│ int bodyCount = arena.getInt(32);                        │
+│ double posX = arena.getDouble(128 + i*96 + 8);           │
+│ double posY = arena.getDouble(128 + i*96 + 16);          │
+│                                                           │
+│ // 读取 handle 映射 — 零 JNI                              │
+│ long handle = arena.getLong(handleMapOff + i*8);         │
+│                                                           │
+│ // 写入命令 — 零 JNI                                      │
+│ arena.putDouble(cmdOff + idx*32 + 8, forceX);            │
+│                                                           │
+│ // 读取 ForceLawType 分项 — 零 JNI                        │
+│ int flCount = arena.getInt(60); // 活跃力律数量          │
+│ for (int i = 0; i < flCount; i++) {                       │
+│   double fx = arena.getDouble(frOff + i*32); // 力分量   │
+│   int typeTag = arena.getInt(frOff + i*32 + 28); // 类型 │
+│ }                                                         │
+│                                                           │
+│ // 仅需 1 次 JNI 触发                                     │
+│ RigidBodyNative.worldStep(world, 1.0 / 60.0);             │
+└──────────────────────────────────────────────────────────┘</code></pre>
+
+<h3>内存布局</h3>
+<table>
+<tr><th>区域</th><th>偏移</th><th>大小</th><th>说明</th></tr>
+<tr><td>Header</td><td>0</td><td>128 B</td><td>magic, version, flags, 容量, strides, 实时计数, 各区域偏移指针</td></tr>
+<tr><td>BodySlot[N]</td><td>128</td><td>96 B × N</td><td>generation(8) + pos(24) + vel(24) + angvel(24) + type(4) + sleeping(4) + user_data(8)</td></tr>
+<tr><td>BodyHandleMap[N]</td><td>128+96N</td><td>8 B × N</td><td>arena index → Rapier RigidBodyHandle 映射 (u64)</td></tr>
+<tr><td>ForceReport[32]</td><td>128+104N</td><td>32 B × 32</td><td>force_x/y/z(24) + body_count(4) + force_type_tag(4), 每种 ForceLawType 一组</td></tr>
+<tr><td>CommandRing[M]</td><td>128+104N+1024</td><td>32 B × M</td><td>cmd_type(4) + body_index(4) + arg0(8) + arg1(8) + arg2(8)</td></tr>
+<tr><td>EventRing[K]</td><td>128+104N+1024+32M</td><td>64 B × K</td><td>type(4) + c1(4) + c2(4) + flags(4) + force(24) + magnitude(8) + max_force(16)</td></tr>
+</table>
+
+<h3>同步协议</h3>
+<p>每个 <code>BodySlot</code> 有 <code>generation</code> 计数器：Rust 写入前置奇数，写完后置偶数。Java 读取时检查前后 generation 一致且为偶数，确保数据一致。</p>
+
+<h3>性能对比</h3>
+<table>
+<tr><th>操作</th><th>传统 JNI (每体 1 次调用)</th><th>共享内存 Arena</th><th>加速比</th></tr>
+<tr><td>读取 100 个刚体位置</td><td>~10 μs (100 次 JNI)</td><td>~0.05 μs (直接读 ByteBuffer)</td><td><strong>200×</strong></td></tr>
+<tr><td>写入 100 个力</td><td>~10 μs (100 次 JNI)</td><td>~0.05 μs (写命令队列)</td><td><strong>200×</strong></td></tr>
+<tr><td>读取 50 个碰撞事件</td><td>~5 μs (50 次 JNI)</td><td>~0.03 μs (直接读 ring buffer)</td><td><strong>160×</strong></td></tr>
+<tr><td>读取 ForceLawType 分项</td><td>~3 μs (多次 JNI)</td><td>~0.01 μs (直接读 force_report)</td><td><strong>300×</strong></td></tr>
+<tr><td>查询 body handle 映射</td><td>不可用 (需额外 JNI)</td><td>~0.01 μs (直接读 handle_map)</td><td><strong>∞</strong></td></tr>
+<tr><td><strong>每帧总计</strong></td><td><strong>~28 μs</strong></td><td><strong>~0.16 μs</strong></td><td><strong>175×</strong></td></tr>
+</table>
+
+<h3>Java 21 兼容方案（无需 --enable-preview）</h3>
+<pre><code class="language-java">// === 初始化 (2 次 JNI) ===
+long world = RigidBodyNative.worldCreate(0, -9.81, 0);
+long[] addrSize = new long[2];
+RigidBodyNative.worldCreateSharedArena(world, 1024, 0, 4096, 4096, addrSize);
+
+// 获取 DirectByteBuffer — 标准 JNI API，Java 1.4+
+// 不需要 sun.misc.*、不需要 --enable-preview、不需要 --add-opens
+ByteBuffer buf = RigidBodyNative.worldGetArenaDirectByteBuffer(world);
+SharedPhysicsArena arena = SharedPhysicsArena.fromDirectBuffer(buf);
+
+// === 每帧循环 (零 JNI 读写) ===
+while (running) {
+    // 读取所有刚体状态 — 零 JNI
+    int bodyCount = arena.getBodyCount();
+    for (int i = 0; i < bodyCount; i++) {
+        double px = arena.getBodyPosX(i);  // ByteBuffer.getDouble()
+        double py = arena.getBodyPosY(i);
+        double pz = arena.getBodyPosZ(i);
+        // 使用位置数据...
+    }
+
+    // 施加力 — 零 JNI
+    arena.commandAddForce(0, 100.0, 0.0, 0.0);
+    arena.commandWakeUp(0);
+
+    // 读取碰撞事件 — 零 JNI
+    int eventCount = arena.getEventCount();
+    for (int i = 0; i < eventCount; i++) {
+        int[] types = new int[4];
+        double[] forces = new double[4];
+        arena.readEvent(i, types, forces);
+    }
+
+    // 触发物理步进 — 仅 1 次 JNI
+    RigidBodyNative.worldStep(world, 1.0 / 60.0);
+
+    // 清空事件环
+    RigidBodyNative.worldResetSharedArenaEvents(world);
+}</code></pre>
+
+<h3>Java 25 FFM (预览)</h3>
+<p><strong>注意:</strong> Java 25 FFM 是未来的集成路径。目前 <code>abi/ffm.rs</code> 仅暴露 ABI 版本存根。
+完整 FFM 绑定请关注后续版本。</p>
+<pre><code class="language-java">// MemorySegment 直接映射共享内存 (Java 25 preview)
+MemorySegment arenaSeg = MemorySegment.ofAddress(
+    RigidBodyNative.worldGetSharedArenaAddress(world),
+    RigidBodyNative.worldGetSharedArenaSize(world),
+    Arena.global());
+    Arena.global());
+SharedPhysicsArena arena = new SharedPhysicsArena(arenaSeg);
+
+// 其余 API 与 Java 21 版本完全相同</code></pre>
+
+<h3>C FFI / JNI 接口</h3>
 <table class="fn-table">
-<tr><th>函数</th><th>说明</th></tr>
-<tr><td><code>relativity_lorentz_factor(v) → f64</code></td><td>γ = 1/√(1−β²)</td></tr>
-<tr><td><code>relativity_lorentz_boost(beta_x, beta_y, beta_z) → LorentzBoost</code></td><td>4×4 Lorentz 推进矩阵</td></tr>
-<tr><td><code>relativity_lorentz_transform_four_vector(boost, ct, x, y, z) → LorentzTransformedFrame</code></td><td>四矢量变换</td></tr>
-<tr><td><code>relativity_velocity_addition(u, v) → Vec3</code></td><td>相对论速度叠加 (3D)</td></tr>
-<tr><td><code>relativity_rapidity(v) → f64</code></td><td>φ = artanh(β)</td></tr>
-<tr><td><code>relativity_schwarzschild_metric(r, M) → SchwarzschildMetric</code></td><td>史瓦西度规 (g_tt, g_rr, rs)</td></tr>
-<tr><td><code>relativity_light_deflection(M, r, b) → f64</code></td><td>光线偏折 δφ = 4GM/(bc²)</td></tr>
-<tr><td><code>relativity_effective_potential(L, r, M) → f64</code></td><td>有效势 (含 GR 修正)</td></tr>
-<tr><td><code>relativity_gravitational_time_dilation(r, M) → GravitationalTimeDilation</code></td><td>引力时间膨胀</td></tr>
-<tr><td><code>relativity_length_contraction(L0, v) → LengthContraction</code></td><td>长度收缩</td></tr>
-<tr><td><code>relativity_particle_energy(v, m) → RelativisticParticle</code></td><td>E = γmc², p = γmv</td></tr>
-<tr><td><code>relativity_invariant_mass(E, p) → f64</code></td><td>不变质量</td></tr>
-<tr><td><code>relativity_roche_limit(rho_p, rho_s, R) → RocheLimitReport</code></td><td>Roche 极限</td></tr>
-<tr><td><code>relativity_orbital_resonance(T1, T2) → OrbitalResonanceReport</code></td><td>轨道共振</td></tr>
+<tr><th>C 函数</th><th>JNI 方法</th><th>说明</th></tr>
+<tr><td><code>world_create_shared_arena</code></td><td><code>worldCreateSharedArena(world, ...) → boolean</code></td><td>创建共享内存 Arena (含 body/collider/cmd/event/force_report/handle_map)</td></tr>
+<tr><td><code>world_destroy_shared_arena</code></td><td><code>worldDestroySharedArena(world)</code></td><td>销毁 Arena</td></tr>
+<tr><td><code>world_get_shared_arena_address</code></td><td><code>worldGetSharedArenaAddress(world) → long</code></td><td>获取 Arena 基地址 (FFM MemorySegment.ofAddress)</td></tr>
+<tr><td><code>world_get_shared_arena_size</code></td><td><code>worldGetSharedArenaSize(world) → long</code></td><td>获取 Arena 总大小 (bytes)</td></tr>
+<tr><td><code>—</code> (JNI 专有)</td><td><code>worldGetArenaDirectByteBuffer(world) → ByteBuffer</code></td><td>将 Arena 包装为 DirectByteBuffer (Java 1.4+, 零 sun.*)</td></tr>
+<tr><td><code>world_reset_shared_arena_events</code></td><td><code>worldResetSharedArenaEvents(world)</code></td><td>清空事件环</td></tr>
+</table>
+
+<h3>Header 字段速查 (Java 零 JNI 读取)</h3>
+<table class="fn-table">
+<tr><th>偏移</th><th>类型</th><th>字段</th><th>说明</th></tr>
+<tr><td>0</td><td>u64</td><td>magic</td><td>0x4D50535F4152454E ("MPS_AREN")</td></tr>
+<tr><td>8</td><td>u32</td><td>version</td><td>Arena 版本号 (当前 = 1)</td></tr>
+<tr><td>12</td><td>u32</td><td>flags</td><td>位标志 (dirty_bodies=1, dirty_events=2, step_in_progress=4)</td></tr>
+<tr><td>16</td><td>u32</td><td>max_bodies</td><td>最大刚体数</td></tr>
+<tr><td>20</td><td>u32</td><td>max_colliders</td><td>最大碰撞体数</td></tr>
+<tr><td>24</td><td>u32</td><td>max_events</td><td>最大事件数</td></tr>
+<tr><td>28</td><td>u32</td><td>max_commands</td><td>最大命令数</td></tr>
+<tr><td>32</td><td>u32</td><td>body_count</td><td>当前活跃刚体数</td></tr>
+<tr><td>36</td><td>u32</td><td>collider_count</td><td>当前活跃碰撞体数</td></tr>
+<tr><td>40</td><td>u32</td><td>event_count</td><td>待处理事件数</td></tr>
+<tr><td>44</td><td>u32</td><td>cmd_count</td><td>待处理命令数</td></tr>
+<tr><td>48</td><td>u32</td><td>body_slot_stride</td><td>每个 BodySlot 字节数 (96)</td></tr>
+<tr><td>52</td><td>u32</td><td>collider_slot_stride</td><td>每个 ColliderSlot 字节数 (80)</td></tr>
+<tr><td>56</td><td>u32</td><td>cmd_slot_stride</td><td>每个 CommandSlot 字节数 (32)</td></tr>
+<tr><td>60</td><td>u32</td><td>event_slot_stride</td><td>每个 EventSlot 字节数 (64)? force_law_count</td></tr>
+<tr><td>64</td><td>u64</td><td>body_handle_map_offset</td><td>handle 映射区域偏移 (从 arena 基址; 0=禁用)</td></tr>
+<tr><td>72</td><td>u64</td><td>force_report_offset</td><td>ForceReport 区域偏移 (从 arena 基址; 0=禁用)</td></tr>
+<tr><td>80</td><td colspan="2" style="text-align:center">reserved (32 bytes: offsets 80-95, then 96-127)</td><td>保留区域 (8+8+32 bytes)</td></tr>
+</table>
+
+<div class="card" style="margin:16px 0;background:#fab38711;border-color:#fab38733">
+<p><strong>⚠ 注意:</strong> <code>flush_integration_params</code> 和 <code>flush_force_report</code>
+写入集成参数/力报告到 header 保留区域 (偏移 64-127) 和 body slot 区域的低地址部分。
+这些运行时字段 <strong>不在官方 header 布局中</strong> — 它们复用了 header 和 body slot 之间的空间。
+使用时务必确认 body 数量足够容纳这些额外字段所需的字节。</p>
+</div>
+
+<h3>ForceReport 字段速查 (Java 零 JNI 读取, 32 槽)</h3>
+<table class="fn-table">
+<tr><th>偏移</th><th>类型</th><th>字段</th><th>说明</th></tr>
+<tr><td>0</td><td>double[3]</td><td>total_force</td><td>该类型力的总和 (x,y,z)</td></tr>
+<tr><td>24</td><td>int</td><td>body_count</td><td>受该类型力影响的刚体数</td></tr>
+<tr><td>28</td><td>int</td><td>force_type_tag</td><td>ForceLawType 标签 (0=WorldGravity, 2=NewtonianGravity, 4=AirDrag, ...)</td></tr>
 </table>
 </section>
 
-<section id="plasma">
-<h2>Plasma — 等离子体物理</h2>
-<table class="fn-table">
-<tr><th>函数</th><th>说明</th></tr>
-<tr><td><code>plasma_debye_params(n_e, T_e, n_i, Z, T_i) → PlasmaParamsReport</code></td><td>λ_D, ω_pe, ω_pi, N_D, v_th</td></tr>
-<tr><td><code>plasma_boris_push(particle, fields, params) → PicParticle</code></td><td>Boris 推进器 (半E→B旋转→半E)</td></tr>
-<tr><td><code>plasma_trilinear_interpolate(particle, grid, dx) → GridField</code></td><td>三线性场插值</td></tr>
-<tr><td><code>plasma_charge_deposition(particle, grid, dx) → ChargeDensityCell</code></td><td>CIC 电荷沉积</td></tr>
-<tr><td><code>plasma_vlasov_moments(particles, n) → VlasovMomentReport</code></td><td>Vlasov 矩 (n, u, T, q)</td></tr>
-<tr><td><code>plasma_poisson_solve_1d(rho, dx, n, phi_out, e_out) → u32</code></td><td>1D Poisson 求解 (Thomas 算法)</td></tr>
-<tr><td><code>plasma_magnetic_x_point(bx, by, dx, nx, ny) → MagneticXPoint</code></td><td>磁 X 点检测</td></tr>
-<tr><td><code>plasma_sweet_parker_rate(S) → f64</code></td><td>Sweet-Parker 重连率 1/√S</td></tr>
-<tr><td><code>plasma_petschek_rate(S) → f64</code></td><td>Petschek 重连率 π/(4ln S)</td></tr>
-<tr><td><code>plasma_alfven_speed(B, rho) → f64</code></td><td>Alfvén 速度 v_A</td></tr>
-<tr><td><code>plasma_lundquist_number(L, v_A, eta) → f64</code></td><td>Lundquist 数 S</td></tr>
-</table>
-</section>
+<!-- ====== MINECRAFT ====== -->
+<section id="minecraft">
+<h2>Minecraft 集成</h2>
+<h3>Java 21 JNI (NeoForge 1.21.1)</h3>
+<pre><code class="language-java">// build.gradle 依赖
+dependencies {
+    implementation 'org.polaris2023:mps-rigid-body:0.1.4'
+}
 
-<section id="superfluidity">
-<h2>Superfluidity — 超流体与量子涡旋</h2>
-<table class="fn-table">
-<tr><th>函数</th><th>说明</th></tr>
-<tr><td><code>superfluid_biot_savart_segment(seg, point) → BiotSavartVelocity</code></td><td>Biot-Savart 涡旋段诱导速度</td></tr>
-<tr><td><code>superfluid_vortex_ring_velocity(ring) → Vec3</code></td><td>涡旋环自诱导速度</td></tr>
-<tr><td><code>superfluid_circulation_quantum(mass) → f64</code></td><td>环流量子 κ₀ = h/m</td></tr>
-<tr><td><code>superfluid_quantised_circulation(velocities, positions, n, mass) → QuantisedCirculation</code></td><td>量子化环流检测</td></tr>
-<tr><td><code>superfluid_gp_order_parameter(r, vortex_core, xi) → GpOrderParameter</code></td><td>GP 序参量 ψ = √n·exp(iφ)</td></tr>
-<tr><td><code>superfluid_gp_energy_density(psi, params) → GpEnergyDensity</code></td><td>GP 能量密度</td></tr>
-<tr><td><code>superfluid_gp_imaginary_time_step(psi, params) → GpOrderParameter</code></td><td>GP 虚时演化</td></tr>
-<tr><td><code>superfluid_vortex_reconnection(seg1, seg2) → VortexReconnectionReport</code></td><td>涡旋重连 (最近点 + X 交换)</td></tr>
-<tr><td><code>superfluid_vortex_tangle_stats(segments, n) → VortexTangleStats</code></td><td>涡旋缠结统计</td></tr>
-<tr><td><code>superfluid_healing_length(g, n, m) → f64</code></td><td>ξ = ħ/√(2mgn)</td></tr>
-<tr><td><code>superfluid_sound_speed(g, n, m) → f64</code></td><td>c = √(gn/m)</td></tr>
-</table>
-</section>
+// 模组中使用
+public class PhysicsMod {
+    private long world;
 
-<section id="wave-optics">
-<h2>Wave Optics — 波动光学与衍射</h2>
-<table class="fn-table">
-<tr><th>函数</th><th>说明</th></tr>
-<tr><td><code>wave_optics_wavenumber(lambda) → f64</code></td><td>k = 2π/λ</td></tr>
-<tr><td><code>wave_optics_plane_wave(point, direction, params) → ComplexAmplitude</code></td><td>平面波 E = A₀·exp(i(k·r−φ₀))</td></tr>
-<tr><td><code>wave_optics_spherical_wave(source, point, params) → SphericalWavePoint</code></td><td>球面波 1/r 衰减</td></tr>
-<tr><td><code>wave_optics_huygens_fresnel(sources, n, point, k) → ComplexAmplitude</code></td><td>惠更斯-菲涅尔叠加</td></tr>
-<tr><td><code>wave_optics_fresnel_diffraction(aperture, point, params, distance) → DiffractionPoint</code></td><td>菲涅尔衍射 (矩形孔径)</td></tr>
-<tr><td><code>wave_optics_fresnel_kirchhoff(aperture, point, params, distance) → KirchhoffDiffractionPoint</code></td><td>菲涅尔-基尔霍夫衍射 (含倾斜因子)</td></tr>
-<tr><td><code>wave_optics_young_double_slit(x, y, slit_sep, slit_width, distance, params) → YoungSlitPoint</code></td><td>杨氏双缝干涉 + 单缝包络</td></tr>
-<tr><td><code>wave_optics_thin_film_interference(params, wavelength) → ThinFilmInterferenceReport</code></td><td>薄膜干涉 (OPD + 半波损失)</td></tr>
-<tr><td><code>wave_optics_thin_film_spectrum(params, wavelengths, n, out) → u32</code></td><td>薄膜多波长光谱 (彩虹色)</td></tr>
-<tr><td><code>wave_optics_fresnel_zone(zone_index, wavelength, distance) → FresnelZoneReport</code></td><td>菲涅尔波带 rₙ = √(nλD)</td></tr>
-<tr><td><code>wave_optics_fresnel_zone_phasor_sum(zones, n) → ComplexAmplitude</code></td><td>前 N 带相量和</td></tr>
-</table>
-</section>
+    public void init() {
+        world = RigidBodyNative.worldCreate(0, -9.81, 0);
+        // 注册地球引力 (Minecraft 主世界 ≈ 地球)
+        RigidBodyNative.worldRegisterCelestialGravity(world, 3, 8);
 
-<section id="acoustics">
-<h2>Acoustics — 声学</h2>
-<table class="fn-table">
-<tr><th>函数</th><th>说明</th></tr>
-<tr><td><code>acoustic_generalized_modal_analysis(M, K, n, ...)</code></td><td>广义模态分析</td></tr>
-<tr><td><code>acoustic_structural_mode_sdof(m, k, c)</code></td><td>单自由度结构模态</td></tr>
-<tr><td><code>acoustic_wave_equation_step(p, p_prev, c, dt, dx, n)</code></td><td>波动方程步进</td></tr>
-<tr><td><code>acoustic_detect_resonance(frequencies, n, target, tolerance)</code></td><td>共振检测</td></tr>
-<tr><td><code>acoustic_contact_material_excitation(desc, mat_a, mat_b)</code></td><td>接触材料声激励</td></tr>
-<tr><td><code>acoustic_modal_synthesis_step(modes, n, excitation, dt)</code></td><td>模态合成步进</td></tr>
-<tr><td><code>acoustic_spatialize_mono_sample(sample, source_pos, listener_pos, listener_orient)</code></td><td>单声道空间化</td></tr>
-</table>
-</section>
+        // 可选: 启用共享内存 Arena 加速 (160×)
+        long[] addrSize = new long[2];
+        RigidBodyNative.worldCreateSharedArena(world, 2048, 4096, 8192, 8192, addrSize);
+        ByteBuffer arena = RigidBodyNative.worldGetArenaDirectByteBuffer(world);
+        // 之后读取刚体状态 → arena.getDouble(offset) 零 JNI
+    }
 
-<section id="thermodynamics">
-<h2>Thermodynamics — 热力学</h2>
-<table class="fn-table">
-<tr><th>函数</th><th>说明</th></tr>
-<tr><td><code>thermo_heat_conduction(k, area, dT, dx)</code></td><td>热传导</td></tr>
-<tr><td><code>thermo_phase_change(T, T_melt, mass, cp, latent)</code></td><td>相变</td></tr>
-<tr><td><code>thermo_thermal_radiation(epsilon, area, T, T_env)</code></td><td>热辐射</td></tr>
-<tr><td><code>thermo_fem_heat_diffusion(nodes, edges, n_nodes, n_edges, dt)</code></td><td>FEM 热扩散</td></tr>
-<tr><td><code>thermo_thermal_stress(strain, E, alpha, dT)</code></td><td>热应力</td></tr>
-<tr><td><code>thermo_thermoelastic_3d(strain, E, nu, alpha, dT)</code></td><td>三维热弹性</td></tr>
-</table>
-</section>
+    public void onServerTick() {
+        RigidBodyNative.worldStep(world, 1.0 / 20.0);
+        // 同步 Rapier 位姿到 Minecraft Entity
+    }
 
-<section id="electromagnetism">
-<h2>Electromagnetism — 电磁学</h2>
-<table class="fn-table">
-<tr><th>函数</th><th>说明</th></tr>
-<tr><td><code>em_lorentz_force(q, E, B, v)</code></td><td>洛伦兹力</td></tr>
-<tr><td><code>em_magnetic_flux(B, area, normal)</code></td><td>磁通量</td></tr>
-<tr><td><code>em_faraday_induction(flux, dt, resistance)</code></td><td>法拉第感应</td></tr>
-<tr><td><code>em_maxwell_step(E, B, dt, dx)</code></td><td>Maxwell 方程步进</td></tr>
-<tr><td><code>em_fdtd_yee_step(E, B, dt, dx, nx, ny, nz)</code></td><td>FDTD Yee 网格步进</td></tr>
-</table>
+    public void shutdown() {
+        RigidBodyNative.worldDestroySharedArena(world);
+        RigidBodyNative.worldDestroy(world);
+    }
+}</code></pre>
 </section>
-
-<section id="fracture">
-<h2>Fracture — 断裂力学</h2>
-<table class="fn-table">
-<tr><th>函数</th><th>说明</th></tr>
-<tr><td><code>fracture_stress_intensity(sigma, a, Y)</code></td><td>应力强度因子</td></tr>
-<tr><td><code>fracture_griffith_criterion(sigma, a, E, gamma)</code></td><td>Griffith 断裂准则</td></tr>
-<tr><td><code>fracture_miner_damage(stresses, cycles, S_N_params, n)</code></td><td>Miner 累积损伤</td></tr>
-<tr><td><code>fracture_sn_curve(S, params)</code></td><td>S-N 曲线</td></tr>
-<tr><td><code>fracture_energy_balance(strain_energy, surface_energy)</code></td><td>断裂能量平衡</td></tr>
-<tr><td><code>fracture_mode_analysis(K_I, K_II, K_III)</code></td><td>断裂模式分析</td></tr>
-<tr><td><code>fracture_replace_body(world, body, fragments, n, ...)</code></td><td>替换刚体为碎片 (Rapier 集成)</td></tr>
-</table>
-</section>
-
-<section id="softbody">
-<h2>Soft Body — 软体动力学</h2>
-<table class="fn-table">
-<tr><th>函数</th><th>说明</th></tr>
-<tr><td><code>softbody_spring_force(positions, velocities, spring, particles)</code></td><td>弹簧力</td></tr>
-<tr><td><code>softbody_distance_constraint(positions, constraint, particles)</code></td><td>距离约束 (XPBD)</td></tr>
-<tr><td><code>softbody_bending_constraint(positions, constraint, particles)</code></td><td>弯曲约束</td></tr>
-<tr><td><code>softbody_sphere_collision(positions, velocities, collision, particles, n)</code></td><td>球体碰撞</td></tr>
-<tr><td><code>softbody_volume_constraint(positions, constraint, particles)</code></td><td>体积约束</td></tr>
-<tr><td><code>softbody_step(positions, velocities, constraints, ..., dt)</code></td><td>软体步进</td></tr>
-</table>
-</section>
-
-<section id="biomechanics">
-<h2>Biomechanics — 生物力学</h2>
-<table class="fn-table">
-<tr><th>函数</th><th>说明</th></tr>
-<tr><td><code>biomechanics_hill_force_length_factor(l_m, l_opt)</code></td><td>Hill 肌肉力-长度因子</td></tr>
-<tr><td><code>biomechanics_hill_force_velocity_factor(v_m, v_max)</code></td><td>Hill 肌肉力-速度因子</td></tr>
-<tr><td><code>biomechanics_hill_muscle_evaluate(desc, state)</code></td><td>Hill 肌肉模型完整评估</td></tr>
-<tr><td><code>biomechanics_skeletal_joint_limit(angle, limit)</code></td><td>骨骼关节限位</td></tr>
-</table>
-</section>
-
-<section id="quantum">
-<h2>Quantum — 量子力学</h2>
-<table class="fn-table">
-<tr><th>函数</th><th>说明</th></tr>
-<tr><td><code>quantum_wave_function(amplitude_real, amplitude_imag)</code></td><td>波函数</td></tr>
-<tr><td><code>quantum_tunneling(barrier)</code></td><td>量子隧穿 (透射/反射系数)</td></tr>
-<tr><td><code>quantum_harmonic_oscillator(m, k, hbar)</code></td><td>量子谐振子 (零点能/能级)</td></tr>
-</table>
-</section>
-
-<section id="molecular">
-<h2>Molecular — 分子动力学</h2>
-<table class="fn-table">
-<tr><th>函数</th><th>说明</th></tr>
-<tr><td><code>molecular_pair_force(p1, p2, law)</code></td><td>Lennard-Jones + Coulomb 对力</td></tr>
-<tr><td><code>molecular_pair_potential(p1, p2, law)</code></td><td>对势能</td></tr>
-<tr><td><code>molecular_nbody_step(particles, n, law, dt)</code></td><td>N 体步进</td></tr>
-</table>
-</section>
-
-<section id="astrophysics">
-<h2>Astrophysics — 天体物理</h2>
-<table class="fn-table">
-<tr><th>函数</th><th>说明</th></tr>
-<tr><td><code>astro_nbody_force(particles, n, params)</code></td><td>N 体引力 (Barnes-Hut)</td></tr>
-<tr><td><code>astro_nbody_step(particles, n, params, dt)</code></td><td>N 体步进</td></tr>
-<tr><td><code>astro_relativistic_orbit_correction(sv, M)</code></td><td>相对论轨道修正</td></tr>
-<tr><td><code>astro_roche_limit(rho_p, rho_s, R)</code></td><td>Roche 极限</td></tr>
-<tr><td><code>astro_orbital_resonance(T1, T2)</code></td><td>轨道共振</td></tr>
-</table>
-</section>
-
-<section id="physchem">
-<h2>PhysChem — 物理化学</h2>
-<table class="fn-table">
-<tr><th>函数</th><th>说明</th></tr>
-<tr><td><code>physchem_chemical_reaction_rate(concentrations, k, n)</code></td><td>化学反应速率</td></tr>
-<tr><td><code>physchem_gray_scott_step(u, v, params)</code></td><td>Gray-Scott 反应扩散</td></tr>
-<tr><td><code>physchem_catalyst_effect(concentration, params)</code></td><td>催化剂效应</td></tr>
-<tr><td><code>physchem_concentration_buoyancy(c, rho0, beta, g)</code></td><td>浓度浮力</td></tr>
-</table>
-</section>
-
-<section id="continuum">
-<h2>Continuum — 连续介质力学</h2>
-<table class="fn-table">
-<tr><th>函数</th><th>说明</th></tr>
-<tr><td><code>continuum_fem_shape_functions(tet, point)</code></td><td>FEM 形函数</td></tr>
-<tr><td><code>continuum_fem_constitutive(E, nu)</code></td><td>FEM 本构关系</td></tr>
-<tr><td><code>continuum_newmark_beta_step(M, K, C, F, u, v, params)</code></td><td>Newmark-β 步进</td></tr>
-<tr><td><code>continuum_bernoulli_equation(p_static, v, rho, z, g)</code></td><td>伯努利方程</td></tr>
-<tr><td><code>continuum_stress_strain(strain, E, nu, alpha, dT)</code></td><td>应力-应变</td></tr>
-<tr><td><code>continuum_hertz_contact(E1, nu1, R1, E2, nu2, R2, F, d, v)</code></td><td>Hertz 接触</td></tr>
-</table>
-</section>
-
-<section id="transmission">
-<h2>Transmission — 传输</h2>
-<table class="fn-table">
-<tr><th>函数</th><th>说明</th></tr>
-<tr><td><code>transmission_friis_link(P_tx, G_tx, G_rx, lambda, d)</code></td><td>Friis 传输方程</td></tr>
-<tr><td><code>transmission_collision_probability(r1, v1, r2, v2, cov1, cov2)</code></td><td>碰撞概率</td></tr>
-</table>
-</section>
-
-<section id="topology">
-<h2>Topology — 拓扑优化</h2>
-<table class="fn-table">
-<tr><th>函数</th><th>说明</th></tr>
-<tr><td><code>topology_simp_material(density, penalty, E_min, E_solid)</code></td><td>SIMP 材料插值</td></tr>
-<tr><td><code>topology_optimize_step(densities, stiffness, forces, params, nx, ny, nz)</code></td><td>拓扑优化步进</td></tr>
-<tr><td><code>topology_density_filter(densities, nx, ny, nz, radius)</code></td><td>密度过滤</td></tr>
-<tr><td><code>topology_density_stats(densities, n)</code></td><td>密度统计</td></tr>
-</table>
-</section>
-
-<section id="compat">
-<h2>Compat — 兼容性辅助</h2>
-<table class="fn-table">
-<tr><th>函数</th><th>说明</th></tr>
-<tr><td><code>compat_insert_dynamic_cuboids(world, positions, half_extents, n, density, friction, restitution) → u32</code></td><td>批量插入动态长方体</td></tr>
-<tr><td><code>compat_insert_static_trimesh(world, vertices, indices, v_len, i_len, friction, restitution) → u64</code></td><td>插入静态三角网格</td></tr>
-<tr><td><code>compat_query_rigid_body_aabb(world, body, out_mins, out_maxs) → Bool</code></td><td>查询刚体 AABB</td></tr>
-</table>
-</section>
-
-<!-- ====== MINECRAFT INTEGRATION ====== -->
 
 <section id="bridge">
-<h2>Bridge — 零拷贝 Java-Native 桥接层</h2>
-<p>
-  传统 JNI 每帧为每个刚体分配 <code>newDoubleArray(3)</code> 拷贝位置/速度。
-  零拷贝桥接层通过 <code>DirectByteBuffer</code> 共享内存和预分配槽位消除全部 per-frame 分配。
-</p>
+<h2>零拷贝桥接</h2>
 
-<h3>三大优化路径</h3>
-<table>
-<tr><th>场景</th><th>传统方式 (每帧开销)</th><th>零拷贝方式</th></tr>
-<tr><td>读取单个刚体位置</td><td><code>newDoubleArray(3)</code> + JNI 拷贝 (1 alloc + 1 FFI)</td><td><code>UNSAFE.allocateMemory(24)</code> 一次，复用 (<strong>0 alloc + 1 FFI</strong>)</td></tr>
-<tr><td>批量读取所有刚体</td><td>N × (3 FFI 调用 + 3 次数组分配)</td><td><code>bridgeBulkBodySnapshot</code> 一次写入 DirectDoubleBuffer (<strong>0 alloc + 1 FFI</strong>)</td></tr>
-<tr><td>Minecraft chunk 体素</td><td><code>getByteArrayRegion</code> 全量拷贝 4096 字节</td><td><code>bridgeVoxelColliderFromDirectBuffer</code> 直接指针引用 (<strong>0 拷贝</strong>)</td></tr>
-</table>
+<h3>批量快照 (bridge.rs)</h3>
+<p><code>bridgeBulkBodySnapshot</code> 一次 JNI 调用将所有刚体位姿写入 Java DirectDoubleBuffer (13 f64/刚体)。</p>
+<p><strong>注意:</strong> 推荐使用 <a href="#shared-arena">共享内存 Arena</a> 替代 bridge API — Arena 提供零 JNI 读写、BodyHandle 映射、ForceReport 分项和事件环缓冲。</p>
+<pre><code class="language-java">int MAX_BODIES = 10000;
+ByteBuffer buf = ByteBuffer.allocateDirect(MAX_BODIES * 13 * 8);
+long bufPtr = ((sun.nio.ch.DirectBuffer) buf).address();
+int count = RigidBodyNative.bridgeBulkBodySnapshot(world, bufPtr, MAX_BODIES);</code></pre>
 
-<h3>核心 API</h3>
-<table class="fn-table">
-<tr><th>函数</th><th>说明</th></tr>
-<tr><td><code>bridgeBulkBodySnapshot(world, out_ptr, capacity) → i32</code></td><td>一次写入所有刚体到 DirectDoubleBuffer (13 f64/body)</td></tr>
-<tr><td><code>bridgeVec3ToSlot(x, y, z, slot) → Bool</code></td><td>写入 Vec3 到预分配 24 字节槽位</td></tr>
-<tr><td><code>bridgeQuatToSlot(i, j, k, w, slot) → Bool</code></td><td>写入 Quat 到预分配 32 字节槽位</td></tr>
-<tr><td><code>bridgeWriteF64Slice(values, count, slot, cap) → i32</code></td><td>批量写入 f64 数组到 DirectDoubleBuffer</td></tr>
-<tr><td><code>bridgeVoxelColliderFromDirectBuffer(world, ptr, sx, sy, sz, ...) → i64</code></td><td>从 DirectByteBuffer 指针直接构建体素碰撞体</td></tr>
-</table>
-
-<h3>DirectByteBuffer 布局 (每刚体 13 个 f64)</h3>
-<pre><code class="language-text">[tx, ty, tz,  qi, qj, qk, qw,  vx, vy, vz,  wx, wy, wz]
- |---translation---|  |---rotation---|  |-linvel-|  |-angvel-|
- 偏移 0              偏移 24           偏移 56    偏移 80</code></pre>
-
-<h3>Java 使用示例</h3>
-<pre><code class="language-java">// 获取 Unsafe 实例 (所有 JVM 通用，含 Java 21+)
-private static final Unsafe U = getUnsafe();
-private static Unsafe getUnsafe() {
-    try {
-        Field f = Unsafe.class.getDeclaredField("theUnsafe");
-        f.setAccessible(true);
-        return (Unsafe) f.get(null);
-    } catch (Exception e) { throw new Error(e); }
-}
-
-// === 初始化：分配本地内存，全帧复用 ===
-long bufPtr = U.allocateMemory(MAX_BODIES * 13 * 8);
-U.setMemory(bufPtr, MAX_BODIES * 13 * 8, (byte) 0);
-
-// === 每帧：一次调用获取全部刚体状态 ===
-int count = RigidBodyNative.bridgeBulkBodySnapshot(world, bufPtr, MAX_BODIES);
-for (int i = 0; i < count; i++) {
-    long off = bufPtr + i * 13 * 8;
-    double tx = U.getDouble(off);        // translation.x
-    double ty = U.getDouble(off + 8);    // translation.y
-    double tz = U.getDouble(off + 16);   // translation.z
-    double vx = U.getDouble(off + 56);   // linvel.x
-    // ... 同步到 Minecraft Entity ...
-}
-
-// === 预分配槽位 (代替 new double[3] 模式) ===
-long posSlot = U.allocateMemory(24);
-RigidBodyNative.bridgeVec3ToSlot(x, y, z, posSlot);
-double x = U.getDouble(posSlot);
-double y = U.getDouble(posSlot + 8);
-double z = U.getDouble(posSlot + 16);
-</code></pre>
+<h3>共享内存 Arena (shared_arena.rs) <span class="badge badge-new">新</span></h3>
+<p>更高阶的零拷贝方案：Rust 维护共享内存区域，Java 直接读写 ByteBuffer/MemorySegment，无需逐帧 JNI 调用。详见 <a href="#shared-arena">共享内存 Arena 章节</a>。</p>
 </section>
 
-<section id="mc-compat">
-<h2>模组兼容性设计</h2>
-<p>零拷贝桥接层使用 <strong>仅标准 JVM API</strong>，不依赖任何 Minecraft 内部类或特定模组加载器。</p>
+<!-- ====== ECOSYSTEM ====== -->
+<section id="ecosystem">
+<h2>生态库</h2>
 
-<h3>兼容矩阵</h3>
 <table>
-<tr><th>平台</th><th>兼容性</th><th>说明</th></tr>
-<tr><td><strong>NeoForge</strong> (1.21.1+)</td><td>✅ 完全支持</td><td>主要目标平台</td></tr>
-<tr><td><strong>Fabric</strong> (1.21+)</td><td>✅ 完全支持</td><td>相同 JNI/FFM ABI</td></tr>
-<tr><td><strong>Forge</strong> (1.20.x)</td><td>✅ 完全支持</td><td>仅需 Java 8+ 和 JNI</td></tr>
-<tr><td><strong>Quilt</strong></td><td>✅ 完全支持</td><td>Fabric 兼容层</td></tr>
-<tr><td><strong>Paper/Spigot</strong> (服务端)</td><td>✅ 完全支持</td><td>纯 JNI，无客户端依赖</td></tr>
-<tr><td><strong>Vanilla</strong> (无模组)</td><td>✅ 完全支持</td><td>Java agent 注入 JNI 库</td></tr>
+<tr><th>库</th><th>版本</th><th>用途</th></tr>
+<tr><td><a href="https://rapier.rs">rapier3d-f64</a></td><td>0.33.0</td><td>核心物理引擎 (碰撞检测 + 约束求解)</td></tr>
+<tr><td><a href="https://github.com/dimforge/parry">parry3d-f64</a></td><td>(间接)</td><td>几何计算 (通过 rapier)</td></tr>
+<tr><td><a href="https://github.com/jni-rs/jni-rs">ljni</a></td><td>0.21.0</td><td>JNI 绑定 (无 panics, 零开销)</td></tr>
+<tr><td><a href="https://github.com/Amanieu/parking_lot">parking_lot</a></td><td>0.12.5</td><td>RwLock/Mutex (事件系统并发)</td></tr>
+<tr><td><a href="https://github.com/rayon-rs/rayon">rayon</a></td><td>1.12</td><td>并行迭代 (Rapier 并行求解)</td></tr>
+<tr><td><a href="https://github.com/purpleprotocol/mimalloc">mimalloc</a></td><td>0.1.52</td><td>全局分配器 (性能)</td></tr>
+<tr><td><a href="https://github.com/rust-lang/hashbrown">hashbrown</a></td><td>0.17.1</td><td>高性能 HashMap (ForceRegistry/事件)</td></tr>
+<tr><td><a href="https://github.com/servo/rust-smallvec">smallvec</a></td><td>1.15.2</td><td>栈内联 Vec (力记录 8 元素内联)</td></tr>
+<tr><td><a href="https://github.com/bevyengine/bevy">bevy_ecs</a></td><td>0.19.0 (optional)</td><td>AnvilKit ECS 集成</td></tr>
+<tr><td><a href="https://github.com/eqrion/cbindgen">cbindgen</a></td><td>0.29.4 (build)</td><td>C 头文件自动生成</td></tr>
 </table>
 
-<h3>API 设计原则</h3>
-<table>
-<tr><th>原则</th><th>实现</th></tr>
-<tr><td><strong>零 Minecraft 依赖</strong></td><td>不使用 <code>net.minecraft.*</code> 任何类；所有交互通过 <code>long</code> 句柄和 <code>Unsafe</code> 分配的本地内存</td></tr>
-<tr><td><strong>零反射黑魔法</strong></td><td>仅使用 <code>Unsafe.allocateMemory</code> + 反射获取实例（JDK 内部 API，所有 JVM 8–25 均支持）；不依赖 <code>sun.nio.ch.DirectBuffer</code>（Java 16+ 已强封装）</td></tr>
-<tr><td><strong>无全局状态</strong></td><td>每个 <code>PhysicsWorld</code> 独立；多世界并行无冲突</td></tr>
-<tr><td><strong>线程安全</strong></td><td>Rust 侧 <code>parking_lot::Mutex</code> 保护事件队列；物理步进单线程</td></tr>
-<tr><td><strong>优雅降级</strong></td><td>DirectByteBuffer 不可用时自动回退到 <code>byte[]</code> + JNI 拷贝路径</td></tr>
-</table>
-
-<h3>与其他模组共存</h3>
-<pre><code class="language-java">// 1. 使用独立类加载器隔离 native 库
-//    System.loadLibrary 在 static{} 中调用，不影响其他模组
-static { System.loadLibrary("mps_rigid_body"); }
-
-// 2. 使用命名空间前缀避免 JNI 符号冲突
-//    Java_org_polaris2023_msp_1rigid_1body_RigidBodyNative_*
-
-// 3. 可选：通过 ServiceLoader 发现其他模组的物理世界
-//    public interface RigidBodyProvider {
-//        PhysicsWorld getPhysicsWorld(Level level);
-//    }
-
-// 4. 内存管理：使用 Cleaner 或 try-with-resources
-try (PhysicsWorld world = new PhysicsWorld(0, -9.81, 0)) {
-    // ... world 自动清理
-}</code></pre>
+<p><strong>兼容 Java 库</strong>：任何能加载 <code>System.loadLibrary("mps_rigid_body")</code> 的 Java 环境（Minecraft Forge/NeoForge/Fabric、Spring Boot、Android NDK）。</p>
+<p><strong>已知问题</strong>：f64 双精度在 10⁷ 步后累积误差 ~10⁻¹²（位置米级），使用 Kahan 补偿辛积分器可降至 ~10⁻²⁸。</p>
 </section>
 
-<section id="mc-jni">
-<h2>Minecraft 集成 — Java 21 JNI (NeoForge 1.21.1)</h2>
-
-<h3>项目配置</h3>
-<table>
-<tr><th>配置项</th><th>值</th></tr>
-<tr><td>Minecraft 版本</td><td>1.21.1</td></tr>
-<tr><td>NeoForge 版本</td><td>21.1.233</td></tr>
-<tr><td>Java 版本</td><td>21</td></tr>
-<tr><td>Mod ID</td><td><code>mps_rigid_body</code></td></tr>
-<tr><td>包名</td><td><code>org.polaris2023.msp_rigid_body</code></td></tr>
-</table>
-
-<h3>构建流程</h3>
-<pre><code class="language-text">cargo build --release
-  └── 生成 target/release/mps_rigid_body.dll (Windows)
-  └── copyNativeLibraryToResources
-        └── 复制到 build/generated/resources/native/{os}/{arch}/
-              └── 打包进 JAR mod
-                    └── Minecraft 启动时 System.loadLibrary("mps_rigid_body")</code></pre>
-
-<h3>Mod 结构</h3>
-<pre><code class="language-text">test21/
-  build.gradle                  — NeoForge moddev 2.0.141
-  src/main/
-    resources/
-      META-INF/
-        neoforge.mods.toml      — Mod 元数据
-    java/org/polaris2023/msp_rigid_body/
-      RigidBody.java            — 公共静态 API (门面)
-      RigidBodyNative.java      — JNI native 方法声明
-      JniSmokeTest.java         — 集成测试
-      util/
-        PhysicsWorld.java       — World 封装 (AutoCloseable)
-        RigidBody.java          — 刚体封装 (Builder 模式)
-        Collider.java           — 碰撞体封装
-        CharacterController.java— 角色控制器封装
-        SpatialIndex.java       — CRbTree/RTree 封装
-        NativeMemory.java       — Unsafe 本地内存管理
-        VoxelGrid.java          — 体素网格辅助类
-        IParent.java            — 父刚体接口</code></pre>
-
-<h3>在 Minecraft 中使用</h3>
-<pre><code class="language-java">// 1. 初始化物理世界 (在 Mod 构造函数中)
-PhysicsWorld physicsWorld = new PhysicsWorld(0, -9.81, 0);
-physicsWorld.integrationParameters(1.0 / 20.0, 4, 4);
-
-// 2. 为每个实体创建刚体
-for (Entity entity : minecraftLevel.entities()) {
-    RigidBody body = physicsWorld.body(BodyStatus.DYNAMIC)
-        .translation(entity.getX(), entity.getY(), entity.getZ())
-        .linearVelocity(entity.getDeltaMovement().x, ...)
-        .gravityScale(1.0)
-        .canSleep(true)
-        .build()
-        .body(physicsWorld);
-}
-
-// 3. 为地形块创建体素碰撞体
-byte[] occupancy = chunkToVoxelGrid(chunk, 16, 16, 16);
-Collider terrain = physicsWorld.voxelCollider(occupancy, 16, 16, 16, 1.0)
-    .friction(0.6)
-    .restitution(0.0)
-    .buildAndInsert();
-
-// 4. 每 tick 推进物理
-physicsWorld.step();
-
-// 5. 读取刚体位置同步回 Minecraft 实体
-for (BodySnapshot snapshot : physicsWorld.bodySnapshot()) {
-    Entity entity = handleToEntity(snapshot.handle());
-    entity.setPos(snapshot.translation()[0], ...);
-}
-
-// 6. 处理碰撞事件
-for (CollisionEvent event : physicsWorld.collisionEvents()) {
-    // 触发 Minecraft 伤害、音效等
-}
-physicsWorld.clearEvents();
-</code></pre>
-
-<h3>Java API 封装层次</h3>
-<table>
-<tr><th>层次</th><th>类</th><th>用途</th></tr>
-<tr><td>底层</td><td><code>RigidBodyNative</code></td><td>JNI native 方法，直接调用 Rust</td></tr>
-<tr><td>中层</td><td><code>NativeMemory</code></td><td>Unsafe 内存管理，Vec3/Quat 读写</td></tr>
-<tr><td>高层</td><td><code>PhysicsWorld</code>, <code>RigidBody</code>, <code>Collider</code></td><td>面向对象封装，Builder 模式</td></tr>
-<tr><td>门面</td><td><code>RigidBody</code> (顶层)</td><td>静态便捷方法</td></tr>
-</table>
-</section>
-
-<section id="mc-ffm">
-<h2>Minecraft 集成 — Java 25 FFM (NeoForge 1.26.1 预览)</h2>
-
-<h3>项目配置</h3>
-<table>
-<tr><th>配置项</th><th>值</th></tr>
-<tr><td>Minecraft 版本</td><td>1.26.1</td></tr>
-<tr><td>NeoForge 版本</td><td>26.1.2</td></tr>
-<tr><td>Java 版本</td><td>25</td></tr>
-<tr><td>JVM 参数</td><td><code>--enable-native-access=ALL-UNNAMED</code></td></tr>
-<tr><td>NeoForge 预览</td><td>通过 <code>-Penable_neoforge_preview=true</code> 启用</td></tr>
-</table>
-
-<h3>FFM vs JNI 对比</h3>
-<table>
-<tr><th>方面</th><th>JNI (test21)</th><th>FFM (test25)</th></tr>
-<tr><td>Java 版本</td><td>21</td><td>25</td></tr>
-<tr><td>Minecraft 版本</td><td>1.21.1</td><td>1.26.1 (预览)</td></tr>
-<tr><td>本地访问</td><td><code>System.loadLibrary</code> + JNI 函数</td><td><code>SymbolLookup</code> + MethodHandle downcalls</td></tr>
-<tr><td>句柄类型</td><td><code>long</code> (64位整数)</td><td><code>MemorySegment</code> (安全内存引用)</td></tr>
-<tr><td>结构布局</td><td>手动偏移量计算</td><td><code>MemoryLayout</code> 定义</td></tr>
-<tr><td>安全性</td><td>JNI 边界 + panic 捕获</td><td>直接 C ABI + out-pointer 验证</td></tr>
-<tr><td>性能</td><td>每次调用有 JNI 开销</td><td>近乎零开销 (直接 C ABI)</td></tr>
-<tr><td>构建集成</td><td>JNI 头文件生成</td><td>C 头文件通过 cbindgen (已完成)</td></tr>
-</table>
-
-<h3>FFM MemoryLayout 示例</h3>
-<pre><code class="language-java">// Rust: pub struct Vec3 { pub x: f64, pub y: f64, pub z: f64 }
-static final StructLayout VEC3 = MemoryLayout.structLayout(
-    ValueLayout.JAVA_DOUBLE.withName("x"),
-    ValueLayout.JAVA_DOUBLE.withName("y"),
-    ValueLayout.JAVA_DOUBLE.withName("z")
-);
-
-// Rust: pub struct RayHit { collider: u64, time_of_impact: f64, normal: Vec3, feature: u32 }
-static final StructLayout RAY_HIT = MemoryLayout.structLayout(
-    ValueLayout.JAVA_LONG.withName("collider"),
-    ValueLayout.JAVA_DOUBLE.withName("time_of_impact"),
-    VEC3.withName("normal"),
-    ValueLayout.JAVA_INT.withName("feature")
-);</code></pre>
-
-<h3>FFM Downcall 示例</h3>
-<pre><code class="language-java">// 加载本地库
-var lookup = SymbolLookup.libraryLookup(
-    Path.of(System.getProperty("rigidbody.native.path")),
-    Arena.global()
-);
-
-// 查找函数
-var worldCreate = Linker.nativeLinker().downcallHandle(
-    lookup.find("world_create").get(),
-    FunctionDescriptor.of(ValueLayout.ADDRESS, VEC3)
-);
-
-// 调用
-MemorySegment world = (MemorySegment) worldCreate.invokeExact(
-    Vec3.of(0, -9.81, 0)
-);</code></pre>
-</section>
-
-<section id="mc-perf">
-<h2>Minecraft 性能优化指南</h2>
-
-<h3>1. 本地库加载</h3>
-<ul>
-  <li>库在首次加载时从 JAR 提取到临时目录</li>
-  <li>后续加载使用缓存路径</li>
-  <li>建议在 Mod 构造函数中预加载: <code>System.loadLibrary("mps_rigid_body")</code></li>
-</ul>
-
-<h3>2. 线程安全</h3>
-<ul>
-  <li>Rust 侧使用 <code>parking_lot::Mutex</code> 保护事件队列</li>
-  <li>物理步进在每个 World 内单线程</li>
-  <li>多个 World 可并行运行 (rayon 线程池)</li>
-</ul>
-
-<h3>3. 内存管理</h3>
-<ul>
-  <li>不透明句柄必须显式销毁 (无 GC 自动回收)</li>
-  <li>JNI: <code>long</code> 值作为原始字段存储</li>
-  <li>FFM: <code>MemorySegment</code> 通过 Arena 作用域管理</li>
-  <li>使用 try-with-resources: <code>try (PhysicsWorld world = ...) { ... }</code></li>
-</ul>
-
-<h3>4. 区块化物理</h3>
-<ul>
-  <li>为每个加载的区块区域创建独立的 Rapier World</li>
-  <li>在区块边界同步碰撞信息</li>
-  <li>卸载区块时销毁对应的 World</li>
-</ul>
-
-<h3>5. 体素碰撞体缓存</h3>
-<ul>
-  <li>体素碰撞体生成开销大 — 缓存每个区块的碰撞体</li>
-  <li>仅在方块变更时重新生成</li>
-  <li>默认阈值: <code>small_voxel_limit=128</code>, <code>mesh_voxel_limit=20_000</code></li>
-</ul>
-
-<h3>6. 空间查询优化</h3>
-<ul>
-  <li>使用 CRbTree/RTree 进行实体查找，避免遍历所有实体</li>
-  <li>每 tick 插入实体 AABB，按区域查询</li>
-  <li>批量查询减少 Java/native 调用开销</li>
-</ul>
-
-<h3>7. 事件处理</h3>
-<ul>
-  <li>每 tick 后批量读取事件 (一次 native 调用)</li>
-  <li>及时清理事件队列: <code>world.clearEvents()</code></li>
-  <li>最大事件数: 16,384</li>
-</ul>
-</section>
-
-
-<section id="event-cache">
-<h2>事件缓存注册机制 — 初始化注册，零帧开销</h2>
-<p>
-  传统的事件读取模式每帧需要：<code>count → allocate → read → parse</code> 四次 FFI 调用。
-  缓存注册机制将事件分发路径压缩为一次 <code>drain</code> 调用，或直接通过 C 函数指针回调。
-</p>
-
-<h3>架构对比</h3>
-<table>
-<tr><th>方面</th><th>传统 Poll 模式</th><th>缓存注册模式</th></tr>
-<tr><td>每帧 FFI 调用</td><td>4 次 (count + allocate + read × 2)</td><td>1 次 (drain)</td></tr>
-<tr><td>内存分配</td><td>每次分配 Java 缓冲区</td><td>启动时一次分配 ring buffer</td></tr>
-<tr><td>锁竞争</td><td><code>Mutex&lt;Vec&gt;</code> 每帧加锁</td><td>无锁 atomic ring buffer (SPSC)</td></tr>
-<tr><td>事件解析</td><td>Java 侧逐字段 <code>MemorySegment.get()</code></td><td>Rust 侧 struct 拷贝，Java 侧批量读取</td></tr>
-<tr><td>回调分发</td><td>不支持</td><td>支持 C 函数指针回调 (零 JNI 开销)</td></tr>
-<tr><td>注册时机</td><td>无</td><td>初始化时一次注册，后续零查找</td></tr>
-</table>
-
-<h3>核心组件</h3>
-
-<h4>1. 无锁 Ring Buffer</h4>
-<p>
-  单生产者（Rust 物理线程）+ 单消费者（Java drain 线程）的无锁环形缓冲区。
-  使用 <code>AtomicU32</code> write/read 游标实现 SPSC 队列语义，零内存分配：
-</p>
-<pre><code class=language-rust>// Rust 侧 — 物理线程写入
-fn push(&self, event: CollisionEventRecord) {
-    let w = self.write.load(Ordering::Relaxed);
-    let r = self.read.load(Ordering::Acquire);
-    if w.wrapping_sub(r) >= cap {
-        self.dropped.fetch_add(1, Ordering::Relaxed); // 溢出统计
-        return;
-    }
-    unsafe { (*self.buf.get())[(w % cap) as usize] = event; }
-    self.write.store(w.wrapping_add(1), Ordering::Release);
-}</code></pre>
-
-<h4>2. Callback Registry</h4>
-<p>
-  初始化时注册 C 函数指针，物理步进时直接调用，无需 Java 侧每帧轮询：
-</p>
-<pre><code class=language-rust>// Rust 侧 — 回调槽位（零堆分配）
-struct CallbackSlot {
-    cb: usize,       // C 函数指针 (0 = 未设置)
-    user_data: usize, // 透传用户数据
-    handle: u64,     // 用于取消注册
-}
-
-fn dispatch_collision(&self, record: CollisionEventRecord) {
-    if self.collision_cb.cb != 0 {
-        let cb: CollisionEventCallback = unsafe { std::mem::transmute(self.collision_cb.cb) };
-        if let Some(f) = cb {
-            unsafe { f(ptr::null(), &record, self.collision_cb.user_data as *mut c_void); }
-        }
-    }
-}</code></pre>
-
-<h3>FFI 函数列表</h3>
-<table class="fn-table">
-<tr><th>函数</th><th>说明</th></tr>
-<tr><td><code>world_init_collision_event_ring(world, capacity) → Bool</code></td><td>分配碰撞事件 ring buffer（启动时一次调用）</td></tr>
-<tr><td><code>world_init_contact_force_event_ring(world, capacity) → Bool</code></td><td>分配接触力事件 ring buffer</td></tr>
-<tr><td><code>world_drain_collision_event_ring(world, out, capacity) → u32</code></td><td>批量排空碰撞事件（唯一每帧 FFI 调用）</td></tr>
-<tr><td><code>world_drain_contact_force_event_ring(world, out, capacity) → u32</code></td><td>批量排空接触力事件</td></tr>
-<tr><td><code>world_collision_event_ring_len(world) → u32</code></td><td>查询 ring buffer 当前事件数（无锁）</td></tr>
-<tr><td><code>world_contact_force_event_ring_len(world) → u32</code></td><td>查询接触力 ring buffer 长度</td></tr>
-<tr><td><code>world_collision_event_ring_stats(world, out) → Bool</code></td><td>读取 ring buffer 统计（容量/占用/丢弃/溢出）</td></tr>
-<tr><td><code>world_contact_force_event_ring_stats(world, out) → Bool</code></td><td>读取接触力 ring buffer 统计</td></tr>
-<tr><td><code>world_clear_event_rings(world)</code></td><td>清空两个 ring buffer 并重置计数器</td></tr>
-<tr><td><code>world_register_collision_callback(world, fn_ptr, user_data) → u64</code></td><td>注册碰撞事件回调，返回句柄</td></tr>
-<tr><td><code>world_register_contact_force_callback(world, fn_ptr, user_data) → u64</code></td><td>注册接触力事件回调</td></tr>
-<tr><td><code>world_unregister_callback(world, handle)</code></td><td>通过句柄取消注册回调</td></tr>
-<tr><td><code>world_set_event_dispatch_mode(world, mode) → Bool</code></td><td>设置分发模式：Poll=0, Callback=1, Both=2</td></tr>
-</table>
-
-<h3>Java 使用模式</h3>
-<pre><code class=language-java>// === 初始化阶段（仅一次）===
-long world = RigidBody.worldCreate(0, -9.81, 0);
-
-// 1. 分配 ring buffer（容量 4096 条事件）
-RigidBody.worldInitCollisionEventRing(world, 4096);
-RigidBody.worldInitContactForceEventRing(world, 4096);
-
-// 2. 设置为 Both 模式（ring buffer + 可选的 callback）
-RigidBody.worldSetEventDispatchMode(world, 2);
-
-// === 每帧循环 ===
-while (running) {
-    // 物理步进 — 事件自动写入 ring buffer
-    RigidBody.worldStep(world, 1.0 / 20.0);
-
-    // 唯一的一次 FFI 调用 — 批量排空事件
-    MemorySegment events = RigidBody.worldDrainCollisionEventRing(world, 4096);
-    int count = RigidBody.eventCount(events, COLLISION_EVENT_LAYOUT);
-
-    // 零 FFI 的 Java 侧遍历
-    for (int i = 0; i &lt; count; i++) {
-        boolean started = RigidBody.collisionEventStarted(events, i);
-        long c1 = RigidBody.collisionEventCollider1(events, i);
-        long c2 = RigidBody.collisionEventCollider2(events, i);
-        // 处理事件...
-    }
-}
-
-// === 可选：注册 C 回调（零 Java 轮询）===
-// 适合高性能场景 — 事件在物理步进内直接回调
-// RigidBody.worldRegisterCollisionCallback(world, callbackPtr, userData);
-</code></pre>
-</section>
-
-<!-- ====== REFERENCE ====== -->
+<!-- ====== PRECISION ====== -->
 <section id="precision">
-<h2>精度优化 — 双精度数值稳定性</h2>
-<p>
-  项目全程使用 <code>rapier3d-f64</code> 双精度物理引擎，并在公式层实施了多层精度保障措施，
-  确保从纳米级量子效应到天文尺度轨道力学的高精度计算。
-</p>
-
-<h3>Kahan 补偿求和</h3>
-<p>
-  当大量小值累加到已累积的大值时，普通 <code>x += y</code> 会丢失低位有效数字。
-  Kahan 算法通过追踪舍入误差补偿项，将累积精度从 ~15 位提升到 ~30 位有效数字。
-</p>
-<pre><code class="language-rust">// math.rs — Kahan 补偿累加器
-pub(crate) struct KahanSum {
-    sum: f64,          // 当前和
-    compensation: f64, // 被丢弃的低位误差
-}
-impl KahanSum {
-    pub fn add(&mut self, value: f64) {
-        let y = value - self.compensation;
-        let t = self.sum + y;
-        self.compensation = (t - self.sum) - y;  // 恢复丢失的低位
-        self.sum = t;
-    }
-}</code></pre>
-<p>
-  除标量 <code>KahanSum</code> 外，项目还提供了 <code>KahanVec3</code> — 对三维向量分量独立
-  补偿求和。应用于气动面表面积分、SPH 粒子邻居遍历、软体约束求解等需要高精度向量累加的场景。
-</p>
-<p>已应用于以下累加热点（12 个模块）：</p>
-<table>
-<tr><th>模块</th><th>累加变量</th><th>场景</th></tr>
-<tr><td><code>aerodynamics.rs</code></td><td><code>total_force</code>, <code>total_torque</code></td><td>气动面 / 体素网格表面积分（上限 1M 面）</td></tr>
-<tr><td><code>events.rs</code></td><td><code>total_drag</code>, <code>total_external</code></td><td>自定义力回调累加</td></tr>
-<tr><td><code>fluid.rs</code></td><td>SPH 密度 / 压力 / 黏性 / 颜色梯度</td><td>粒子邻居遍历</td></tr>
-<tr><td><code>chaos.rs</code></td><td><code>sum_log</code>, <code>sum_log_div</code></td><td>Lyapunov 指数估计（数万步轨道积分）</td></tr>
-<tr><td><code>softbody.rs</code></td><td><code>total_error</code> (4 处), <code>denominator</code></td><td>XPBD 距离/弯曲/体积约束求解</td></tr>
-<tr><td><code>superfluidity.rs</code></td><td>环量 / 涡旋绳长度 / 曲率 / 动能</td><td>Biot-Savart 积分 & 缠结统计</td></tr>
-<tr><td><code>topology.rs</code></td><td>密度均值 / 柔度和</td><td>SIMP 拓扑优化（上限 2M 单元）</td></tr>
-<tr><td><code>thermodynamics.rs</code></td><td>总热率</td><td>FEM 热扩散（上限 1M 节点）</td></tr>
-<tr><td><code>electromagnetism.rs</code></td><td>总电磁能密度</td><td>FDTD Yee 网格</td></tr>
-<tr><td><code>physchem.rs</code></td><td><code>total_u</code>, <code>total_v</code></td><td>Gray-Scott 反应扩散（上限 2M 网格）</td></tr>
-<tr><td><code>plasma.rs</code></td><td>动能 / 场能量</td><td>PIC 模拟</td></tr>
-<tr><td><code>acoustics.rs</code></td><td>声能 / 模态合成累加</td><td>波动方程 & 模态分析（上限 2M 单元）</td></tr>
-</table>
-
-<h3>mul_add 融合乘加 — 消除灾难性抵消</h3>
-<p>
-  <code>a * b + c</code> 使用 CPU 硬件指令 <code>mul_add</code> 一次舍入完成，
-  而 <code>a * b + c</code> 需要两次舍入。这在以下关键场景中至关重要：
-</p>
-<table>
-<tr><th>位置</th><th>原公式</th><th>精度问题</th></tr>
-<tr><td>Lorentz 因子 ×5</td><td><code>1.0/sqrt(1.0 - β²)</code></td><td>β ≈ 1 时 1−β² 灾难性抵消</td></tr>
-<tr><td>轨道积分</td><td><code>position + velocity * dt</code></td><td>天文尺度位置吞掉微小位移</td></tr>
-<tr><td>SPH Poly6 kernel</td><td><code>(h² − r²)³</code></td><td>r ≈ h 时边界附近抵消</td></tr>
-<tr><td>SPH 梯度</td><td><code>(smoothing_radius − distance)²</code></td><td>邻近核边缘抵消</td></tr>
-<tr><td>Schwarzschild 度规</td><td><code>1 − rs/r</code></td><td>r ≈ rs 时视界附近抵消</td></tr>
-<tr><td>N 体引力</td><td><code>r² + ε²</code></td><td>软化参数 ε 远小于距离时被吞</td></tr>
-<tr><td>RK4 助推滑翔</td><td><code>state + dt * sum / 6</code></td><td>大海拔吃小增量</td></tr>
-</table>
-
-<h3>r³ 溢出防护</h3>
-<p>
-  在轨道力学和库仑力计算中，直接使用 <code>r.powi(3)</code> 当 r 跨越纳米到天文单位时
-  会溢出或丢失精度。改用 <code>r² * r</code> 或 <code>r² * r.sqrt()</code> 分解计算：
-</p>
-<table>
-<tr><th>模块</th><th>原计算</th><th>优化</th></tr>
-<tr><td><code>spaceflight.rs</code></td><td><code>mu / rn.powi(3)</code></td><td><code>mu / (rn * rn.sqrt())</code></td></tr>
-<tr><td><code>astrophysics.rs</code></td><td><code>GM / (c² * r³)</code></td><td><code>GM / (c² * r² * r)</code></td></tr>
-<tr><td><code>molecular.rs</code></td><td><code>k / distance.powi(3)</code></td><td><code>k / (d² * d)</code></td></tr>
-</table>
-
-<h3>统一 EPSILON 体系</h3>
-<p>项目定义了4级 epsilon 常量，配合 <code>approx_eq()</code> 使用相对容差比较：</p>
-<table>
-<tr><th>常量</th><th>值</th><th>适用场景</th></tr>
-<tr><td><code>EPS_GENERAL</code></td><td>1.0e-12</td><td>通用值比较</td></tr>
-<tr><td><code>EPS_TIGHT</code></td><td>1.0e-14</td><td>导数 / 接近零的比较</td></tr>
-<tr><td><code>EPS_GEOMETRIC</code></td><td>1.0e-9</td><td>几何 / 网格容差</td></tr>
-<tr><td><code>EPS_DIST_SQ</code></td><td>1.0e-18</td><td>速度动量距离平方</td></tr>
-</table>
-<p>相对比较 <code>approx_eq(a, b, eps_abs, eps_rel)</code> 自动适应数值量级——对
-从 <code>1e-30</code>（电子质量）到 <code>1e30</code>（天体质量）跨度 60+ 数量级的值都能正确比较。</p>
+<h2>精度优化</h2>
+<h3>Kahan 补偿累加</h3>
+<p>标准 <code>x += y</code> 在大量累加时丢失低位。Kahan 算法追踪补偿项，精度从 ~15 位 → ~30 位。</p>
+<h3>双精度 (f64) 全链路</h3>
+<p>所有计算使用 rapier3d-f64 (f64)，避免 f32 精度损失。力累加使用 KahanVec3。</p>
+<h3>辛积分器能量守恒</h3>
+<p>半隐式 Euler 对引力系统不守恒能量。辛积分器保持 shadow Hamiltonian，长期轨道稳定。</p>
+<h3>后牛顿修正</h3>
+<p>地球轨道 ~10⁻⁹ 相对论修正，水星 ~10⁻⁷。使用 2PN 公式可精确到 ~10⁻¹²。</p>
 </section>
 
-<section id="error-codes">
-<h2>错误码</h2>
+<!-- ====== PERFORMANCE ====== -->
+<section id="perf">
+<h2>性能优化</h2>
+
+<h3>持久化缓冲 (v0.1.4+)</h3>
+<p><code>FrameWorkBuffers</code> 是 <code>PhysicsWorld</code> 的内置持久化工作区 — 每帧复用，零堆分配。</p>
 <table>
-<tr><th>常量</th><th>值</th><th>说明</th></tr>
-<tr><td><code>ERR_NULL_POINTER</code></td><td>1</td><td>输出指针为空</td></tr>
-<tr><td><code>ERR_INVALID_HANDLE</code></td><td>2</td><td>句柄指针为空</td></tr>
-<tr><td><code>ERR_INVALID_BODY</code></td><td>3</td><td>刚体句柄为零</td></tr>
-<tr><td><code>ERR_INVALID_COLLIDER</code></td><td>4</td><td>碰撞体句柄为零</td></tr>
-<tr><td><code>ERR_INVALID_JOINT</code></td><td>5</td><td>关节句柄为零</td></tr>
-<tr><td><code>ERR_UNSUPPORTED</code></td><td>6</td><td>操作不支持</td></tr>
+<tr><th>优化项</th><th>说明</th><th>消除的分配</th></tr>
+<tr><td>frame_log 持久化</td><td>HashMap 在 world 生命周期内复用，每帧 take/drain/putback</td><td>每帧 HashMap::new()</td></tr>
+<tr><td>arena_idx_map 缓存</td><td>body index→handle 映射在 FrameWorkBuffers 中缓存，每帧 clear+rebuild</td><td>每帧 Vec::new() + push</td></tr>
+<tr><td>force_law_type 固定数组</td><td>drain_report 用 [Option&lt;KahanVec3&gt;;32] 替代 BTreeMap</td><td>每帧每物体 BTreeMap::new()</td></tr>
+<tr><td>pending_forces 持久化</td><td>ForceFacade 接收 &mut SmallVec，所有 law 共享</td><td>每帧 SmallVec::new()</td></tr>
+<tr><td>friction_work 持久化</td><td>库仑摩擦力 scratch Vec 跨帧复用</td><td>每帧 Vec::new()</td></tr>
 </table>
 
-<h3>错误查询</h3>
-<pre><code class="language-java">// Java 侧
-String msg = RigidBodyNative.abiLastErrorMessage();
-int code = RigidBodyNative.abiLastErrorCode();</code></pre>
-<pre><code class="language-rust">// Rust 侧
-let code = last_error_code();
-let msg_ptr = last_error_message();</code></pre>
+<h3>事件系统优化 (v0.1.4+)</h3>
+<table>
+<tr><th>优化项</th><th>说明</th></tr>
+<tr><td>ProducerCache 锁自由化</td><td>CollisionDispatch/ContactForce dispatch 使用 UnsafeCell + 原子字段, 不再需要 RwLock</td></tr>
+<tr><td>CallbackSlot 原子化</td><td>cb/user_data/handle 字段使用 AtomicUsize/AtomicU64, 注册/注销/热路径均无锁</td></tr>
+</table>
+
+<h3>体质查找优化 (v0.1.4+)</h3>
+<table>
+<tr><th>优化项</th><th>说明</th></tr>
+<tr><td>单次 get_mut 查找</td><td>CelestialGravityForceLaw 合并 get()+get_mut() 为单次 get_mut()</td></tr>
+<tr><td>unregister_by_type 单次遍历</td><td>合并 find_by_type→Vec + per-handle unregister 为一次 unregister_by_type() 遍历</td></tr>
+</table>
+
+<h3>Java 端优化 (v0.1.4+)</h3>
+<table>
+<tr><th>优化项</th><th>说明</th></tr>
+<tr><td>getVec3 复用</td><td>NativeMemory 使用 ThreadLocal&lt;double[3]&gt; 替代每读 new double[3]</td></tr>
+<tr><td>getVec3(out[], offset) 批量</td><td>新增无分配重载: 写入调用者提供的数组</td></tr>
+</table>
 </section>
 
+<!-- ====== VERIFICATION ====== -->
 <section id="verification">
 <h2>验证命令</h2>
-<pre><code class="language-shell"># Rust 测试 (188 个)
-cargo test
+<pre><code class="language-bash">cargo test --lib                    # 332 个 Rust 单元测试
+cargo build --release               # 发布构建 (~24s)
+cargo check                         # 快速语法/类型检查 (~2s)
 
-# Rust 类型检查
-cargo check
-
-# Java 21 JNI smoke test
-cd test21
-.\gradlew.bat check
-
-# Java 25 FFM smoke test
-cd ..\test25
-.\gradlew.bat check
-
-# 完整构建
-cargo build --release
-cd test21 && .\gradlew.bat build
-cd ..\test25 && .\gradlew.bat build</code></pre>
+# Java 端冒烟测试
+cd test21 && ./gradlew check</code></pre>
 </section>
 
 <section id="build">
 <h2>构建与部署</h2>
-
-<h3>本地构建</h3>
-<pre><code class="language-shell"># 1. 构建 Rust cdylib
+<pre><code class="language-bash"># 本地构建
 cargo build --release
 
-# 2. 构建 Java mod (含 native library 打包)
-cd test21
-.\gradlew.bat build
+# 输出:
+# target/release/mps_rigid_body.dll  (Windows)
+# target/release/libmps_rigid_body.so (Linux)
+# target/release/libmps_rigid_body.dylib (macOS)
 
-# 3. 输出
-# target/release/mps_rigid_body.dll    — Rust 原生库
-# test21/build/libs/mps_rigid_body.jar — Minecraft mod</code></pre>
+# JNI 部署: 复制到 java.library.path 或通过 -Drigidbody.native.path 指定
+# FFM 部署: 复制到模块路径或 classpath 的 /native/ 目录</code></pre>
+</section>
 
-<h3>依赖</h3>
-<table>
-<tr><th>依赖</th><th>版本</th><th>说明</th></tr>
-<tr><td>rapier3d-f64</td><td>0.33.0</td><td>双精度物理引擎 (parallel)</td></tr>
-<tr><td>jni (ljni)</td><td>0.21.0</td><td>JNI 绑定</td></tr>
-<tr><td>parking_lot</td><td>0.12.5</td><td>同步原语</td></tr>
-<tr><td>hashbrown</td><td>0.17.1</td><td>高性能 HashMap</td></tr>
-<tr><td>smallvec</td><td>1.15.2</td><td>小向量优化</td></tr>
-<tr><td>mimalloc</td><td>0.1.52</td><td>全局分配器</td></tr>
-<tr><td>rayon</td><td>1.12</td><td>并行计算</td></tr>
-<tr><td>cbindgen</td><td>0.29.4</td><td>构建时 C 头文件生成</td></tr>
-<tr><td>anvilkit (可选)</td><td>0.1</td><td>ECS 桥接 (feature: rapier)</td></tr>
-<tr><td>bevy_ecs (可选)</td><td>0.19.0</td><td>ECS 框架</td></tr>
+<!-- ====== FULL API TABLE ====== -->
+<section id="api-table">
+<h2>完整 C FFI 函数表</h2>
+<p>以下为所有通过 <code>pub extern "C" fn</code> 暴露的 C FFI 函数 (~480 个, 617 个 extern fn 含 JNI 导出)。
+标记 ✅ 表示 JNI wrapper 已实现。</p>
+
+<h3>World 管理 (18)</h3>
+<table class="fn-table">
+<tr><td><code>world_create</code></td><td>✅</td><td><code>world_destroy</code></td><td>✅</td><td><code>world_step</code></td><td>✅</td></tr>
+<tr><td><code>world_set_gravity</code></td><td>✅</td><td><code>world_get_gravity_out</code></td><td>✅</td><td><code>world_set_integration_parameters</code></td><td>✅</td></tr>
+<tr><td><code>world_get_rigid_body_set_size</code></td><td>✅</td><td><code>world_get_collider_set_size</code></td><td>✅</td><td><code>world_body_snapshot</code></td><td>✅</td></tr>
+<tr><td><code>world_dynamic_body_snapshot</code></td><td>✅</td><td><code>world_update_body_poses</code></td><td>✅</td><td><code>world_update_body_velocities</code></td><td>✅</td></tr>
+<tr><td><code>world_register_celestial_gravity</code></td><td>✅ <span class="badge badge-new">新</span></td><td><code>world_get_force_registry_count</code></td><td>✅</td><td><code>world_get_force_registry_typed_count</code></td><td>✅</td></tr>
 </table>
 
-<h3>Feature Flags</h3>
-<pre><code class="language-toml">[features]
-default = []                              # 无默认特性
-anvilkit-bridge = ["dep:anvilkit", "dep:bevy_ecs"]  # 启用 ECS 桥接</code></pre>
+<h3>刚体 (36)</h3>
+<table class="fn-table">
+<tr><td><code>rigid_body_builder_create</code></td><td>✅</td><td><code>rigid_body_builder_set_*</code> (x11)</td><td>✅</td><td><code>rigid_body_builder_build</code></td><td>✅</td></tr>
+<tr><td><code>world_insert_rigid_body</code></td><td>✅</td><td><code>world_remove_rigid_body</code></td><td>✅</td><td><code>world_copy_rigid_body</code></td><td>✅</td></tr>
+<tr><td><code>rigid_body_get_translation/rotation/linvel/angvel/force/status</code> (x6)</td><td>✅</td></tr>
+<tr><td><code>rigid_body_set_translation/rotation/pose/linvel/angvel/status</code> (x6)</td><td>✅</td></tr>
+<tr><td><code>rigid_body_add_force/at_point/reset/torque/reset</code> (x5)</td><td>✅</td></tr>
+<tr><td><code>rigid_body_apply_impulse/torque_impulse</code> (x2)</td><td>✅</td></tr>
+<tr><td><code>rigid_body_enable_ccd/sleep/wake_up/is_sleeping</code> (x4)</td><td>✅</td></tr>
+</table>
 
-<h3>GitHub Pages 部署</h3>
-<pre><code class="language-shell"># 在 GitHub 仓库 Settings → Pages 中:
-# Source: Deploy from a branch
-# Branch: main
-# Folder: /docs
+<h3>碰撞体 (52)</h3>
+<table class="fn-table">
+<tr><td><code>collider_builder_create(_ex/obb/sphere/halfspace/heightmap/convex_hull/point_cloud/double_bv/skewed_obb/discrete_obb/fused_collapsing/edge_bvh/medial_spheres)</code> (x13)</td><td>✅</td></tr>
+<tr><td><code>collider_builder_create_capsule/ssv/ellipsoid/prism/cylinder/spherical_shell/kdop/fdh/neural_bounds/voxels/voxel_aabb/voxel_obb</code> (x12)</td><td>✅</td></tr>
+<tr><td><code>collider_builder_set_*</code> (x10: translation/rotation/pose/sensor/friction/restitution/density/collision_groups/solver_groups/active_events/hooks/contact_force_threshold)</td><td>✅</td></tr>
+<tr><td><code>world_insert_collider(_with_parent)</code></td><td>✅</td><td><code>world_remove_collider</code></td><td>✅</td></tr>
+<tr><td><code>collider_get/set_*</code> (x12: translation/rotation/pose/sensor/friction/restitution/groups/events/hooks/threshold/density/shape_count)</td><td>✅</td></tr>
+</table>
 
-# 推送后自动部署到:
-# https://{username}.github.io/rigid-body/</code></pre>
+<h3>查询 (27)</h3>
+<table class="fn-table">
+<tr><td><code>query_cast_ray(s)</code></td><td>✅</td><td><code>query_project_point</code></td><td>✅</td><td><code>query_intersect_point_count</code></td><td>✅</td></tr>
+<tr><td><code>query_intersect_aabb_count/obb/sphere</code> (x4)</td><td>✅</td></tr>
+<tr><td><code>query_intersect_voxel_aabb(_count)/obb(_count)</code> (x4)</td><td>✅</td></tr>
+<tr><td><code>query_cast_shape</code></td><td>✅</td></tr>
+<tr><td><code>query_intersect_capsule/cylinder/ellipsoid/prism/ssv/spherical_shell/neural_bounds</code> (x7)</td><td>✅</td></tr>
+</table>
+
+<h3>事件 (20)</h3>
+<table class="fn-table">
+<tr><td><code>world_clear_events</code></td><td>✅</td><td><code>world_collision_event_count</code></td><td>✅</td></tr>
+<tr><td><code>world_get_collision_event(s)</code> (x2)</td><td>✅</td><td><code>world_contact_force_event_count</code></td><td>✅</td></tr>
+<tr><td><code>world_get_contact_force_event(s)</code> (x2)</td><td>✅</td></tr>
+<tr><td><code>world_init/drain_collision/contact_force_event_ring</code> (x4)</td><td>✅</td></tr>
+<tr><td><code>world_collision/contact_force_event_ring_len/stats</code> (x4)</td><td>✅</td></tr>
+<tr><td><code>world_register_collision/contact_force_callback</code> (x2)</td><td>✅</td></tr>
+<tr><td><code>world_unregister_callback</code></td><td>✅</td><td><code>world_set_event_dispatch_mode</code></td><td>✅</td></tr>
+</table>
+
+<h3>力系统 (13)</h3>
+<table class="fn-table">
+<tr><td><code>world_set/clear/get_coulomb_friction_law</code></td><td>✅</td><td><code>world_set/clear/get_air_drag_law</code></td><td>✅</td></tr>
+<tr><td><code>world_set/clear/get_external_force_law</code></td><td>✅</td><td><code>world_set/clear/get_newton_gravity_law</code></td><td>✅</td></tr>
+<tr><td><code>world_get_custom_physics_report</code></td><td>✅</td></tr>
+</table>
+
+<h3>引力与轨道 (11) <span class="badge badge-new">新</span></h3>
+<table class="fn-table">
+<tr><td><code>celestial_get_body</code></td><td>✅</td><td><code>celestial_get_sh_coeffs/count</code></td><td>✅</td></tr>
+<tr><td><code>gravity_spherical_harmonics</code></td><td>✅</td><td><code>gravity_ellipsoid</code></td><td>✅</td></tr>
+<tr><td><code>gravity_zonal_harmonics</code></td><td>✅</td><td><code>gravity_quadrupole_tensor</code></td><td>✅</td></tr>
+<tr><td><code>integrator_leapfrog_step</code></td><td>✅</td><td><code>integrator_post_newtonian</code></td><td>✅</td></tr>
+<tr><td><code>integrator_specific_energy</code></td><td>✅</td><td><code>integrator_keplerian_elements</code></td><td>✅</td></tr>
+</table>
+
+<h3>地形引力 (6) <span class="badge badge-new">新</span></h3>
+<table class="fn-table">
+<tr><td><code>terrain_polyhedron_gravity</code></td><td>✅</td><td><code>terrain_gravity_dem</code></td><td>✅</td></tr>
+<tr><td><code>terrain_gravity_dem_fft</code></td><td>✅</td><td><code>terrain_lunar_mascon_gravity</code></td><td>✅</td></tr>
+<tr><td><code>terrain_lunar_mascon_count</code></td><td>✅</td><td><code>terrain_lunar_mascon_get</code></td><td>✅</td></tr>
+</table>
+
+<h3>航天/弹道/气动/流体 (15)</h3>
+<table class="fn-table">
+<tr><td><code>space_apply_j2_force_to_body</code></td><td>✅</td><td><code>space_apply_solar_radiation_pressure_to_body</code></td><td>✅</td></tr>
+<tr><td><code>space_apply_gravity_gradient_torque_to_body</code></td><td>✅</td><td><code>space_apply_atmospheric_drag_to_body</code></td><td>✅</td></tr>
+<tr><td><code>trajectory_apply_forces_to_body</code></td><td>✅</td><td><code>aero_apply_surfaces/voxel_grid</code></td><td>✅</td></tr>
+<tr><td><code>fluid_apply_aabb_forces</code></td><td>✅</td><td><code>molecular_apply_pair_forces</code></td><td>✅</td></tr>
+</table>
+
+<h3>空间索引 (18)</h3>
+<table class="fn-table">
+<tr><td><code>rtree_create/destroy/clear/len</code></td><td>✅</td><td><code>rtree_insert/update/remove/rebuild</code></td><td>✅</td></tr>
+<tr><td><code>rtree_query_aabb(_count)</code></td><td>✅</td><td><code>crb_tree_*</code> (x9)</td><td>✅</td></tr>
+</table>
+
+<h3>零拷贝桥接 / 共享内存 (10+)</h3>
+<table class="fn-table">
+<tr><td><code>bridgeBulkBodySnapshot</code></td><td>✅</td><td><code>bridgeVec3ToSlot</code></td><td>✅</td></tr>
+<tr><td><code>bridgeQuatToSlot</code></td><td>✅</td><td><code>bridgeWriteF64Slice</code></td><td>✅</td></tr>
+<tr><td><code>bridgeVoxelColliderFromDirectBuffer</code></td><td>✅</td><td></td><td></td></tr>
+<tr><td><code>world_create_shared_arena</code></td><td>✅ <span class="badge badge-new">新</span></td><td><code>world_get_shared_arena_address</code></td><td>✅</td></tr>
+<tr><td><code>world_get_shared_arena_size</code></td><td>✅</td><td><code>world_destroy_shared_arena</code></td><td>✅</td></tr>
+<tr><td><code>world_reset_shared_arena_events</code></td><td>✅</td><td><code>worldGetArenaDirectByteBuffer</code> (JNI)</td><td>✅</td></tr>
+</table>
+
+<p>总计：<strong>~480 个 C FFI 函数, ~280 个有 JNI wrapper</strong>。
+覆盖 World 管理(24)、刚体(61)、碰撞体(60)、查询(24)、事件(41)、力系统(17)、引力与轨道(74+)、空间索引(20)、桥接(8)、共享 Arena(6)。</p>
 </section>
 
 </div>
 
+<!-- ====== SCRIPTS ====== -->
 <script>
-// Sidebar active tracking
-const sections = document.querySelectorAll('section[id]');
-const navLinks = document.querySelectorAll('#sidebar a');
-const observer = new IntersectionObserver(entries => {
-  entries.forEach(entry => {
-    if (entry.isIntersecting) {
-      navLinks.forEach(a => a.classList.remove('active'));
-      const active = document.querySelector(`#sidebar a[href="#${entry.target.id}"]`);
-      if (active) active.classList.add('active');
-    }
-  });
-}, { rootMargin: '-20% 0px -70% 0px' });
-sections.forEach(s => observer.observe(s));
-
-// Search
-function searchSidebar(query) {
-  const q = query.toLowerCase();
-  navLinks.forEach(a => {
-    const text = a.textContent.toLowerCase();
-    a.style.display = q === '' || text.includes(q) ? '' : 'none';
-  });
-}
-
-// Code highlighting
+// Highlight
 document.addEventListener('DOMContentLoaded', () => {
-  document.querySelectorAll('pre code').forEach(block => {
-    hljs.highlightElement(block);
-  });
+  document.querySelectorAll('pre code').forEach(b => hljs.highlightElement(b));
 });
-
-// Mobile menu: close on link click
+// Mobile
 document.querySelectorAll('#sidebar a').forEach(a => {
   a.addEventListener('click', () => {
     document.getElementById('sidebar').classList.remove('open');
+  });
+});
+// Active nav tracking
+const sections = document.querySelectorAll('section[id]');
+const navLinks = document.querySelectorAll('#sidebar a');
+window.addEventListener('scroll', () => {
+  let current = '';
+  sections.forEach(s => {
+    if (window.scrollY >= s.offsetTop - 100) current = s.id;
+  });
+  navLinks.forEach(a => {
+    a.classList.toggle('active', a.getAttribute('href') === '#' + current);
   });
 });
 </script>

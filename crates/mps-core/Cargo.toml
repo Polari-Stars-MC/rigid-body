@@ -1,0 +1,24 @@
+[package]
+name = "mps-core"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+rapier3d = { workspace = true }
+ljni = { workspace = true }
+parking_lot = { workspace = true }
+hashbrown = { workspace = true }
+smallvec = { workspace = true }
+rayon = { workspace = true }
+anvilkit = { workspace = true, optional = true }
+bevy_ecs = { workspace = true, optional = true }
+
+[features]
+default = []
+anvilkit-bridge = ["dep:anvilkit", "dep:bevy_ecs"]
+
+[build-dependencies]
+cbindgen = "0.29.4"

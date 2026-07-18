@@ -204,6 +204,18 @@ impl KahanVec3 {
         self.sum
     }
 
+    /// Return the current compensated sum as a rapier Vector.
+    #[inline]
+    pub(crate) fn value_vec(&self) -> rapier3d::prelude::Vector {
+        rapier3d::prelude::Vector::new(self.sum.x, self.sum.y, self.sum.z)
+    }
+
+    /// Add a rapier Vector using Kahan compensation.
+    #[inline]
+    pub(crate) fn add_vec(&mut self, value: rapier3d::prelude::Vector) {
+        self.add(Vec3 { x: value.x, y: value.y, z: value.z });
+    }
+
     /// Reset the accumulator to zero.
     #[inline]
     pub(crate) fn reset(&mut self) {

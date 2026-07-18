@@ -1,4 +1,4 @@
-use crate::rapier::ffi::Bool;
+use mps_core::rapier::ffi::Bool;
 
 pub const ABI_VERSION: u32 = 1;
 

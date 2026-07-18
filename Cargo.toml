@@ -1,37 +1,18 @@
-[package]
-name = "mps_rigid_body"
+[workspace]
+members = ["crates/mps-core", "crates/mps-jni", "crates/mps-ffm"]
+resolver = "2"
+
+[workspace.package]
 version = "0.1.4"
 edition = "2024"
 
-[lib]
-crate-type = ["cdylib", "rlib"]
-
-[dependencies]
-rapier3d = { package = "rapier3d-f64", version = "0.33.0", features = ["parallel"] }
+[workspace.dependencies]
+rapier3d = { package = "rapier3d-f64", version = "0.34.0", features = ["parallel"] }
 ljni = { version = "0.21.0", package = "jni" }
 parking_lot = "0.12.5"
 hashbrown = "0.17.1"
 smallvec = "1.15.2"
 mimalloc = "0.1.52"
-anvilkit = { version = "0.1", features = ["rapier"], optional = true }
-bevy_ecs = { version = "0.19.0", optional = true }
 rayon = "1.12"
-
-[features]
-default = []
-anvilkit-bridge = ["dep:anvilkit", "dep:bevy_ecs"]
-
-
-[build-dependencies]
-cbindgen = "0.29.4"
-
-[profile.dev]
-panic = "abort"
-
-[profile.release]
-panic = "abort"
-lto = "thin"
-codegen-units = 1
-opt-level = 3
-strip = true
-debug = 0
+anvilkit = { version = "0.1", features = ["rapier"] }
+bevy_ecs = { version = "0.19.0" }

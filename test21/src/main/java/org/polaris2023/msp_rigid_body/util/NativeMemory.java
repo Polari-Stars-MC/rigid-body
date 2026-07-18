@@ -12,6 +12,9 @@ final class NativeMemory implements AutoCloseable {
     private long address;
     private final long bytes;
 
+    // P7: preallocate reusable arrays to avoid per-frame allocations
+    private final ThreadLocal<double[]> vec3Buffer = ThreadLocal.withInitial(() -> new double[3]);
+
     NativeMemory(long bytes) {
         if (bytes <= 0L) {
             throw new IllegalArgumentException("native memory size must be positive");
@@ -71,12 +74,21 @@ final class NativeMemory implements AutoCloseable {
         UNSAFE.putDouble(address() + offset, value);
     }
 
+    /// P7: reuse a preallocated array via ThreadLocal to avoid per-read allocations.
+    /// Callers MUST consume/process the returned array before calling getVec3 again.
     double[] getVec3(long offset) {
-        return new double[] {
-                getDouble(offset),
-                getDouble(offset + 8),
-                getDouble(offset + 16)
-        };
+        double[] buf = vec3Buffer.get();
+        buf[0] = getDouble(offset);
+        buf[1] = getDouble(offset + 8);
+        buf[2] = getDouble(offset + 16);
+        return buf;
+    }
+
+    /// Safe copy variant: writes into the caller-provided array without allocation.
+    void getVec3(long offset, double[] out, int outOffset) {
+        out[outOffset] = getDouble(offset);
+        out[outOffset + 1] = getDouble(offset + 8);
+        out[outOffset + 2] = getDouble(offset + 16);
     }
 
     long[] getLongs(int count) {
