@@ -1,44 +1,6 @@
 /* tslint:disable */
 /* eslint-disable */
 
-/**
- * Snapshot entry for one body — used for batch sync with Three.js.
- * Layout per body: 13 f64 values.
- */
-export class BodySnapshotEntry {
-    private constructor();
-    free(): void;
-    [Symbol.dispose](): void;
-    /**
-     * Angular velocity (x, y, z) at offset 10
-     */
-    angvel_x: number;
-    angvel_y: number;
-    angvel_z: number;
-    /**
-     * Position (x, y, z) at offset 0
-     */
-    pos_x: number;
-    pos_y: number;
-    pos_z: number;
-    /**
-     * Rotation quaternion (i, j, k, w) at offset 3
-     */
-    rot_i: number;
-    rot_j: number;
-    rot_k: number;
-    rot_w: number;
-    /**
-     * Linear velocity (x, y, z) at offset 7
-     */
-    vel_x: number;
-    vel_y: number;
-    vel_z: number;
-}
-
-/**
- * Body status (matches rapier3d BodyStatus).
- */
 export enum BodyStatus {
     Dynamic = 0,
     Fixed = 1,
@@ -76,16 +38,10 @@ export class CelestialParams {
     rotation_rate: number;
 }
 
-/**
- * Descriptor for creating a collider.
- */
 export class ColliderDescriptor {
     free(): void;
     [Symbol.dispose](): void;
     constructor();
-    /**
-     * Shape parameters: (radius, half_x, half_y, half_z) depending on type.
-     */
     a: number;
     b: number;
     c: number;
@@ -101,9 +57,6 @@ export class ColliderDescriptor {
     translation: Vec3;
 }
 
-/**
- * Collision event record.
- */
 export class CollisionEvent {
     private constructor();
     free(): void;
@@ -114,124 +67,41 @@ export class CollisionEvent {
     started: boolean;
 }
 
-/**
- * Contact force event record.
- */
-export class ContactForceEvent {
-    private constructor();
-    free(): void;
-    [Symbol.dispose](): void;
-    collider1: bigint;
-    collider2: bigint;
-    force_x: number;
-    force_y: number;
-    force_z: number;
-    max_force_dir_x: number;
-    max_force_dir_y: number;
-    max_force_dir_z: number;
-    max_force_magnitude: number;
-    total_force_magnitude: number;
-}
-
-/**
- * A physics world with configurable gravity and body management.
- */
 export class PhysicsWorld {
     free(): void;
     [Symbol.dispose](): void;
-    add_force(handle: bigint, fx: number, fy: number, fz: number, wake_up: boolean): void;
-    add_torque(handle: bigint, tx: number, ty: number, tz: number, wake_up: boolean): void;
-    apply_impulse(handle: bigint, ix: number, iy: number, iz: number, wake_up: boolean): void;
-    /**
-     * Cast a ray into the world. Returns collider handle or 0.
-     */
-    cast_ray(ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, max_toi: number): bigint;
+    add_force(h: bigint, fx: number, fy: number, fz: number, wake: boolean): void;
+    add_torque(h: bigint, tx: number, ty: number, tz: number, wake: boolean): void;
+    apply_impulse(h: bigint, ix: number, iy: number, iz: number, wake: boolean): void;
     clear_events(): void;
-    /**
-     * Create a dynamic box at position with given half-extents and mass.
-     */
     create_dynamic_box(px: number, py: number, pz: number, hx: number, hy: number, hz: number, mass: number): bigint;
-    /**
-     * Create a dynamic sphere at position with given radius and mass.
-     */
-    create_dynamic_sphere(px: number, py: number, pz: number, radius: number, mass: number): bigint;
-    /**
-     * Create a ground plane (halfspace) collider attached to a fixed body.
-     */
+    create_dynamic_sphere(px: number, py: number, pz: number, r: number, mass: number): bigint;
     create_ground_plane(nx: number, ny: number, nz: number, dist: number): bigint;
-    /**
-     * Destroy the world.
-     */
     destroy(): void;
-    /**
-     * Enable/disable CCD. FFI: rigid_body_enable_ccd(world, handle, Bool)
-     */
-    enable_ccd(handle: bigint, enabled: boolean): void;
-    get_body_angular_velocity(handle: bigint): Vec3;
-    /**
-     * Returns body count as i32 (matches FFI).
-     */
+    get_body_angular_velocity(h: bigint): Vec3;
     get_body_count(): number;
-    get_body_linear_velocity(handle: bigint): Vec3;
-    get_body_rotation(handle: bigint): Quat;
-    /**
-     * Batch snapshot for Three.js sync.
-     * Returns Float64Array: [pos(3), quat(4), vel(3), angvel(3)] per body = 13 f64 each.
-     */
+    get_body_linear_velocity(h: bigint): Vec3;
+    get_body_rotation(h: bigint): Quat;
     get_body_snapshot(): Float64Array;
-    get_body_translation(handle: bigint): Vec3;
-    /**
-     * Get parameters of a built-in celestial body.
-     */
+    get_body_translation(h: bigint): Vec3;
     get_celestial_params(body_id: number): CelestialParams | undefined;
-    /**
-     * Returns collider count as i32 (matches FFI).
-     */
-    get_collider_count(): number;
     get_collision_event(index: number): CollisionEvent;
     get_collision_event_count(): number;
     get_collision_events(): Array<any>;
-    /**
-     * Insert a collider from a descriptor. Optionally attach to a parent body.
-     */
-    insert_collider(desc: ColliderDescriptor, parent_body: bigint): bigint;
+    insert_collider(desc: ColliderDescriptor, parent: bigint): bigint;
     insert_rigid_body(desc: RigidBodyDescriptor): bigint;
-    /**
-     * Count bodies intersecting an AABB.
-     */
-    intersect_aabb_count(min_x: number, min_y: number, min_z: number, max_x: number, max_y: number, max_z: number): number;
     constructor(gx: number, gy: number, gz: number);
-    /**
-     * Register a celestial body's gravity. Returns the force law handle (>0) or 0 on error.
-     */
     register_celestial_gravity(body_id: number, degree: number): bigint;
-    /**
-     * Remove a collider by handle.
-     */
-    remove_collider(handle: bigint): void;
-    remove_rigid_body(handle: bigint, remove_colliders: boolean): void;
-    set_body_translation(handle: bigint, x: number, y: number, z: number): void;
+    remove_collider(h: bigint): void;
+    remove_rigid_body(h: bigint, remove_col: boolean): void;
     set_gravity(x: number, y: number, z: number): void;
-    /**
-     * Put a body to sleep. FFI: rigid_body_sleep(world, handle) -> Bool
-     */
-    sleep(handle: bigint): void;
     step(dt: number): void;
-    /**
-     * Wake up a body. FFI: rigid_body_wake_up(world, handle, strong: Bool)
-     */
-    wake_up(handle: bigint): void;
+    wake_up(h: bigint): void;
 }
 
-/**
- * Quaternion (i, j, k, w) — compatible with Three.js ordering.
- */
 export class Quat {
     free(): void;
     [Symbol.dispose](): void;
-    /**
-     * Identity quaternion.
-     */
     static identity(): Quat;
     constructor(i: number, j: number, k: number, w: number);
     i: number;
@@ -240,9 +110,6 @@ export class Quat {
     w: number;
 }
 
-/**
- * Descriptor for creating a rigid body.
- */
 export class RigidBodyDescriptor {
     free(): void;
     [Symbol.dispose](): void;
@@ -260,9 +127,6 @@ export class RigidBodyDescriptor {
     translation: Vec3;
 }
 
-/**
- * Shape types for colliders.
- */
 export enum ShapeType {
     Ball = 0,
     Cuboid = 1,
@@ -270,14 +134,8 @@ export enum ShapeType {
     Cylinder = 3,
     Cone = 4,
     Halfspace = 5,
-    Heightfield = 6,
-    ConvexHull = 7,
-    TriangleMesh = 8,
 }
 
-/**
- * 3D vector (matches rapier3d/Three.js convention: right-handed Y-up).
- */
 export class Vec3 {
     free(): void;
     [Symbol.dispose](): void;
@@ -287,41 +145,26 @@ export class Vec3 {
     z: number;
 }
 
-/**
- * Initialize the WASM module (sets panic hook).
- */
 export function init(): void;
 
-/**
- * Returns the version string.
- */
 export function version(): string;
 
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
-    readonly __wbg_bodysnapshotentry_free: (a: number, b: number) => void;
     readonly __wbg_colliderdescriptor_free: (a: number, b: number) => void;
     readonly __wbg_collisionevent_free: (a: number, b: number) => void;
-    readonly __wbg_contactforceevent_free: (a: number, b: number) => void;
-    readonly __wbg_get_bodysnapshotentry_angvel_x: (a: number) => number;
-    readonly __wbg_get_bodysnapshotentry_angvel_y: (a: number) => number;
-    readonly __wbg_get_bodysnapshotentry_angvel_z: (a: number) => number;
-    readonly __wbg_get_bodysnapshotentry_pos_x: (a: number) => number;
-    readonly __wbg_get_bodysnapshotentry_pos_y: (a: number) => number;
-    readonly __wbg_get_bodysnapshotentry_pos_z: (a: number) => number;
-    readonly __wbg_get_bodysnapshotentry_rot_i: (a: number) => number;
-    readonly __wbg_get_bodysnapshotentry_rot_j: (a: number) => number;
-    readonly __wbg_get_bodysnapshotentry_rot_k: (a: number) => number;
-    readonly __wbg_get_bodysnapshotentry_rot_w: (a: number) => number;
-    readonly __wbg_get_bodysnapshotentry_vel_x: (a: number) => number;
-    readonly __wbg_get_bodysnapshotentry_vel_y: (a: number) => number;
-    readonly __wbg_get_bodysnapshotentry_vel_z: (a: number) => number;
+    readonly __wbg_get_colliderdescriptor_a: (a: number) => number;
+    readonly __wbg_get_colliderdescriptor_b: (a: number) => number;
+    readonly __wbg_get_colliderdescriptor_c: (a: number) => number;
     readonly __wbg_get_colliderdescriptor_collision_group: (a: number) => number;
     readonly __wbg_get_colliderdescriptor_collision_mask: (a: number) => number;
+    readonly __wbg_get_colliderdescriptor_d: (a: number) => number;
     readonly __wbg_get_colliderdescriptor_density: (a: number) => number;
+    readonly __wbg_get_colliderdescriptor_friction: (a: number) => number;
     readonly __wbg_get_colliderdescriptor_is_sensor: (a: number) => number;
+    readonly __wbg_get_colliderdescriptor_restitution: (a: number) => number;
     readonly __wbg_get_colliderdescriptor_rotation: (a: number) => number;
     readonly __wbg_get_colliderdescriptor_shape_type: (a: number) => number;
     readonly __wbg_get_colliderdescriptor_translation: (a: number) => number;
@@ -329,6 +172,10 @@ export interface InitOutput {
     readonly __wbg_get_collisionevent_collider2: (a: number) => bigint;
     readonly __wbg_get_collisionevent_sensor: (a: number) => number;
     readonly __wbg_get_collisionevent_started: (a: number) => number;
+    readonly __wbg_get_quat_i: (a: number) => number;
+    readonly __wbg_get_quat_j: (a: number) => number;
+    readonly __wbg_get_quat_k: (a: number) => number;
+    readonly __wbg_get_quat_w: (a: number) => number;
     readonly __wbg_get_rigidbodydescriptor_angular_damping: (a: number) => number;
     readonly __wbg_get_rigidbodydescriptor_angular_velocity: (a: number) => number;
     readonly __wbg_get_rigidbodydescriptor_can_sleep: (a: number) => number;
@@ -340,23 +187,16 @@ export interface InitOutput {
     readonly __wbg_get_rigidbodydescriptor_translation: (a: number) => number;
     readonly __wbg_quat_free: (a: number, b: number) => void;
     readonly __wbg_rigidbodydescriptor_free: (a: number, b: number) => void;
-    readonly __wbg_set_bodysnapshotentry_angvel_x: (a: number, b: number) => void;
-    readonly __wbg_set_bodysnapshotentry_angvel_y: (a: number, b: number) => void;
-    readonly __wbg_set_bodysnapshotentry_angvel_z: (a: number, b: number) => void;
-    readonly __wbg_set_bodysnapshotentry_pos_x: (a: number, b: number) => void;
-    readonly __wbg_set_bodysnapshotentry_pos_y: (a: number, b: number) => void;
-    readonly __wbg_set_bodysnapshotentry_pos_z: (a: number, b: number) => void;
-    readonly __wbg_set_bodysnapshotentry_rot_i: (a: number, b: number) => void;
-    readonly __wbg_set_bodysnapshotentry_rot_j: (a: number, b: number) => void;
-    readonly __wbg_set_bodysnapshotentry_rot_k: (a: number, b: number) => void;
-    readonly __wbg_set_bodysnapshotentry_rot_w: (a: number, b: number) => void;
-    readonly __wbg_set_bodysnapshotentry_vel_x: (a: number, b: number) => void;
-    readonly __wbg_set_bodysnapshotentry_vel_y: (a: number, b: number) => void;
-    readonly __wbg_set_bodysnapshotentry_vel_z: (a: number, b: number) => void;
+    readonly __wbg_set_colliderdescriptor_a: (a: number, b: number) => void;
+    readonly __wbg_set_colliderdescriptor_b: (a: number, b: number) => void;
+    readonly __wbg_set_colliderdescriptor_c: (a: number, b: number) => void;
     readonly __wbg_set_colliderdescriptor_collision_group: (a: number, b: number) => void;
     readonly __wbg_set_colliderdescriptor_collision_mask: (a: number, b: number) => void;
+    readonly __wbg_set_colliderdescriptor_d: (a: number, b: number) => void;
     readonly __wbg_set_colliderdescriptor_density: (a: number, b: number) => void;
+    readonly __wbg_set_colliderdescriptor_friction: (a: number, b: number) => void;
     readonly __wbg_set_colliderdescriptor_is_sensor: (a: number, b: number) => void;
+    readonly __wbg_set_colliderdescriptor_restitution: (a: number, b: number) => void;
     readonly __wbg_set_colliderdescriptor_rotation: (a: number, b: number) => void;
     readonly __wbg_set_colliderdescriptor_shape_type: (a: number, b: number) => void;
     readonly __wbg_set_colliderdescriptor_translation: (a: number, b: number) => void;
@@ -364,6 +204,10 @@ export interface InitOutput {
     readonly __wbg_set_collisionevent_collider2: (a: number, b: bigint) => void;
     readonly __wbg_set_collisionevent_sensor: (a: number, b: number) => void;
     readonly __wbg_set_collisionevent_started: (a: number, b: number) => void;
+    readonly __wbg_set_quat_i: (a: number, b: number) => void;
+    readonly __wbg_set_quat_j: (a: number, b: number) => void;
+    readonly __wbg_set_quat_k: (a: number, b: number) => void;
+    readonly __wbg_set_quat_w: (a: number, b: number) => void;
     readonly __wbg_set_rigidbodydescriptor_angular_damping: (a: number, b: number) => void;
     readonly __wbg_set_rigidbodydescriptor_angular_velocity: (a: number, b: number) => void;
     readonly __wbg_set_rigidbodydescriptor_can_sleep: (a: number, b: number) => void;
@@ -379,136 +223,16 @@ export interface InitOutput {
     readonly quat_new: (a: number, b: number, c: number, d: number) => number;
     readonly rigidbodydescriptor_new: () => number;
     readonly vec3_new: (a: number, b: number, c: number) => number;
-    readonly __wbg_get_colliderdescriptor_a: (a: number) => number;
-    readonly __wbg_get_colliderdescriptor_b: (a: number) => number;
-    readonly __wbg_get_colliderdescriptor_c: (a: number) => number;
-    readonly __wbg_get_colliderdescriptor_d: (a: number) => number;
-    readonly __wbg_get_colliderdescriptor_friction: (a: number) => number;
-    readonly __wbg_get_colliderdescriptor_restitution: (a: number) => number;
-    readonly __wbg_get_contactforceevent_collider1: (a: number) => bigint;
-    readonly __wbg_get_contactforceevent_collider2: (a: number) => bigint;
-    readonly __wbg_get_contactforceevent_force_x: (a: number) => number;
-    readonly __wbg_get_contactforceevent_force_y: (a: number) => number;
-    readonly __wbg_get_contactforceevent_force_z: (a: number) => number;
-    readonly __wbg_get_contactforceevent_max_force_dir_x: (a: number) => number;
-    readonly __wbg_get_contactforceevent_max_force_dir_y: (a: number) => number;
-    readonly __wbg_get_contactforceevent_max_force_dir_z: (a: number) => number;
-    readonly __wbg_get_contactforceevent_max_force_magnitude: (a: number) => number;
-    readonly __wbg_get_contactforceevent_total_force_magnitude: (a: number) => number;
-    readonly __wbg_get_quat_i: (a: number) => number;
-    readonly __wbg_get_quat_j: (a: number) => number;
-    readonly __wbg_get_quat_k: (a: number) => number;
-    readonly __wbg_get_quat_w: (a: number) => number;
     readonly __wbg_get_rigidbodydescriptor_additional_mass: (a: number) => number;
     readonly __wbg_get_vec3_x: (a: number) => number;
     readonly __wbg_get_vec3_y: (a: number) => number;
     readonly __wbg_get_vec3_z: (a: number) => number;
-    readonly __wbg_set_colliderdescriptor_a: (a: number, b: number) => void;
-    readonly __wbg_set_colliderdescriptor_b: (a: number, b: number) => void;
-    readonly __wbg_set_colliderdescriptor_c: (a: number, b: number) => void;
-    readonly __wbg_set_colliderdescriptor_d: (a: number, b: number) => void;
-    readonly __wbg_set_colliderdescriptor_friction: (a: number, b: number) => void;
-    readonly __wbg_set_colliderdescriptor_restitution: (a: number, b: number) => void;
-    readonly __wbg_set_contactforceevent_collider1: (a: number, b: bigint) => void;
-    readonly __wbg_set_contactforceevent_collider2: (a: number, b: bigint) => void;
-    readonly __wbg_set_contactforceevent_force_x: (a: number, b: number) => void;
-    readonly __wbg_set_contactforceevent_force_y: (a: number, b: number) => void;
-    readonly __wbg_set_contactforceevent_force_z: (a: number, b: number) => void;
-    readonly __wbg_set_contactforceevent_max_force_dir_x: (a: number, b: number) => void;
-    readonly __wbg_set_contactforceevent_max_force_dir_y: (a: number, b: number) => void;
-    readonly __wbg_set_contactforceevent_max_force_dir_z: (a: number, b: number) => void;
-    readonly __wbg_set_contactforceevent_max_force_magnitude: (a: number, b: number) => void;
-    readonly __wbg_set_contactforceevent_total_force_magnitude: (a: number, b: number) => void;
-    readonly __wbg_set_quat_i: (a: number, b: number) => void;
-    readonly __wbg_set_quat_j: (a: number, b: number) => void;
-    readonly __wbg_set_quat_k: (a: number, b: number) => void;
-    readonly __wbg_set_quat_w: (a: number, b: number) => void;
     readonly __wbg_set_rigidbodydescriptor_additional_mass: (a: number, b: number) => void;
     readonly __wbg_set_vec3_x: (a: number, b: number) => void;
     readonly __wbg_set_vec3_y: (a: number, b: number) => void;
     readonly __wbg_set_vec3_z: (a: number, b: number) => void;
     readonly __wbg_set_rigidbodydescriptor_rotation: (a: number, b: number) => void;
     readonly __wbg_get_rigidbodydescriptor_rotation: (a: number) => number;
-    readonly init: () => void;
-    readonly physicsworld_cast_ray: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => bigint;
-    readonly query_cast_ray: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
-    readonly physicsworld_clear_events: (a: number) => void;
-    readonly world_clear_events: (a: number) => void;
-    readonly physicsworld_create_dynamic_box: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => bigint;
-    readonly physicsworld_create_dynamic_sphere: (a: number, b: number, c: number, d: number, e: number, f: number) => bigint;
-    readonly physicsworld_create_ground_plane: (a: number, b: number, c: number, d: number, e: number) => bigint;
-    readonly physicsworld_get_collision_event: (a: number, b: number) => number;
-    readonly world_get_collision_event: (a: number, b: number, c: number) => void;
-    readonly physicsworld_get_collision_event_count: (a: number) => number;
-    readonly world_collision_event_count: (a: number) => number;
-    readonly physicsworld_get_collision_events: (a: number) => any;
-    readonly physicsworld_insert_collider: (a: number, b: number, c: bigint) => bigint;
-    readonly physicsworld_intersect_aabb_count: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => number;
-    readonly query_intersect_aabb_count: (a: number, b: number, c: number) => number;
-    readonly physicsworld_remove_collider: (a: number, b: bigint) => void;
-    readonly world_remove_collider: (a: number, b: bigint, c: number) => number;
-    readonly version: () => [number, number];
-    readonly world_destroy: (a: number) => void;
-    readonly rigid_body_builder_create: (a: number) => number;
-    readonly rigid_body_builder_set_pose: (a: number, b: number, c: number) => void;
-    readonly rigid_body_builder_set_linvel: (a: number, b: number) => void;
-    readonly rigid_body_builder_set_angvel: (a: number, b: number) => void;
-    readonly rigid_body_builder_set_additional_mass: (a: number, b: number) => void;
-    readonly rigid_body_builder_set_linear_damping: (a: number, b: number) => void;
-    readonly rigid_body_builder_set_angular_damping: (a: number, b: number) => void;
-    readonly rigid_body_builder_build: (a: number) => number;
-    readonly world_insert_rigid_body: (a: number, b: number) => bigint;
-    readonly collider_builder_create_ex: (a: number) => number;
-    readonly collider_builder_set_translation: (a: number, b: number) => void;
-    readonly collider_builder_set_pose: (a: number, b: number, c: number) => void;
-    readonly collider_builder_set_friction: (a: number, b: number) => void;
-    readonly collider_builder_set_restitution: (a: number, b: number) => void;
-    readonly collider_builder_set_density: (a: number, b: number) => void;
-    readonly collider_builder_set_sensor: (a: number, b: number) => void;
-    readonly collider_builder_set_collision_groups: (a: number, b: number) => void;
-    readonly collider_builder_build: (a: number) => number;
-    readonly world_insert_collider_with_parent: (a: number, b: number, c: bigint) => bigint;
-    readonly celestial_get_body: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => number;
-    readonly world_register_celestial_gravity: (a: number, b: number, c: number) => bigint;
-    readonly __wbg_physicsworld_free: (a: number, b: number) => void;
-    readonly physicsworld_add_force: (a: number, b: bigint, c: number, d: number, e: number, f: number) => void;
-    readonly rigid_body_add_force: (a: number, b: bigint, c: number, d: number) => number;
-    readonly physicsworld_add_torque: (a: number, b: bigint, c: number, d: number, e: number, f: number) => void;
-    readonly rigid_body_add_torque: (a: number, b: bigint, c: number, d: number) => number;
-    readonly physicsworld_apply_impulse: (a: number, b: bigint, c: number, d: number, e: number, f: number) => void;
-    readonly rigid_body_apply_impulse: (a: number, b: bigint, c: number, d: number) => number;
-    readonly physicsworld_destroy: (a: number) => void;
-    readonly physicsworld_enable_ccd: (a: number, b: bigint, c: number) => void;
-    readonly rigid_body_enable_ccd: (a: number, b: bigint, c: number) => number;
-    readonly physicsworld_get_body_angular_velocity: (a: number, b: bigint) => number;
-    readonly rigid_body_get_angvel: (a: number, b: number, c: bigint) => void;
-    readonly physicsworld_get_body_count: (a: number) => number;
-    readonly world_get_rigid_body_set_size: (a: number) => number;
-    readonly physicsworld_get_body_linear_velocity: (a: number, b: bigint) => number;
-    readonly rigid_body_get_linvel: (a: number, b: number, c: bigint) => void;
-    readonly physicsworld_get_body_rotation: (a: number, b: bigint) => number;
-    readonly rigid_body_get_rotation: (a: number, b: number, c: bigint) => void;
-    readonly physicsworld_get_body_snapshot: (a: number) => any;
-    readonly world_body_snapshot: (a: number, b: number, c: number, d: number) => number;
-    readonly physicsworld_get_body_translation: (a: number, b: bigint) => number;
-    readonly rigid_body_get_translation: (a: number, b: number, c: bigint) => void;
-    readonly physicsworld_get_collider_count: (a: number) => number;
-    readonly world_get_collider_set_size: (a: number) => number;
-    readonly physicsworld_insert_rigid_body: (a: number, b: number) => bigint;
-    readonly physicsworld_new: (a: number, b: number, c: number) => number;
-    readonly world_create: (a: number) => number;
-    readonly physicsworld_remove_rigid_body: (a: number, b: bigint, c: number) => void;
-    readonly world_remove_rigid_body: (a: number, b: bigint, c: number) => number;
-    readonly physicsworld_set_body_translation: (a: number, b: bigint, c: number, d: number, e: number) => void;
-    readonly rigid_body_set_translation: (a: number, b: bigint, c: number, d: number) => number;
-    readonly physicsworld_set_gravity: (a: number, b: number, c: number, d: number) => void;
-    readonly world_set_gravity: (a: number, b: number) => void;
-    readonly physicsworld_sleep: (a: number, b: bigint) => void;
-    readonly rigid_body_sleep: (a: number, b: bigint) => number;
-    readonly physicsworld_step: (a: number, b: number) => void;
-    readonly world_step: (a: number, b: number) => void;
-    readonly physicsworld_wake_up: (a: number, b: bigint) => void;
-    readonly rigid_body_wake_up: (a: number, b: bigint, c: number) => number;
     readonly __wbg_celestialparams_free: (a: number, b: number) => void;
     readonly __wbg_get_celestialparams_equatorial_radius: (a: number) => number;
     readonly __wbg_get_celestialparams_flattening: (a: number) => number;
@@ -532,8 +256,76 @@ export interface InitOutput {
     readonly __wbg_set_celestialparams_max_degree: (a: number, b: number) => void;
     readonly __wbg_set_celestialparams_ref_radius: (a: number, b: number) => void;
     readonly __wbg_set_celestialparams_rotation_rate: (a: number, b: number) => void;
+    readonly init: () => void;
     readonly physicsworld_get_celestial_params: (a: number, b: number) => number;
+    readonly celestial_get_body: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => number;
     readonly physicsworld_register_celestial_gravity: (a: number, b: number, c: number) => bigint;
+    readonly world_register_celestial_gravity: (a: number, b: number, c: number) => bigint;
+    readonly version: () => [number, number];
+    readonly world_destroy: (a: number) => void;
+    readonly rigid_body_builder_create: (a: number) => number;
+    readonly rigid_body_builder_set_pose: (a: number, b: number, c: number) => void;
+    readonly rigid_body_builder_set_linvel: (a: number, b: number) => void;
+    readonly rigid_body_builder_set_angvel: (a: number, b: number) => void;
+    readonly rigid_body_builder_set_additional_mass: (a: number, b: number) => void;
+    readonly rigid_body_builder_set_linear_damping: (a: number, b: number) => void;
+    readonly rigid_body_builder_set_angular_damping: (a: number, b: number) => void;
+    readonly rigid_body_builder_build: (a: number) => number;
+    readonly world_insert_rigid_body: (a: number, b: number) => bigint;
+    readonly world_clear_events: (a: number) => void;
+    readonly world_get_collision_event: (a: number, b: number, c: number) => void;
+    readonly world_collision_event_count: (a: number) => number;
+    readonly collider_builder_create_ex: (a: number) => number;
+    readonly collider_builder_set_translation: (a: number, b: number) => void;
+    readonly collider_builder_set_pose: (a: number, b: number, c: number) => void;
+    readonly collider_builder_set_friction: (a: number, b: number) => void;
+    readonly collider_builder_set_restitution: (a: number, b: number) => void;
+    readonly collider_builder_set_density: (a: number, b: number) => void;
+    readonly collider_builder_set_sensor: (a: number, b: number) => void;
+    readonly collider_builder_set_collision_groups: (a: number, b: number) => void;
+    readonly collider_builder_build: (a: number) => number;
+    readonly world_insert_collider_with_parent: (a: number, b: number, c: bigint) => bigint;
+    readonly world_remove_collider: (a: number, b: bigint, c: number) => number;
+    readonly __wbg_physicsworld_free: (a: number, b: number) => void;
+    readonly physicsworld_add_force: (a: number, b: bigint, c: number, d: number, e: number, f: number) => void;
+    readonly rigid_body_add_force: (a: number, b: bigint, c: number, d: number) => number;
+    readonly physicsworld_add_torque: (a: number, b: bigint, c: number, d: number, e: number, f: number) => void;
+    readonly rigid_body_add_torque: (a: number, b: bigint, c: number, d: number) => number;
+    readonly physicsworld_apply_impulse: (a: number, b: bigint, c: number, d: number, e: number, f: number) => void;
+    readonly rigid_body_apply_impulse: (a: number, b: bigint, c: number, d: number) => number;
+    readonly physicsworld_destroy: (a: number) => void;
+    readonly physicsworld_get_body_angular_velocity: (a: number, b: bigint) => number;
+    readonly rigid_body_get_angvel: (a: number, b: number, c: bigint) => void;
+    readonly physicsworld_get_body_count: (a: number) => number;
+    readonly world_get_rigid_body_set_size: (a: number) => number;
+    readonly physicsworld_get_body_linear_velocity: (a: number, b: bigint) => number;
+    readonly rigid_body_get_linvel: (a: number, b: number, c: bigint) => void;
+    readonly physicsworld_get_body_rotation: (a: number, b: bigint) => number;
+    readonly rigid_body_get_rotation: (a: number, b: number, c: bigint) => void;
+    readonly physicsworld_get_body_snapshot: (a: number) => any;
+    readonly world_body_snapshot: (a: number, b: number, c: number, d: number) => number;
+    readonly physicsworld_get_body_translation: (a: number, b: bigint) => number;
+    readonly rigid_body_get_translation: (a: number, b: number, c: bigint) => void;
+    readonly physicsworld_insert_rigid_body: (a: number, b: number) => bigint;
+    readonly physicsworld_new: (a: number, b: number, c: number) => number;
+    readonly world_create: (a: number) => number;
+    readonly physicsworld_remove_rigid_body: (a: number, b: bigint, c: number) => void;
+    readonly world_remove_rigid_body: (a: number, b: bigint, c: number) => number;
+    readonly physicsworld_set_gravity: (a: number, b: number, c: number, d: number) => void;
+    readonly world_set_gravity: (a: number, b: number) => void;
+    readonly physicsworld_step: (a: number, b: number) => void;
+    readonly world_step: (a: number, b: number) => void;
+    readonly physicsworld_wake_up: (a: number, b: bigint) => void;
+    readonly rigid_body_wake_up: (a: number, b: bigint, c: number) => number;
+    readonly physicsworld_clear_events: (a: number) => void;
+    readonly physicsworld_create_dynamic_box: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => bigint;
+    readonly physicsworld_create_dynamic_sphere: (a: number, b: number, c: number, d: number, e: number, f: number) => bigint;
+    readonly physicsworld_create_ground_plane: (a: number, b: number, c: number, d: number, e: number) => bigint;
+    readonly physicsworld_get_collision_event: (a: number, b: number) => number;
+    readonly physicsworld_get_collision_event_count: (a: number) => number;
+    readonly physicsworld_get_collision_events: (a: number) => any;
+    readonly physicsworld_insert_collider: (a: number, b: number, c: bigint) => bigint;
+    readonly physicsworld_remove_collider: (a: number, b: bigint) => void;
     readonly sf_biot_savart_velocity: (a: number, b: number, c: number) => number;
     readonly sf_circulation_around_loop: (a: number, b: number, c: number, d: number) => number;
     readonly sf_circulation_quantum: () => number;
@@ -583,6 +375,7 @@ export interface InitOutput {
     readonly rigid_body_builder_set_translation: (a: number, b: number) => void;
     readonly rigid_body_builder_set_user_data: (a: number, b: bigint, c: bigint) => void;
     readonly rigid_body_destroy_raw: (a: number) => void;
+    readonly rigid_body_enable_ccd: (a: number, b: bigint, c: number) => number;
     readonly rigid_body_enable_ccd_flag: (a: number, b: bigint, c: number) => number;
     readonly rigid_body_get_angvel_out: (a: number, b: bigint, c: number) => void;
     readonly rigid_body_get_force: (a: number, b: number, c: bigint) => void;
@@ -603,7 +396,9 @@ export interface InitOutput {
     readonly rigid_body_set_rotation: (a: number, b: bigint, c: number, d: number) => number;
     readonly rigid_body_set_rotation_flag: (a: number, b: bigint, c: number, d: number) => number;
     readonly rigid_body_set_status: (a: number, b: bigint, c: number, d: number) => number;
+    readonly rigid_body_set_translation: (a: number, b: bigint, c: number, d: number) => number;
     readonly rigid_body_set_translation_flag: (a: number, b: bigint, c: number, d: number) => number;
+    readonly rigid_body_sleep: (a: number, b: bigint) => number;
     readonly rigid_body_sleep_flag: (a: number, b: bigint) => number;
     readonly rigid_body_wake_up_flag: (a: number, b: bigint, c: number) => number;
     readonly rtree_clear: (a: number) => void;
@@ -652,17 +447,17 @@ export interface InitOutput {
     readonly collider_builder_create_prism: (a: number) => number;
     readonly collider_builder_create_spherical_shell: (a: number) => number;
     readonly collider_builder_create_ssv: (a: number) => number;
+    readonly query_cast_ray: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
     readonly query_cast_ray_out: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => bigint;
     readonly query_cast_rays: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => number;
     readonly query_cast_shape: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
     readonly query_cast_shape_out: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => bigint;
     readonly query_intersect_aabb: (a: number, b: number, c: number, d: number, e: number) => number;
+    readonly query_intersect_aabb_count: (a: number, b: number, c: number) => number;
     readonly query_intersect_aabb_count_all: (a: number, b: number) => number;
     readonly query_intersect_aabb_counts: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
     readonly query_intersect_aabb_rigid_bodies_all: (a: number, b: number, c: number, d: number) => number;
-    readonly query_intersect_aabb_rigid_bodies: (a: number, b: number, c: number, d: number, e: number) => number;
     readonly query_intersect_aabb_rigid_body_count_all: (a: number, b: number) => number;
-    readonly query_intersect_aabb_rigid_body_count: (a: number, b: number, c: number) => number;
     readonly query_intersect_capsule: (a: number, b: number, c: number, d: number, e: number) => number;
     readonly query_intersect_capsule_all: (a: number, b: number, c: number, d: number) => number;
     readonly query_intersect_capsule_count: (a: number, b: number, c: number) => number;
@@ -832,6 +627,37 @@ export interface InitOutput {
     readonly terrain_lunar_mascon_get: (a: number, b: number) => number;
     readonly terrain_lunar_mascon_gravity: (a: number, b: number) => number;
     readonly terrain_polyhedron_gravity: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => number;
+    readonly collider_builder_create_voxel_aabb: (a: number, b: number, c: number) => number;
+    readonly collider_builder_create_voxel_aabb_auto: (a: number, b: number, c: number) => number;
+    readonly collider_builder_create_voxel_obb: (a: number, b: number, c: number) => number;
+    readonly collider_builder_create_voxel_obb_auto: (a: number, b: number, c: number) => number;
+    readonly collider_builder_create_voxels: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => number;
+    readonly collider_builder_create_voxels_auto: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => number;
+    readonly joint_builder_create: (a: number, b: number, c: number, d: number) => number;
+    readonly joint_builder_destroy: (a: number) => void;
+    readonly joint_builder_set_contacts_enabled: (a: number, b: number) => void;
+    readonly joint_builder_set_limits: (a: number, b: number, c: number, d: number) => void;
+    readonly joint_builder_set_local_anchor1: (a: number, b: number) => void;
+    readonly joint_builder_set_local_anchor2: (a: number, b: number) => void;
+    readonly joint_builder_set_motor_position: (a: number, b: number, c: number, d: number, e: number) => void;
+    readonly joint_builder_set_motor_velocity: (a: number, b: number, c: number, d: number) => void;
+    readonly query_intersect_voxel_aabb: (a: number, b: number, c: number, d: number, e: number) => number;
+    readonly query_intersect_aabb_rigid_bodies: (a: number, b: number, c: number, d: number, e: number) => number;
+    readonly query_intersect_aabb_rigid_body_count: (a: number, b: number, c: number) => number;
+    readonly query_intersect_voxel_aabb_count: (a: number, b: number, c: number) => number;
+    readonly query_intersect_voxel_obb: (a: number, b: number, c: number, d: number, e: number) => number;
+    readonly query_intersect_voxel_obb_count: (a: number, b: number, c: number) => number;
+    readonly voxel_aabb_build_stats: (a: number, b: number, c: number, d: number) => void;
+    readonly voxel_aabb_build_stats_out: (a: number, b: number, c: number, d: number) => void;
+    readonly voxel_build_stats: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
+    readonly voxel_obb_build_stats: (a: number, b: number, c: number, d: number) => void;
+    readonly voxel_obb_build_stats_out: (a: number, b: number, c: number, d: number) => void;
+    readonly world_insert_dynamic_voxel_obb: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => bigint;
+    readonly world_insert_impulse_joint: (a: number, b: bigint, c: bigint, d: number, e: number) => bigint;
+    readonly world_insert_static_voxel_aabb: (a: number, b: number, c: number, d: number, e: number, f: number) => bigint;
+    readonly world_remove_impulse_joint: (a: number, b: bigint, c: number) => number;
+    readonly celestial_get_sh_coeff_count: (a: number) => number;
+    readonly celestial_get_sh_coeffs: (a: number, b: number, c: number, d: number) => number;
     readonly character_controller_collision_count: (a: number) => number;
     readonly character_controller_create: () => number;
     readonly character_controller_destroy: (a: number) => void;
@@ -858,76 +684,6 @@ export interface InitOutput {
     readonly query_intersect_neural_bounds_count: (a: number, b: number, c: number, d: number, e: number) => number;
     readonly query_intersect_neural_bounds_count_all: (a: number, b: number, c: number, d: number) => number;
     readonly world_replace_body_with_fracture_fragments: (a: number, b: bigint, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => number;
-    readonly biomechanics_hill_force_length_factor: (a: number, b: number, c: number) => number;
-    readonly biomechanics_hill_force_velocity_factor: (a: number, b: number) => number;
-    readonly biomechanics_hill_muscle_evaluate: (a: number, b: number, c: number) => number;
-    readonly biomechanics_hill_three_element_force: (a: number, b: number, c: number, d: number, e: number) => number;
-    readonly biomechanics_muscle_joint_torque: (a: number, b: number) => number;
-    readonly biomechanics_skeletal_joint_limit: (a: number, b: number, c: number, d: number) => number;
-    readonly chaos_bifurcation_lorenz: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => number;
-    readonly chaos_detect: (a: number, b: number, c: number, d: number) => number;
-    readonly chaos_lyapunov_rosenstein: (a: number, b: number, c: number, d: number, e: number) => number;
-    readonly chaos_double_pendulum_accel: (a: number, b: number, c: number) => number;
-    readonly chaos_double_pendulum_integrate: (a: number, b: number, c: number, d: number, e: number) => number;
-    readonly chaos_double_pendulum_step: (a: number, b: number, c: number) => number;
-    readonly chaos_logistic_bifurcation: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => number;
-    readonly chaos_logistic_iterate: (a: number, b: number, c: number, d: number, e: number) => number;
-    readonly chaos_logistic_step: (a: number, b: number, c: number) => number;
-    readonly chaos_lorenz_integrate: (a: number, b: number, c: number, d: number, e: number) => number;
-    readonly chaos_lorenz_integrate_count: (a: number, b: number) => number;
-    readonly chaos_lorenz_step: (a: number, b: number, c: number) => number;
-    readonly chaos_lyapunov_lorenz: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
-    readonly last_error_code: () => number;
-    readonly last_error_message: () => number;
-    readonly thermal_fem_diffusion_step: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => number;
-    readonly thermal_fourier_conduction: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
-    readonly thermal_phase_change: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => number;
-    readonly thermal_phase_condition: (a: number, b: number, c: number, d: number) => number;
-    readonly thermal_stefan_boltzmann_radiation: (a: number, b: number, c: number, d: number, e: number) => number;
-    readonly thermal_stress_from_expansion: (a: number, b: number, c: number, d: number) => number;
-    readonly thermal_thermoelastic_stress_strain: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
-    readonly wo_fresnel_diffraction_point: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => number;
-    readonly wo_fresnel_grid: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => number;
-    readonly wo_fresnel_zone: (a: number, b: number, c: number, d: number) => number;
-    readonly wo_fresnel_zone_sum: (a: number, b: number, c: number, d: number) => number;
-    readonly wo_huygens_fresnel: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => number;
-    readonly wo_kirchhoff_diffraction_point: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => number;
-    readonly wo_plane_wave: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => number;
-    readonly wo_spherical_wave: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => number;
-    readonly wo_thin_film_interference: (a: number, b: number, c: number) => number;
-    readonly wo_thin_film_spectrum: (a: number, b: number, c: number, d: number) => number;
-    readonly wo_wavelength: (a: number) => number;
-    readonly wo_wavenumber: (a: number) => number;
-    readonly wo_young_slit_pattern: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => number;
-    readonly wo_young_slit_point: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => number;
-    readonly last_error_clear: () => void;
-    readonly collider_builder_create_voxel_aabb: (a: number, b: number, c: number) => number;
-    readonly collider_builder_create_voxel_aabb_auto: (a: number, b: number, c: number) => number;
-    readonly collider_builder_create_voxel_obb: (a: number, b: number, c: number) => number;
-    readonly collider_builder_create_voxel_obb_auto: (a: number, b: number, c: number) => number;
-    readonly collider_builder_create_voxels: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => number;
-    readonly collider_builder_create_voxels_auto: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => number;
-    readonly joint_builder_create: (a: number, b: number, c: number, d: number) => number;
-    readonly joint_builder_destroy: (a: number) => void;
-    readonly joint_builder_set_contacts_enabled: (a: number, b: number) => void;
-    readonly joint_builder_set_limits: (a: number, b: number, c: number, d: number) => void;
-    readonly joint_builder_set_local_anchor1: (a: number, b: number) => void;
-    readonly joint_builder_set_local_anchor2: (a: number, b: number) => void;
-    readonly joint_builder_set_motor_position: (a: number, b: number, c: number, d: number, e: number) => void;
-    readonly joint_builder_set_motor_velocity: (a: number, b: number, c: number, d: number) => void;
-    readonly query_intersect_voxel_aabb: (a: number, b: number, c: number, d: number, e: number) => number;
-    readonly query_intersect_voxel_aabb_count: (a: number, b: number, c: number) => number;
-    readonly query_intersect_voxel_obb: (a: number, b: number, c: number, d: number, e: number) => number;
-    readonly query_intersect_voxel_obb_count: (a: number, b: number, c: number) => number;
-    readonly voxel_aabb_build_stats: (a: number, b: number, c: number, d: number) => void;
-    readonly voxel_aabb_build_stats_out: (a: number, b: number, c: number, d: number) => void;
-    readonly voxel_build_stats: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
-    readonly voxel_obb_build_stats: (a: number, b: number, c: number, d: number) => void;
-    readonly voxel_obb_build_stats_out: (a: number, b: number, c: number, d: number) => void;
-    readonly world_insert_dynamic_voxel_obb: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => bigint;
-    readonly world_insert_impulse_joint: (a: number, b: bigint, c: bigint, d: number, e: number) => bigint;
-    readonly world_insert_static_voxel_aabb: (a: number, b: number, c: number, d: number, e: number, f: number) => bigint;
-    readonly world_remove_impulse_joint: (a: number, b: bigint, c: number) => number;
     readonly astro_barnes_hut_should_open: (a: number, b: number, c: number) => number;
     readonly astro_fmm_monopole_acceleration: (a: number, b: number, c: number, d: number, e: number) => number;
     readonly astro_nbody_barnes_hut_accelerations: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
@@ -980,10 +736,68 @@ export interface InitOutput {
     readonly world_set_newton_gravity_law_flag: (a: number, b: number) => number;
     readonly world_unregister_callback: (a: number, b: bigint) => void;
     readonly world_clear_intersection_pair_filter_callback: (a: number) => void;
-    readonly integrator_keplerian_elements: (a: number, b: number, c: number, d: number) => number;
-    readonly integrator_leapfrog_step: (a: number, b: number, c: number, d: number, e: number) => number;
-    readonly integrator_post_newtonian: (a: number, b: number, c: number, d: number, e: number) => number;
-    readonly integrator_specific_energy: (a: number, b: number, c: number, d: number) => number;
+    readonly biomechanics_hill_force_length_factor: (a: number, b: number, c: number) => number;
+    readonly biomechanics_hill_force_velocity_factor: (a: number, b: number) => number;
+    readonly biomechanics_hill_muscle_evaluate: (a: number, b: number, c: number) => number;
+    readonly biomechanics_hill_three_element_force: (a: number, b: number, c: number, d: number, e: number) => number;
+    readonly biomechanics_muscle_joint_torque: (a: number, b: number) => number;
+    readonly biomechanics_skeletal_joint_limit: (a: number, b: number, c: number, d: number) => number;
+    readonly chaos_bifurcation_lorenz: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => number;
+    readonly chaos_detect: (a: number, b: number, c: number, d: number) => number;
+    readonly chaos_lyapunov_rosenstein: (a: number, b: number, c: number, d: number, e: number) => number;
+    readonly chaos_double_pendulum_accel: (a: number, b: number, c: number) => number;
+    readonly chaos_double_pendulum_integrate: (a: number, b: number, c: number, d: number, e: number) => number;
+    readonly chaos_double_pendulum_step: (a: number, b: number, c: number) => number;
+    readonly chaos_logistic_bifurcation: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => number;
+    readonly chaos_logistic_iterate: (a: number, b: number, c: number, d: number, e: number) => number;
+    readonly chaos_logistic_step: (a: number, b: number, c: number) => number;
+    readonly chaos_lorenz_integrate: (a: number, b: number, c: number, d: number, e: number) => number;
+    readonly chaos_lorenz_integrate_count: (a: number, b: number) => number;
+    readonly chaos_lorenz_step: (a: number, b: number, c: number) => number;
+    readonly chaos_lyapunov_lorenz: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
+    readonly thermal_fem_diffusion_step: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => number;
+    readonly thermal_fourier_conduction: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
+    readonly thermal_phase_change: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => number;
+    readonly thermal_phase_condition: (a: number, b: number, c: number, d: number) => number;
+    readonly thermal_stefan_boltzmann_radiation: (a: number, b: number, c: number, d: number, e: number) => number;
+    readonly thermal_stress_from_expansion: (a: number, b: number, c: number, d: number) => number;
+    readonly thermal_thermoelastic_stress_strain: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
+    readonly wo_fresnel_diffraction_point: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => number;
+    readonly wo_fresnel_grid: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => number;
+    readonly wo_fresnel_zone: (a: number, b: number, c: number, d: number) => number;
+    readonly wo_fresnel_zone_sum: (a: number, b: number, c: number, d: number) => number;
+    readonly wo_huygens_fresnel: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => number;
+    readonly wo_kirchhoff_diffraction_point: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => number;
+    readonly wo_plane_wave: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => number;
+    readonly wo_spherical_wave: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => number;
+    readonly wo_thin_film_interference: (a: number, b: number, c: number) => number;
+    readonly wo_thin_film_spectrum: (a: number, b: number, c: number, d: number) => number;
+    readonly wo_wavelength: (a: number) => number;
+    readonly wo_wavenumber: (a: number) => number;
+    readonly wo_young_slit_pattern: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => number;
+    readonly wo_young_slit_point: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => number;
+    readonly crb_tree_clear: (a: number) => void;
+    readonly crb_tree_create: () => number;
+    readonly crb_tree_destroy: (a: number) => void;
+    readonly crb_tree_insert: (a: number, b: bigint, c: number) => number;
+    readonly crb_tree_insert_flag: (a: number, b: bigint, c: number) => number;
+    readonly crb_tree_len: (a: number) => number;
+    readonly crb_tree_query_aabb: (a: number, b: number, c: number, d: number) => number;
+    readonly crb_tree_query_aabb_count: (a: number, b: number) => number;
+    readonly crb_tree_remove: (a: number, b: bigint) => number;
+    readonly crb_tree_update: (a: number, b: bigint, c: number) => number;
+    readonly world_body_snapshot_count: (a: number) => number;
+    readonly world_dynamic_body_snapshot: (a: number, b: number, c: number, d: number) => number;
+    readonly world_dynamic_body_snapshot_count: (a: number) => number;
+    readonly world_get_collider_set_size: (a: number) => number;
+    readonly world_get_force_registry_count: (a: number) => number;
+    readonly world_get_force_registry_typed_count: (a: number, b: number) => number;
+    readonly world_get_gravity: (a: number, b: number) => void;
+    readonly world_get_gravity_out: (a: number, b: number) => void;
+    readonly world_get_integration_parameters: (a: number, b: number, c: number) => number;
+    readonly world_set_integration_parameters: (a: number, b: number, c: number, d: number) => number;
+    readonly world_update_body_poses: (a: number, b: number, c: number, d: number, e: number) => number;
+    readonly world_update_body_velocities: (a: number, b: number, c: number, d: number, e: number) => number;
     readonly collider_builder_create: (a: number, b: number) => number;
     readonly collider_builder_create_convex_hull: (a: number, b: number) => number;
     readonly collider_builder_create_discrete_obb: (a: number, b: number, c: number) => number;
@@ -1035,40 +849,23 @@ export interface InitOutput {
     readonly world_insert_dynamic_cuboids: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => bigint;
     readonly world_insert_static_trimesh: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => bigint;
     readonly world_remove_collider_flag: (a: number, b: bigint, c: number) => number;
-    readonly celestial_get_sh_coeff_count: (a: number) => number;
-    readonly celestial_get_sh_coeffs: (a: number, b: number, c: number, d: number) => number;
-    readonly crb_tree_clear: (a: number) => void;
-    readonly crb_tree_create: () => number;
-    readonly crb_tree_destroy: (a: number) => void;
-    readonly crb_tree_insert: (a: number, b: bigint, c: number) => number;
-    readonly crb_tree_insert_flag: (a: number, b: bigint, c: number) => number;
-    readonly crb_tree_len: (a: number) => number;
-    readonly crb_tree_query_aabb: (a: number, b: number, c: number, d: number) => number;
-    readonly crb_tree_query_aabb_count: (a: number, b: number) => number;
-    readonly crb_tree_remove: (a: number, b: bigint) => number;
-    readonly crb_tree_update: (a: number, b: bigint, c: number) => number;
-    readonly world_body_snapshot_count: (a: number) => number;
-    readonly world_dynamic_body_snapshot: (a: number, b: number, c: number, d: number) => number;
-    readonly world_dynamic_body_snapshot_count: (a: number) => number;
-    readonly world_get_force_registry_count: (a: number) => number;
-    readonly world_get_force_registry_typed_count: (a: number, b: number) => number;
-    readonly world_get_gravity: (a: number, b: number) => void;
-    readonly world_get_gravity_out: (a: number, b: number) => void;
-    readonly world_get_integration_parameters: (a: number, b: number, c: number) => number;
-    readonly world_set_integration_parameters: (a: number, b: number, c: number, d: number) => number;
-    readonly world_update_body_poses: (a: number, b: number, c: number, d: number, e: number) => number;
-    readonly world_update_body_velocities: (a: number, b: number, c: number, d: number, e: number) => number;
+    readonly integrator_keplerian_elements: (a: number, b: number, c: number, d: number) => number;
+    readonly integrator_leapfrog_step: (a: number, b: number, c: number, d: number, e: number) => number;
+    readonly integrator_post_newtonian: (a: number, b: number, c: number, d: number, e: number) => number;
+    readonly integrator_specific_energy: (a: number, b: number, c: number, d: number) => number;
     readonly continuum_deformation_gradient: (a: number, b: number, c: number, d: number) => number;
     readonly continuum_linear_elastic_constitutive_matrix: (a: number, b: number, c: number, d: number) => number;
     readonly continuum_linear_tetra_element_stiffness: (a: number, b: number, c: number, d: number, e: number) => number;
-    readonly continuum_tetra_strain_displacement_matrix: (a: number, b: number, c: number, d: number) => number;
     readonly continuum_newmark_beta_solve: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number) => number;
     readonly continuum_tetra_shape_functions: (a: number, b: number, c: number) => number;
+    readonly continuum_tetra_strain_displacement_matrix: (a: number, b: number, c: number, d: number) => number;
     readonly continuum_tetra_volume: (a: number) => number;
     readonly control_lqr_like_stabilizing_input: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => number;
     readonly control_mpc_solve_box_qp: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => number;
     readonly control_pid_step: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
     readonly control_state_space_step: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number) => number;
+    readonly last_error_code: () => number;
+    readonly last_error_message: () => number;
     readonly quantum_harmonic_oscillator_report: (a: number, b: number, c: number) => number;
     readonly quantum_rectangular_barrier_probability: (a: number) => number;
     readonly quantum_rectangular_barrier_tunneling: (a: number, b: number) => number;
@@ -1077,6 +874,7 @@ export interface InitOutput {
     readonly quantum_wave_probability_density: (a: number) => number;
     readonly quantum_wkb_transmission: (a: number, b: number) => number;
     readonly quantum_zero_point_energy: (a: number, b: number) => number;
+    readonly last_error_clear: () => void;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;
     readonly __wbindgen_exn_store: (a: number) => void;
     readonly __externref_table_alloc: () => number;
