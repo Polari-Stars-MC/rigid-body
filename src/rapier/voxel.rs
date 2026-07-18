@@ -21,7 +21,9 @@ struct VoxelGrid<'a> {
     size_x: usize,
     size_y: usize,
     size_z: usize,
-    voxel_size: f64,
+    voxel_size_x: f64,
+    voxel_size_y: f64,
+    voxel_size_z: f64,
     origin: Vec3,
 }
 
@@ -30,7 +32,9 @@ struct OwnedVoxelGrid {
     size_x: usize,
     size_y: usize,
     size_z: usize,
-    voxel_size: f64,
+    voxel_size_x: f64,
+    voxel_size_y: f64,
+    voxel_size_z: f64,
     origin: Vec3,
 }
 
@@ -41,7 +45,9 @@ impl OwnedVoxelGrid {
             size_x: self.size_x,
             size_y: self.size_y,
             size_z: self.size_z,
-            voxel_size: self.voxel_size,
+            voxel_size_x: self.voxel_size_x,
+            voxel_size_y: self.voxel_size_y,
+            voxel_size_z: self.voxel_size_z,
             origin: self.origin,
         }
     }
@@ -49,9 +55,10 @@ impl OwnedVoxelGrid {
 
 impl VoxelGrid<'_> {
     fn index(&self, x: usize, y: usize, z: usize) -> Option<usize> {
-        let plane = self.size_x.checked_mul(self.size_y)?;
-        let base = z.checked_mul(plane)?;
-        let row = y.checked_mul(self.size_x)?;
+        let plane = self.size_x.checked_mul(self.size_z)?;
+        let base = y.checked_mul(plane)?;
+        let row = z.checked_mul(self.size_x)?;
+
         base.checked_add(row)?.checked_add(x)
     }
 
@@ -77,9 +84,9 @@ impl VoxelGrid<'_> {
 
     fn cell_min(&self, x: usize, y: usize, z: usize) -> Vector {
         Vector::new(
-            self.origin.x + x as f64 * self.voxel_size,
-            self.origin.y + y as f64 * self.voxel_size,
-            self.origin.z + z as f64 * self.voxel_size,
+            self.origin.x + x as f64 * self.voxel_size_x,
+            self.origin.y + y as f64 * self.voxel_size_y,
+            self.origin.z + z as f64 * self.voxel_size_z,
         )
     }
 }
@@ -112,17 +119,17 @@ fn push_cuboid(
     max_y: usize,
     max_z: usize,
 ) {
-    let size_x = (max_x - x) as f64 * grid.voxel_size;
-    let size_y = (max_y - y) as f64 * grid.voxel_size;
-    let size_z = (max_z - z) as f64 * grid.voxel_size;
+    let size_x = (max_x - x) as f64 * grid.voxel_size_x;
+    let size_y = (max_y - y) as f64 * grid.voxel_size_y;
+    let size_z = (max_z - z) as f64 * grid.voxel_size_z;
     if size_x <= 0.0 || size_y <= 0.0 || size_z <= 0.0 {
         return;
     }
 
     let center = Vector::new(
-        grid.origin.x + (x as f64 + (max_x - x) as f64 * 0.5) * grid.voxel_size,
-        grid.origin.y + (y as f64 + (max_y - y) as f64 * 0.5) * grid.voxel_size,
-        grid.origin.z + (z as f64 + (max_z - z) as f64 * 0.5) * grid.voxel_size,
+        grid.origin.x + (x as f64 + (max_x - x) as f64 * 0.5) * grid.voxel_size_x,
+        grid.origin.y + (y as f64 + (max_y - y) as f64 * 0.5) * grid.voxel_size_y,
+        grid.origin.z + (z as f64 + (max_z - z) as f64 * 0.5) * grid.voxel_size_z,
     );
     parts.push((
         Pose::from_parts(center, Rotation::IDENTITY),
@@ -351,7 +358,9 @@ fn build_surface_mesh(grid: &VoxelGrid<'_>, solid_count: usize) -> Option<Collid
     let face_capacity = solid_count.saturating_mul(6);
     let mut vertices = Vec::with_capacity(face_capacity.saturating_mul(4).min(65_536));
     let mut indices = Vec::with_capacity(face_capacity.saturating_mul(2).min(32_768));
-    let s = grid.voxel_size;
+    let sx = grid.voxel_size_x;
+    let sy = grid.voxel_size_y;
+    let sz = grid.voxel_size_z;
 
     for z in 0..grid.size_z {
         for y in 0..grid.size_y {
@@ -361,7 +370,7 @@ fn build_surface_mesh(grid: &VoxelGrid<'_>, solid_count: usize) -> Option<Collid
                 }
 
                 let min = grid.cell_min(x, y, z);
-                let max = min + Vector::new(s, s, s);
+                let max = min + Vector::new(sx, sy, sz);
                 let x = x as isize;
                 let y = y as isize;
                 let z = z as isize;
@@ -526,11 +535,15 @@ fn ceil_to_usize(value: f64) -> Option<usize> {
     Some(value as usize)
 }
 
-fn build_aabb_voxel_grid(aabb: AabbDesc, voxel_size: f64) -> Option<OwnedVoxelGrid> {
+fn build_aabb_voxel_grid(aabb: AabbDesc, voxel_size_x: f64, voxel_size_y: f64, voxel_size_z: f64) -> Option<OwnedVoxelGrid> {
     if !vec3_finite(aabb.mins)
         || !vec3_finite(aabb.maxs)
-        || !voxel_size.is_finite()
-        || voxel_size <= 0.0
+        || !voxel_size_x.is_finite()
+        || voxel_size_x <= 0.0
+        || !voxel_size_y.is_finite()
+        || voxel_size_y <= 0.0
+        || !voxel_size_z.is_finite()
+        || voxel_size_z <= 0.0
         || aabb.mins.x >= aabb.maxs.x
         || aabb.mins.y >= aabb.maxs.y
         || aabb.mins.z >= aabb.maxs.z
@@ -538,9 +551,9 @@ fn build_aabb_voxel_grid(aabb: AabbDesc, voxel_size: f64) -> Option<OwnedVoxelGr
         return None;
     }
 
-    let size_x = ceil_to_usize((aabb.maxs.x - aabb.mins.x) / voxel_size)?;
-    let size_y = ceil_to_usize((aabb.maxs.y - aabb.mins.y) / voxel_size)?;
-    let size_z = ceil_to_usize((aabb.maxs.z - aabb.mins.z) / voxel_size)?;
+    let size_x = ceil_to_usize((aabb.maxs.x - aabb.mins.x) / voxel_size_x)?;
+    let size_y = ceil_to_usize((aabb.maxs.y - aabb.mins.y) / voxel_size_y)?;
+    let size_z = ceil_to_usize((aabb.maxs.z - aabb.mins.z) / voxel_size_z)?;
     if size_x == 0 || size_y == 0 || size_z == 0 {
         return None;
     }
@@ -554,7 +567,9 @@ fn build_aabb_voxel_grid(aabb: AabbDesc, voxel_size: f64) -> Option<OwnedVoxelGr
         size_x,
         size_y,
         size_z,
-        voxel_size,
+        voxel_size_x,
+        voxel_size_y,
+        voxel_size_z,
         origin: aabb.mins,
     })
 }
@@ -603,13 +618,13 @@ fn obb_world_aabb(obb: Obb, rotation: Rotation) -> Option<AabbDesc> {
     Some(AabbDesc { mins, maxs })
 }
 
-fn build_obb_voxel_grid(obb: Obb, voxel_size: f64) -> Option<OwnedVoxelGrid> {
-    if !voxel_size.is_finite() || voxel_size <= 0.0 {
+fn build_obb_voxel_grid(obb: Obb, voxel_size_x: f64, voxel_size_y: f64, voxel_size_z: f64) -> Option<OwnedVoxelGrid> {
+    if !voxel_size_x.is_finite() || voxel_size_x <= 0.0 || !voxel_size_y.is_finite() || voxel_size_y <= 0.0 || !voxel_size_z.is_finite() || voxel_size_z <= 0.0 {
         return None;
     }
     let rotation = quat_to_rapier(obb.rotation);
     let bounds = obb_world_aabb(obb, rotation)?;
-    let mut grid = build_aabb_voxel_grid(bounds, voxel_size)?;
+    let mut grid = build_aabb_voxel_grid(bounds, voxel_size_x, voxel_size_y, voxel_size_z)?;
     let inverse_rotation = rotation.inverse();
     let center = Vector::new(obb.center.x, obb.center.y, obb.center.z);
     let half = Vector::new(obb.half_extents.x, obb.half_extents.y, obb.half_extents.z);
@@ -619,9 +634,9 @@ fn build_obb_voxel_grid(obb: Obb, voxel_size: f64) -> Option<OwnedVoxelGrid> {
         for y in 0..grid.size_y {
             for x in 0..grid.size_x {
                 let world = Vector::new(
-                    grid.origin.x + (x as f64 + 0.5) * voxel_size,
-                    grid.origin.y + (y as f64 + 0.5) * voxel_size,
-                    grid.origin.z + (z as f64 + 0.5) * voxel_size,
+                    grid.origin.x + (x as f64 + 0.5) * voxel_size_x,
+                    grid.origin.y + (y as f64 + 0.5) * voxel_size_y,
+                    grid.origin.z + (z as f64 + 0.5) * voxel_size_z,
                 );
                 let local = inverse_rotation * (world - center);
                 let solid =
@@ -653,7 +668,9 @@ fn create_voxels_with_options(
     size_x: u32,
     size_y: u32,
     size_z: u32,
-    voxel_size: f64,
+    voxel_size_x: f64,
+    voxel_size_y: f64,
+    voxel_size_z: f64,
     origin: Vec3,
     options: VoxelColliderOptions,
 ) -> *mut ColliderBuilderHandle {
@@ -661,8 +678,12 @@ fn create_voxels_with_options(
         || size_x == 0
         || size_y == 0
         || size_z == 0
-        || !voxel_size.is_finite()
-        || voxel_size <= 0.0
+        || !voxel_size_x.is_finite()
+        || voxel_size_x <= 0.0
+        || !voxel_size_y.is_finite()
+        || voxel_size_y <= 0.0
+        || !voxel_size_z.is_finite()
+        || voxel_size_z <= 0.0
         || !origin.x.is_finite()
         || !origin.y.is_finite()
         || !origin.z.is_finite()
@@ -686,7 +707,9 @@ fn create_voxels_with_options(
         size_x: size_x as usize,
         size_y: size_y as usize,
         size_z: size_z as usize,
-        voxel_size,
+        voxel_size_x,
+        voxel_size_y,
+        voxel_size_z,
         origin,
     };
 
@@ -703,11 +726,13 @@ pub extern "C" fn collider_builder_create_voxels(
     size_x: u32,
     size_y: u32,
     size_z: u32,
-    voxel_size: f64,
+    voxel_size_x: f64,
+    voxel_size_y: f64,
+    voxel_size_z: f64,
     origin: Vec3,
     options: VoxelColliderOptions,
 ) -> *mut ColliderBuilderHandle {
-    create_voxels_with_options(voxels, size_x, size_y, size_z, voxel_size, origin, options)
+    create_voxels_with_options(voxels, size_x, size_y, size_z, voxel_size_x, voxel_size_y, voxel_size_z, origin, options)
 }
 
 #[unsafe(no_mangle)]
@@ -716,7 +741,9 @@ pub extern "C" fn collider_builder_create_voxels_auto(
     size_x: u32,
     size_y: u32,
     size_z: u32,
-    voxel_size: f64,
+    voxel_size_x: f64,
+    voxel_size_y: f64,
+    voxel_size_z: f64,
     origin: Vec3,
     dynamic_body: crate::rapier::ffi::Bool,
 ) -> *mut ColliderBuilderHandle {
@@ -725,7 +752,9 @@ pub extern "C" fn collider_builder_create_voxels_auto(
         size_x,
         size_y,
         size_z,
-        voxel_size,
+        voxel_size_x,
+        voxel_size_y,
+        voxel_size_z,
         origin,
         VoxelColliderOptions {
             dynamic_body,
@@ -740,7 +769,9 @@ pub extern "C" fn voxel_build_stats(
     size_x: u32,
     size_y: u32,
     size_z: u32,
-    voxel_size: f64,
+    voxel_size_x: f64,
+    voxel_size_y: f64,
+    voxel_size_z: f64,
     origin: Vec3,
     options: VoxelColliderOptions,
 ) -> VoxelBuildStats {
@@ -748,8 +779,12 @@ pub extern "C" fn voxel_build_stats(
         || size_x == 0
         || size_y == 0
         || size_z == 0
-        || !voxel_size.is_finite()
-        || voxel_size <= 0.0
+        || !voxel_size_x.is_finite()
+        || voxel_size_x <= 0.0
+        || !voxel_size_y.is_finite()
+        || voxel_size_y <= 0.0
+        || !voxel_size_z.is_finite()
+        || voxel_size_z <= 0.0
         || !origin.x.is_finite()
         || !origin.y.is_finite()
         || !origin.z.is_finite()
@@ -772,7 +807,9 @@ pub extern "C" fn voxel_build_stats(
         size_x: size_x as usize,
         size_y: size_y as usize,
         size_z: size_z as usize,
-        voxel_size,
+        voxel_size_x,
+        voxel_size_y,
+        voxel_size_z,
         origin,
     };
     compute_voxel_build_stats(&grid, options)
@@ -781,10 +818,12 @@ pub extern "C" fn voxel_build_stats(
 #[unsafe(no_mangle)]
 pub extern "C" fn voxel_aabb_build_stats(
     aabb: AabbDesc,
-    voxel_size: f64,
+    voxel_size_x: f64,
+    voxel_size_y: f64,
+    voxel_size_z: f64,
     options: VoxelColliderOptions,
 ) -> VoxelBuildStats {
-    let Some(grid) = build_aabb_voxel_grid(aabb, voxel_size) else {
+    let Some(grid) = build_aabb_voxel_grid(aabb, voxel_size_x, voxel_size_y, voxel_size_z) else {
         return VoxelBuildStats::default();
     };
     compute_voxel_build_stats(&grid.as_grid(), options)
@@ -793,10 +832,12 @@ pub extern "C" fn voxel_aabb_build_stats(
 #[unsafe(no_mangle)]
 pub extern "C" fn voxel_obb_build_stats(
     obb: Obb,
-    voxel_size: f64,
+    voxel_size_x: f64,
+    voxel_size_y: f64,
+    voxel_size_z: f64,
     options: VoxelColliderOptions,
 ) -> VoxelBuildStats {
-    let Some(grid) = build_obb_voxel_grid(obb, voxel_size) else {
+    let Some(grid) = build_obb_voxel_grid(obb, voxel_size_x, voxel_size_y, voxel_size_z) else {
         return VoxelBuildStats::default();
     };
     compute_voxel_build_stats(&grid.as_grid(), options)
@@ -805,36 +846,42 @@ pub extern "C" fn voxel_obb_build_stats(
 #[unsafe(no_mangle)]
 pub extern "C" fn voxel_aabb_build_stats_out(
     aabb: AabbDesc,
-    voxel_size: f64,
+    voxel_size_x: f64,
+    voxel_size_y: f64,
+    voxel_size_z: f64,
     options: VoxelColliderOptions,
     out_stats: *mut VoxelBuildStats,
 ) {
     let Some(out_stats) = (unsafe { out_stats.as_mut() }) else {
         return;
     };
-    *out_stats = voxel_aabb_build_stats(aabb, voxel_size, options);
+    *out_stats = voxel_aabb_build_stats(aabb, voxel_size_x, voxel_size_y, voxel_size_z, options);
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn voxel_obb_build_stats_out(
     obb: Obb,
-    voxel_size: f64,
+    voxel_size_x: f64,
+    voxel_size_y: f64,
+    voxel_size_z: f64,
     options: VoxelColliderOptions,
     out_stats: *mut VoxelBuildStats,
 ) {
     let Some(out_stats) = (unsafe { out_stats.as_mut() }) else {
         return;
     };
-    *out_stats = voxel_obb_build_stats(obb, voxel_size, options);
+    *out_stats = voxel_obb_build_stats(obb, voxel_size_x, voxel_size_y, voxel_size_z, options);
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn collider_builder_create_voxel_aabb(
     aabb: AabbDesc,
-    voxel_size: f64,
+    voxel_size_x: f64,
+    voxel_size_y: f64,
+    voxel_size_z: f64,
     options: VoxelColliderOptions,
 ) -> *mut ColliderBuilderHandle {
-    let Some(grid) = build_aabb_voxel_grid(aabb, voxel_size) else {
+    let Some(grid) = build_aabb_voxel_grid(aabb, voxel_size_x, voxel_size_y, voxel_size_z) else {
         return std::ptr::null_mut();
     };
     builder_from_owned_grid(grid, options)
@@ -843,12 +890,16 @@ pub extern "C" fn collider_builder_create_voxel_aabb(
 #[unsafe(no_mangle)]
 pub extern "C" fn collider_builder_create_voxel_aabb_auto(
     aabb: AabbDesc,
-    voxel_size: f64,
+    voxel_size_x: f64,
+    voxel_size_y: f64,
+    voxel_size_z: f64,
     dynamic_body: crate::rapier::ffi::Bool,
 ) -> *mut ColliderBuilderHandle {
     collider_builder_create_voxel_aabb(
         aabb,
-        voxel_size,
+        voxel_size_x,
+        voxel_size_y,
+        voxel_size_z,
         VoxelColliderOptions {
             dynamic_body,
             ..VoxelColliderOptions::default()
@@ -859,10 +910,12 @@ pub extern "C" fn collider_builder_create_voxel_aabb_auto(
 #[unsafe(no_mangle)]
 pub extern "C" fn collider_builder_create_voxel_obb(
     obb: Obb,
-    voxel_size: f64,
+    voxel_size_x: f64,
+    voxel_size_y: f64,
+    voxel_size_z: f64,
     options: VoxelColliderOptions,
 ) -> *mut ColliderBuilderHandle {
-    let Some(grid) = build_obb_voxel_grid(obb, voxel_size) else {
+    let Some(grid) = build_obb_voxel_grid(obb, voxel_size_x, voxel_size_y, voxel_size_z) else {
         return std::ptr::null_mut();
     };
     builder_from_owned_grid(grid, options)
@@ -871,12 +924,16 @@ pub extern "C" fn collider_builder_create_voxel_obb(
 #[unsafe(no_mangle)]
 pub extern "C" fn collider_builder_create_voxel_obb_auto(
     obb: Obb,
-    voxel_size: f64,
+    voxel_size_x: f64,
+    voxel_size_y: f64,
+    voxel_size_z: f64,
     dynamic_body: crate::rapier::ffi::Bool,
 ) -> *mut ColliderBuilderHandle {
     collider_builder_create_voxel_obb(
         obb,
-        voxel_size,
+        voxel_size_x, 
+        voxel_size_y, 
+        voxel_size_z,
         VoxelColliderOptions {
             dynamic_body,
             ..VoxelColliderOptions::default()
@@ -972,7 +1029,9 @@ pub extern "C" fn query_intersect_voxel_obb_count(
 pub extern "C" fn world_insert_static_voxel_aabb(
     world: *mut WorldHandle,
     aabb: AabbDesc,
-    voxel_size: f64,
+    voxel_size_x: f64,
+    voxel_size_y: f64,
+    voxel_size_z: f64,
     options: VoxelColliderOptions,
     friction: f64,
     restitution: f64,
@@ -989,7 +1048,7 @@ pub extern "C" fn world_insert_static_voxel_aabb(
     if body_handle == 0 {
         return 0;
     }
-    let builder = collider_builder_create_voxel_aabb(aabb, voxel_size, options);
+    let builder = collider_builder_create_voxel_aabb(aabb,  voxel_size_x, voxel_size_y, voxel_size_z, options);
     if builder.is_null() {
         crate::rapier::rigid_body::world_remove_rigid_body(world, body_handle, Bool::TRUE);
         return 0;
@@ -1014,7 +1073,9 @@ pub extern "C" fn world_insert_static_voxel_aabb(
 pub extern "C" fn world_insert_dynamic_voxel_obb(
     world: *mut WorldHandle,
     obb: Obb,
-    voxel_size: f64,
+    voxel_size_x: f64,
+    voxel_size_y: f64,
+    voxel_size_z: f64,
     mut options: VoxelColliderOptions,
     density: f64,
     friction: f64,
@@ -1044,7 +1105,9 @@ pub extern "C" fn world_insert_dynamic_voxel_obb(
                 w: 1.0,
             },
         },
-        voxel_size,
+        voxel_size_x, 
+        voxel_size_y, 
+        voxel_size_z,
         options,
     );
     if builder.is_null() {
@@ -1096,7 +1159,9 @@ mod tests {
             size_x: 2,
             size_y: 2,
             size_z: 2,
-            voxel_size: 1.0,
+            voxel_size_x: 1.0,
+            voxel_size_y: 1.0,
+            voxel_size_z: 1.0,
             origin: Vec3::default(),
         };
 
@@ -1111,7 +1176,9 @@ mod tests {
             size_x: 2,
             size_y: 2,
             size_z: 2,
-            voxel_size: 1.0,
+            voxel_size_x: 1.0,
+            voxel_size_y: 1.0,
+            voxel_size_z: 1.0,
             origin: Vec3::default(),
         };
 
@@ -1135,7 +1202,7 @@ mod tests {
             },
         };
         let aabb_builder =
-            collider_builder_create_voxel_aabb(aabb, 0.5, options(VoxelColliderMode::Auto));
+            collider_builder_create_voxel_aabb(aabb, 0.5, 0.5, 0.5, options(VoxelColliderMode::Auto));
         assert!(!aabb_builder.is_null());
         crate::rapier::collider::collider_builder_destroy(aabb_builder);
 
@@ -1154,7 +1221,7 @@ mod tests {
             },
         };
         let obb_builder =
-            collider_builder_create_voxel_obb(obb, 0.5, options(VoxelColliderMode::Auto));
+            collider_builder_create_voxel_obb(obb, 0.5, 0.5, 0.5, options(VoxelColliderMode::Auto));
         assert!(!obb_builder.is_null());
         crate::rapier::collider::collider_builder_destroy(obb_builder);
     }

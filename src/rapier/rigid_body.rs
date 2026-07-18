@@ -540,6 +540,21 @@ pub extern "C" fn rigid_body_set_pose_flag(
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn rigid_body_get_mass(
+    world: *mut WorldHandle,
+    handle: RigidBodyHandleRaw,
+) -> f64 {
+    let Some(world) = (unsafe { world.as_mut() }) else {
+        return 0.0;
+    };
+    let Some(body) = world.inner.bodies.get_mut(unpack_rigid_body_handle(handle)) else {
+        return 0.0;
+    };
+
+    body.mass()
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn rigid_body_get_force(
     world: *const WorldHandle,
     handle: RigidBodyHandleRaw,

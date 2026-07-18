@@ -4249,6 +4249,8 @@ uint8_t rigid_body_set_pose_flag(struct WorldHandle *world,
                                  struct Quat rotation,
                                  struct Bool wake_up);
 
+double rigid_body_get_mass(struct WorldHandle *world, RigidBodyHandleRaw handle);
+
 struct Vec3 rigid_body_get_force(const struct WorldHandle *world, RigidBodyHandleRaw handle);
 
 struct Vec3 rigid_body_get_linvel(const struct WorldHandle *world, RigidBodyHandleRaw handle);
@@ -5240,7 +5242,9 @@ struct ColliderBuilderHandle *collider_builder_create_voxels(const uint8_t *voxe
                                                              uint32_t size_x,
                                                              uint32_t size_y,
                                                              uint32_t size_z,
-                                                             double voxel_size,
+                                                             double voxel_size_x,
+                                                             double voxel_size_y,
+                                                             double voxel_size_z,
                                                              struct Vec3 origin,
                                                              struct VoxelColliderOptions options);
 
@@ -5248,7 +5252,9 @@ struct ColliderBuilderHandle *collider_builder_create_voxels_auto(const uint8_t 
                                                                   uint32_t size_x,
                                                                   uint32_t size_y,
                                                                   uint32_t size_z,
-                                                                  double voxel_size,
+                                                                  double voxel_size_x,
+                                                                  double voxel_size_y,
+                                                                  double voxel_size_z,
                                                                   struct Vec3 origin,
                                                                   struct Bool dynamic_body);
 
@@ -5256,42 +5262,60 @@ struct VoxelBuildStats voxel_build_stats(const uint8_t *voxels,
                                          uint32_t size_x,
                                          uint32_t size_y,
                                          uint32_t size_z,
-                                         double voxel_size,
+                                         double voxel_size_x,
+                                         double voxel_size_y,
+                                         double voxel_size_z,
                                          struct Vec3 origin,
                                          struct VoxelColliderOptions options);
 
 struct VoxelBuildStats voxel_aabb_build_stats(struct AabbDesc aabb,
-                                              double voxel_size,
+                                              double voxel_size_x,
+                                              double voxel_size_y,
+                                              double voxel_size_z,
                                               struct VoxelColliderOptions options);
 
 struct VoxelBuildStats voxel_obb_build_stats(struct Obb obb,
-                                             double voxel_size,
+                                             double voxel_size_x,
+                                             double voxel_size_y,
+                                             double voxel_size_z,
                                              struct VoxelColliderOptions options);
 
 void voxel_aabb_build_stats_out(struct AabbDesc aabb,
-                                double voxel_size,
+                                double voxel_size_x,
+                                double voxel_size_y,
+                                double voxel_size_z,
                                 struct VoxelColliderOptions options,
                                 struct VoxelBuildStats *out_stats);
 
 void voxel_obb_build_stats_out(struct Obb obb,
-                               double voxel_size,
+                               double voxel_size_x,
+                               double voxel_size_y,
+                               double voxel_size_z,
                                struct VoxelColliderOptions options,
                                struct VoxelBuildStats *out_stats);
 
 struct ColliderBuilderHandle *collider_builder_create_voxel_aabb(struct AabbDesc aabb,
-                                                                 double voxel_size,
+                                                                 double voxel_size_x,
+                                                                 double voxel_size_y,
+                                                                 double voxel_size_z,
                                                                  struct VoxelColliderOptions options);
 
 struct ColliderBuilderHandle *collider_builder_create_voxel_aabb_auto(struct AabbDesc aabb,
-                                                                      double voxel_size,
+                                                                      double voxel_size_x,
+                                                                      double voxel_size_y,
+                                                                      double voxel_size_z,
                                                                       struct Bool dynamic_body);
 
 struct ColliderBuilderHandle *collider_builder_create_voxel_obb(struct Obb obb,
-                                                                double voxel_size,
+                                                                double voxel_size_x,
+                                                                double voxel_size_y,
+                                                                double voxel_size_z,
                                                                 struct VoxelColliderOptions options);
 
 struct ColliderBuilderHandle *collider_builder_create_voxel_obb_auto(struct Obb obb,
-                                                                     double voxel_size,
+                                                                     double voxel_size_x,
+                                                                     double voxel_size_y,
+                                                                     double voxel_size_z,
                                                                      struct Bool dynamic_body);
 
 uint32_t query_intersect_voxel_aabb(const struct WorldHandle *world,
@@ -5316,14 +5340,18 @@ uint32_t query_intersect_voxel_obb_count(const struct WorldHandle *world,
 
 RigidBodyHandleRaw world_insert_static_voxel_aabb(struct WorldHandle *world,
                                                   struct AabbDesc aabb,
-                                                  double voxel_size,
+                                                  double voxel_size_x,
+                                                  double voxel_size_y,
+                                                  double voxel_size_z,
                                                   struct VoxelColliderOptions options,
                                                   double friction,
                                                   double restitution);
 
 RigidBodyHandleRaw world_insert_dynamic_voxel_obb(struct WorldHandle *world,
                                                   struct Obb obb,
-                                                  double voxel_size,
+                                                  double voxel_size_x,
+                                                  double voxel_size_y,
+                                                  double voxel_size_z,
                                                   struct VoxelColliderOptions options,
                                                   double density,
                                                   double friction,
