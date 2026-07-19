@@ -1,4 +1,4 @@
-﻿use rapier3d::prelude::Vector;
+use rapier3d::prelude::Vector;
 
 use crate::rapier::error::{
     ERR_CAPACITY, ERR_INVALID_ARGUMENT, ERR_NULL_POINTER, clear_error, set_error,
@@ -18,56 +18,6 @@ fn aero_surface_valid(surface: AeroSurface) -> bool {
         && surface.area > 0.0
         && surface.drag_coefficient >= 0.0
         && surface.lift_coefficient >= 0.0
-}
-
-fn compute_surface_force(
-    surface: AeroSurface,
-    body_linvel: Vector,
-    body_angvel: Vector,
-    body_center: Vector,
-    wind_velocity: Vector,
-    air_density: f64,
-) -> Option<(Vector, Vector)> {
-    if !aero_surface_valid(surface) || !air_density.is_finite() || air_density < 0.0 {
-        return None;
-    }
-
-    let point = vec3_to_rapier(surface.point);
-    let normal = vec3_to_rapier(surface.normal);
-    #[allow(clippy::question_mark)]
-    let Some(unit_normal) = normal.try_normalize() else {
-        return None;
-    };
-
-    let arm = point - body_center;
-    let point_velocity = body_linvel + body_angvel.cross(arm);
-    let relative_air = wind_velocity - point_velocity;
-    let speed_squared = relative_air.length_squared();
-    if speed_squared <= 1.0e-18 {
-        return None;
-    }
-
-    let speed = speed_squared.sqrt();
-    let flow_dir = relative_air / speed;
-    let exposure = flow_dir.dot(unit_normal).max(0.0);
-    if exposure <= 0.0 {
-        return None;
-    }
-
-    let dynamic_pressure = 0.5 * air_density * speed_squared;
-    let effective_area = surface.area * exposure;
-    let drag = flow_dir * (dynamic_pressure * effective_area * surface.drag_coefficient);
-    let lift_axis = flow_dir.cross(unit_normal);
-    let lift = lift_axis
-        .try_normalize()
-        .map(|axis| {
-            let lift_dir = axis.cross(flow_dir);
-            lift_dir * (dynamic_pressure * effective_area * surface.lift_coefficient)
-        })
-        .unwrap_or(Vector::ZERO);
-    let force = drag + lift;
-
-    Some((force, arm.cross(force)))
 }
 
 fn voxel_index(size_x: usize, size_y: usize, x: usize, y: usize, z: usize) -> Option<usize> {
@@ -150,16 +100,15 @@ pub extern "C" fn aero_apply_surfaces(
         return Bool::FALSE;
     };
 
-    let body_linvel = body.linvel();
-    let body_angvel = body.angvel();
-    let body_center = body.center_of_mass();
-    let wind_velocity = vec3_to_rapier(wind_velocity);
+    let body_linvel = vec3_from_rapier(body.linvel());
+    let body_angvel = vec3_from_rapier(body.angvel());
+    let body_center = vec3_from_rapier(body.center_of_mass());
     let mut total_force = KahanVec3::default();
     let mut total_torque = KahanVec3::default();
     let mut active_surface_count = 0u32;
 
     for surface in surfaces {
-        let Some((force, torque)) = compute_surface_force(
+        let Some((force, torque)) = mps_formula::aerodynamics::compute_surface_force(
             *surface,
             body_linvel,
             body_angvel,
@@ -170,9 +119,9 @@ pub extern "C" fn aero_apply_surfaces(
             continue;
         };
 
-        body.add_force_at_point(force, vec3_to_rapier(surface.point), wake_up.0 != 0);
-        total_force.add(vec3_from_rapier(force));
-        total_torque.add(vec3_from_rapier(torque));
+        body.add_force_at_point(vec3_to_rapier(force), vec3_to_rapier(surface.point), wake_up.0 != 0);
+        total_force.add(force);
+        total_torque.add(torque);
         active_surface_count += 1;
     }
 
@@ -257,9 +206,9 @@ pub extern "C" fn aero_apply_voxel_grid(
     };
 
     let pose = *body.position();
-    let body_linvel = body.linvel();
-    let body_angvel = body.angvel();
-    let body_center = body.center_of_mass();
+    let body_linvel = vec3_from_rapier(body.linvel());
+    let body_angvel = vec3_from_rapier(body.angvel());
+    let body_center = vec3_from_rapier(body.center_of_mass());
     let wind_velocity = vec3_to_rapier(wind_velocity);
     let local_origin = vec3_to_rapier(local_origin);
     let face_area = voxel_size * voxel_size;
@@ -322,20 +271,20 @@ pub extern "C" fn aero_apply_voxel_grid(
                         drag_coefficient,
                         lift_coefficient,
                     };
-                    let Some((force, torque)) = compute_surface_force(
+                    let Some((force, torque)) = mps_formula::aerodynamics::compute_surface_force(
                         surface,
                         body_linvel,
                         body_angvel,
                         body_center,
-                        wind_velocity,
+                        vec3_from_rapier(wind_velocity),
                         air_density,
                     ) else {
                         continue;
                     };
 
-                    body.add_force_at_point(force, world_point, wake_up.0 != 0);
-                    total_force.add(vec3_from_rapier(force));
-                    total_torque.add(vec3_from_rapier(torque));
+                    body.add_force_at_point(vec3_to_rapier(force), world_point, wake_up.0 != 0);
+                    total_force.add(force);
+                    total_torque.add(torque);
                     active_surface_count += 1;
                 }
             }
@@ -434,32 +383,28 @@ pub extern "C" fn aero_estimate_surface_force(
         return Bool::FALSE;
     }
 
-    let Some((force, torque)) = compute_surface_force(
-        surface,
-        vec3_to_rapier(body_linvel),
-        vec3_to_rapier(body_angvel),
-        vec3_to_rapier(body_center),
-        vec3_to_rapier(wind_velocity),
+    match mps_formula::aerodynamics::estimate_surface_force(
+        body_linvel,
+        body_angvel,
+        body_center,
+        wind_velocity,
         air_density,
-    ) else {
-        if let Some(out_report) = unsafe { out_report.as_mut() } {
-            *out_report = AeroForceReport {
-                surface_count: 1,
-                ..AeroForceReport::default()
-            };
+        surface,
+    ) {
+        Some(report) => {
+            if let Some(out_report) = unsafe { out_report.as_mut() } {
+                *out_report = report;
+            }
+            Bool::TRUE
         }
-        return Bool::TRUE;
-    };
-
-    if let Some(out_report) = unsafe { out_report.as_mut() } {
-        *out_report = AeroForceReport {
-            total_force: vec3_from_rapier(force),
-            total_torque: vec3_from_rapier(torque),
-            surface_count: 1,
-            active_surface_count: 1,
-        };
+        None => {
+            if let Some(out_report) = unsafe { out_report.as_mut() } {
+                *out_report = AeroForceReport {
+                    surface_count: 1,
+                    ..AeroForceReport::default()
+                };
+            }
+            Bool::TRUE
+        }
     }
-    Bool::TRUE
 }
-
-
