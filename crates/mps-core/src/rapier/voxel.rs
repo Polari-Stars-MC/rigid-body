@@ -1,4 +1,4 @@
-use std::slice;
+﻿use std::slice;
 
 use rayon::prelude::*;
 
@@ -16,15 +16,15 @@ const MAX_COMPOUND_PARTS: usize = 100_000;
 const MAX_SURFACE_VERTICES: usize = 1_000_000;
 const MAX_SURFACE_TRIANGLES: usize = 500_000;
 
-struct VoxelGrid<'a> {
-    voxels: &'a [u8],
-    size_x: usize,
-    size_y: usize,
-    size_z: usize,
-    voxel_size_x: f64,
-    voxel_size_y: f64,
-    voxel_size_z: f64,
-    origin: Vec3,
+pub struct VoxelGrid<'a> {
+    pub voxels: &'a [u8],
+    pub size_x: usize,
+    pub size_y: usize,
+    pub size_z: usize,
+    pub voxel_size_x: f64,
+    pub voxel_size_y: f64,
+    pub voxel_size_z: f64,
+    pub origin: Vec3,
 }
 
 struct OwnedVoxelGrid {
@@ -458,7 +458,7 @@ fn build_surface_mesh(grid: &VoxelGrid<'_>, solid_count: usize) -> Option<Collid
     ColliderBuilder::trimesh(vertices, indices).ok()
 }
 
-fn build_voxel_collider(
+pub fn build_voxel_collider(
     grid: &VoxelGrid<'_>,
     options: VoxelColliderOptions,
 ) -> Option<ColliderBuilder> {
@@ -1138,91 +1138,8 @@ pub extern "C" fn world_insert_dynamic_voxel_obb(
     body_handle
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::rapier::ffi::{Bool, Quat};
 
-    fn options(mode: VoxelColliderMode) -> VoxelColliderOptions {
-        VoxelColliderOptions {
-            mode: mode as u32,
-            dynamic_body: Bool::FALSE,
-            small_voxel_limit: 128,
-            mesh_voxel_limit: 20_000,
-        }
-    }
 
-    #[test]
-    fn empty_voxels_build_no_collider() {
-        let grid = VoxelGrid {
-            voxels: &[0; 8],
-            size_x: 2,
-            size_y: 2,
-            size_z: 2,
-            voxel_size_x: 1.0,
-            voxel_size_y: 1.0,
-            voxel_size_z: 1.0,
-            origin: Vec3::default(),
-        };
 
-        assert!(build_voxel_collider(&grid, options(VoxelColliderMode::Auto)).is_none());
-    }
 
-    #[test]
-    fn solid_voxels_build_with_each_mode() {
-        let voxels = [1; 8];
-        let grid = VoxelGrid {
-            voxels: &voxels,
-            size_x: 2,
-            size_y: 2,
-            size_z: 2,
-            voxel_size_x: 1.0,
-            voxel_size_y: 1.0,
-            voxel_size_z: 1.0,
-            origin: Vec3::default(),
-        };
 
-        assert!(build_voxel_collider(&grid, options(VoxelColliderMode::Cuboids)).is_some());
-        assert!(build_voxel_collider(&grid, options(VoxelColliderMode::GreedyCuboids)).is_some());
-        assert!(build_voxel_collider(&grid, options(VoxelColliderMode::SurfaceMesh)).is_some());
-    }
-
-    #[test]
-    fn voxel_aabb_and_obb_build() {
-        let aabb = AabbDesc {
-            mins: Vec3 {
-                x: 0.0,
-                y: 0.0,
-                z: 0.0,
-            },
-            maxs: Vec3 {
-                x: 2.0,
-                y: 1.0,
-                z: 1.0,
-            },
-        };
-        let aabb_builder =
-            collider_builder_create_voxel_aabb(aabb, 0.5, 0.5, 0.5, options(VoxelColliderMode::Auto));
-        assert!(!aabb_builder.is_null());
-        crate::rapier::collider::collider_builder_destroy(aabb_builder);
-
-        let obb = Obb {
-            center: Vec3::default(),
-            half_extents: Vec3 {
-                x: 1.0,
-                y: 0.5,
-                z: 0.5,
-            },
-            rotation: Quat {
-                i: 0.0,
-                j: 0.0,
-                k: 0.0,
-                w: 1.0,
-            },
-        };
-        let obb_builder =
-            collider_builder_create_voxel_obb(obb, 0.5, 0.5, 0.5, options(VoxelColliderMode::Auto));
-        assert!(!obb_builder.is_null());
-        crate::rapier::collider::collider_builder_destroy(obb_builder);
-    }
-}

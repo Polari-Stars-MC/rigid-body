@@ -3,7 +3,7 @@ pub type ColliderHandleRaw = u64;
 pub type ImpulseJointHandleRaw = u64;
 
 pub struct WorldHandle {
-    pub(crate) inner: crate::rapier::world::PhysicsWorld,
+    pub inner: crate::rapier::world::PhysicsWorld,
 }
 
 #[cfg(feature = "anvilkit-bridge")]

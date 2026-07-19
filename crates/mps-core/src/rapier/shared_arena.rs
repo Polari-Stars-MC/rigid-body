@@ -1,4 +1,4 @@
-//! Shared-memory physics arena — zero-JNI data access from Java.
+﻿//! Shared-memory physics arena — zero-JNI data access from Java.
 //!
 //! ## Motivation
 //!
@@ -174,10 +174,10 @@ use crate::rapier::forces::ForceLawType;
 // ---------------------------------------------------------------------------
 
 /// Magic number identifying a valid arena: "MPS_AREN"
-const ARENA_MAGIC: u64 = 0x4D50535F4152454E;
+pub const ARENA_MAGIC: u64 = 0x4D50535F4152454E;
 
 /// Current arena layout version — increment when layout changes
-const ARENA_VERSION: u32 = 1;
+pub const ARENA_VERSION: u32 = 1;
 
 /// Arena flags
 const FLAG_DIRTY_BODIES: u32 = 1 << 0;
@@ -185,13 +185,13 @@ const FLAG_DIRTY_EVENTS: u32 = 1 << 1;
 const FLAG_STEP_IN_PROGRESS: u32 = 1 << 2;
 
 /// Strides (must match Java side exactly)
-const BODY_SLOT_STRIDE: u32 = 96;
-const COLLIDER_SLOT_STRIDE: u32 = 80;
-const CMD_SLOT_STRIDE: u32 = 32;
-const EVENT_SLOT_STRIDE: u32 = 64;
+pub const BODY_SLOT_STRIDE: u32 = 96;
+pub const COLLIDER_SLOT_STRIDE: u32 = 80;
+pub const CMD_SLOT_STRIDE: u32 = 32;
+pub const EVENT_SLOT_STRIDE: u32 = 64;
 
 /// Header size in bytes
-const HEADER_SIZE: usize = 128;
+pub const HEADER_SIZE: usize = 128;
 
 /// Default arena sizes
 const DEFAULT_MAX_BODIES: u32 = 1024;
@@ -364,7 +364,7 @@ impl SharedPhysicsArena {
     // Header accessors
     // -----------------------------------------------------------------------
 
-    fn header_u32(&self, offset: usize) -> u32 {
+    pub fn header_u32(&self, offset: usize) -> u32 {
         unsafe { (self.ptr.add(offset) as *const u32).read_unaligned() }
     }
 
@@ -372,7 +372,7 @@ impl SharedPhysicsArena {
         unsafe { (self.ptr.add(offset) as *mut u32).write_unaligned(value); }
     }
 
-    fn header_u64(&self, offset: usize) -> u64 {
+    pub fn header_u64(&self, offset: usize) -> u64 {
         unsafe { (self.ptr.add(offset) as *const u64).read_unaligned() }
     }
 
@@ -381,7 +381,7 @@ impl SharedPhysicsArena {
     // -----------------------------------------------------------------------
 
     /// Get pointer to a body slot.
-    fn body_slot_ptr(&self, index: u32) -> *mut u8 {
+    pub fn body_slot_ptr(&self, index: u32) -> *mut u8 {
         unsafe {
             self.ptr.add(
                 self.body_slots_offset + index as usize * BODY_SLOT_STRIDE as usize,
@@ -938,70 +938,17 @@ impl Drop for SharedPhysicsArena {
 // Tests
 // ---------------------------------------------------------------------------
 
-#[cfg(test)]
-mod tests {
-    use super::*;
 
-    #[test]
-    fn arena_create_and_drop() {
-        let arena = SharedPhysicsArena::new(16, 32, 64, 128);
-        assert!(!arena.as_ptr().is_null());
-        let expected_size = HEADER_SIZE
-            + 16 * BODY_SLOT_STRIDE as usize
-            + 32 * COLLIDER_SLOT_STRIDE as usize
-            + 16 * 8 // body_handle_map
-            + 32 * 32 // force_report
-            + 128 * CMD_SLOT_STRIDE as usize
-            + 64 * EVENT_SLOT_STRIDE as usize;
-        assert_eq!(arena.size(), expected_size,
-            "expected {} got {}", expected_size, arena.size());
 
-        // Check header magic
-        let magic = arena.header_u64(0);
-        assert_eq!(magic, ARENA_MAGIC);
 
-        let version = arena.header_u32(8);
-        assert_eq!(version, ARENA_VERSION);
-    }
 
-    #[test]
-    fn body_flush_and_readback() {
-        let arena = SharedPhysicsArena::new(8, 0, 0, 0);
 
-        arena.flush_body(0, 1.0, 2.0, 3.0, 0.1, 0.2, 0.3, 0.01, 0.02, 0.03, 0, 0, 42);
 
-        // Read back from the slot
-        let slot = arena.body_slot_ptr(0);
-        unsafe {
-            let generation_val = (slot as *const u64).read_unaligned();
-            assert!(generation_val > 0, "generation should be non-zero");
-            assert_eq!(generation_val & 1, 0, "generation should be even (stable)");
 
-            let pos_x = (slot.add(8) as *const f64).read_unaligned();
-            assert!((pos_x - 1.0).abs() < 1e-10);
-        }
-    }
 
-    #[test]
-    fn command_drain_empty() {
-        let arena = SharedPhysicsArena::new(8, 0, 0, 16);
-        let cmds = arena.drain_commands();
-        assert!(cmds.is_empty());
-    }
 
-    #[test]
-    fn event_push_and_reset() {
-        let arena = SharedPhysicsArena::new(0, 0, 8, 0);
 
-        arena.push_collision_event(true, 1, 2, false, false);
-        arena.push_collision_event(false, 3, 4, true, true);
 
-        // Event count in header should be 2
-        let count = arena.header_u32(40);
-        assert_eq!(count, 2);
 
-        arena.reset_event_ring();
-        let count = arena.header_u32(40);
-        assert_eq!(count, 0);
-    }
-}
+
+

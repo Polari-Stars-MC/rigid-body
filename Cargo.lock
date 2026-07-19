@@ -2048,7 +2048,6 @@ dependencies = [
  "bevy_ecs 0.19.0",
  "cbindgen",
  "hashbrown 0.17.1",
- "jni 0.21.1",
  "parking_lot",
  "rapier3d-f64",
  "rayon",
@@ -2069,6 +2068,16 @@ dependencies = [
  "jni 0.21.1",
  "mps-core",
  "mps-ffm",
+]
+
+[[package]]
+name = "mps-test"
+version = "0.1.4"
+dependencies = [
+ "hashbrown 0.17.1",
+ "mps-core",
+ "rapier3d-f64",
+ "smallvec",
 ]
 
 [[package]]

@@ -1,4 +1,4 @@
-use std::slice;
+﻿use std::slice;
 
 use rapier3d::prelude::{ColliderBuilder, Vector};
 use smallvec::{SmallVec, smallvec};
@@ -16,7 +16,7 @@ struct Slab {
     max: f64,
 }
 
-trait DirectionHull {
+pub trait DirectionHull {
     fn directions(&self) -> &[Vector];
 
     fn build(&self, points: &[Vector]) -> Option<ColliderBuilder> {
@@ -24,8 +24,8 @@ trait DirectionHull {
     }
 }
 
-struct KdopHull {
-    directions: SmallVec<[Vector; 13]>,
+pub struct KdopHull {
+    pub directions: SmallVec<[Vector; 13]>,
 }
 
 impl DirectionHull for KdopHull {
@@ -34,8 +34,8 @@ impl DirectionHull for KdopHull {
     }
 }
 
-struct FdhHull<'a> {
-    directions: &'a [Vector],
+pub struct FdhHull<'a> {
+    pub directions: &'a [Vector],
 }
 
 impl DirectionHull for FdhHull<'_> {
@@ -60,7 +60,7 @@ fn read_vectors(values: &[f64]) -> Option<SmallVec<[Vector; 32]>> {
     Some(vectors)
 }
 
-fn kdop_directions(preset: KdopPreset) -> SmallVec<[Vector; 13]> {
+pub fn kdop_directions(preset: KdopPreset) -> SmallVec<[Vector; 13]> {
     let mut directions: SmallVec<[Vector; 13]> = smallvec![
         Vector::new(1.0, 0.0, 0.0),
         Vector::new(0.0, 1.0, 0.0),
@@ -246,36 +246,12 @@ pub extern "C" fn collider_builder_create_fdh(
     Box::into_raw(Box::new(ColliderBuilderHandle { inner: builder }))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
 
-    fn cube_points() -> SmallVec<[Vector; 8]> {
-        let mut points = SmallVec::new();
-        for x in [-1.0, 1.0] {
-            for y in [-1.0, 1.0] {
-                for z in [-1.0, 1.0] {
-                    points.push(Vector::new(x, y, z));
-                }
-            }
-        }
-        points
-    }
 
-    #[test]
-    fn kdop_builds_from_cube_points() {
-        let hull = KdopHull {
-            directions: kdop_directions(KdopPreset::K14),
-        };
-        assert!(hull.build(&cube_points()).is_some());
-    }
 
-    #[test]
-    fn fdh_builds_from_custom_directions() {
-        let directions = kdop_directions(KdopPreset::K6);
-        let hull = FdhHull {
-            directions: &directions,
-        };
-        assert!(hull.build(&cube_points()).is_some());
-    }
-}
+
+
+
+
+
+

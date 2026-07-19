@@ -8,7 +8,6 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 rapier3d = { workspace = true }
-ljni = { workspace = true }
 parking_lot = { workspace = true }
 hashbrown = { workspace = true }
 smallvec = { workspace = true }

@@ -1,0 +1,13 @@
+[package]
+name = "mps-test"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+mps-core = { path = "../mps-core" }
+rapier3d = { workspace = true }
+smallvec = { workspace = true }
+hashbrown = { workspace = true }
+
+[features]
+anvilkit-bridge = ["mps-core/anvilkit-bridge"]

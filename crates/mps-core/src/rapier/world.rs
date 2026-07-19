@@ -1,4 +1,4 @@
-use rapier3d::prelude::{
+﻿use rapier3d::prelude::{
     ActiveHooks, BroadPhaseBvh, CCDSolver, ColliderSet, ImpulseJointSet, IntegrationParameters,
     IslandManager, MultibodyJointSet, NarrowPhase, PhysicsPipeline, RigidBodySet, Vector,
 };
@@ -69,15 +69,15 @@ impl FrameWorkBuffers {
     }
 }
 
-pub(crate) struct PhysicsWorld {
+pub struct PhysicsWorld {
     pub(crate) pipeline: PhysicsPipeline,
     pub(crate) gravity: Vector,
     pub(crate) integration_parameters: IntegrationParameters,
     pub(crate) islands: IslandManager,
     pub(crate) broad_phase: BroadPhaseBvh,
     pub(crate) narrow_phase: NarrowPhase,
-    pub(crate) bodies: RigidBodySet,
-    pub(crate) colliders: ColliderSet,
+    pub bodies: RigidBodySet,
+    pub colliders: ColliderSet,
     pub(crate) impulse_joints: ImpulseJointSet,
     pub(crate) multibody_joints: MultibodyJointSet,
     pub(crate) ccd_solver: CCDSolver,
@@ -818,75 +818,6 @@ fn force_law_type_from_u32(tag: u32) -> Option<ForceLawType> {
 // ---------------------------------------------------------------------------
 // Tests
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::rapier::ffi::BodyStatus;
-
-    #[test]
-    fn integration_parameters_and_body_batch_updates_work() {
-        let world = world_create(Vec3 {
-            x: 0.0,
-            y: -9.81,
-            z: 0.0,
-        });
-        assert!(!world.is_null());
-        assert_eq!(
-            world_set_integration_parameters(world, 1.0 / 120.0, 8, 2),
-            Bool::TRUE
-        );
-
-        let mut params = [0.0; 3];
-        assert_eq!(
-            world_get_integration_parameters(world, params.as_mut_ptr(), params.len() as u32),
-            3
-        );
-        assert_eq!(params[1], 8.0);
-        assert_eq!(params[2], 2.0);
-
-        let builder =
-            crate::rapier::rigid_body::rigid_body_builder_create(BodyStatus::Dynamic as u32);
-        let body = crate::rapier::rigid_body::rigid_body_builder_build(builder);
-        let handle = crate::rapier::rigid_body::world_insert_rigid_body(world, body);
-        assert_ne!(handle, 0);
-        assert_eq!(world_body_snapshot_count(world), 1);
-
-        let handles = [handle];
-        let poses = [1.0, 2.0, 3.0, 0.0, 0.0, 0.0, 1.0];
-        assert_eq!(
-            world_update_body_poses(world, handles.as_ptr(), poses.as_ptr(), 1, Bool::TRUE),
-            1
-        );
-        let velocities = [4.0, 5.0, 6.0, 0.1, 0.2, 0.3];
-        assert_eq!(
-            world_update_body_velocities(
-                world,
-                handles.as_ptr(),
-                velocities.as_ptr(),
-                1,
-                Bool::TRUE
-            ),
-            1
-        );
-
-        let mut out_handles = [0; 1];
-        let mut values = [0.0; 13];
-        assert_eq!(
-            world_body_snapshot(
-                world,
-                out_handles.as_mut_ptr(),
-                values.as_mut_ptr(),
-                out_handles.len() as u32,
-            ),
-            1
-        );
-        assert_eq!(out_handles[0], handle);
-        assert_eq!(&values[..3], &[1.0, 2.0, 3.0]);
-        assert_eq!(&values[7..10], &[4.0, 5.0, 6.0]);
-
-        world_destroy(world);
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Shared Arena FFI — zero-JNI physics data access
@@ -969,3 +900,4 @@ pub extern "C" fn world_reset_shared_arena_events(world: *mut WorldHandle) {
         arena.reset_event_ring();
     }
 }
+

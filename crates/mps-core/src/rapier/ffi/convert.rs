@@ -27,7 +27,7 @@ fn unpack_handle_parts(handle: u64) -> (u32, u32) {
     ((raw & 0xffff_ffff) as u32, (raw >> 32) as u32)
 }
 
-pub(crate) fn vec3_to_rapier(value: Vec3) -> Vector {
+pub fn vec3_to_rapier(value: Vec3) -> Vector {
     Vector::new(value.x, value.y, value.z)
 }
 
@@ -82,32 +82,32 @@ pub(crate) fn isometry_from_parts(translation: Vec3, rotation: Quat) -> Pose {
     Pose::from_parts(vec3_to_rapier(translation), quat_to_rapier(rotation))
 }
 
-pub(crate) fn pack_rigid_body_handle(handle: RigidBodyHandle) -> RigidBodyHandleRaw {
+pub fn pack_rigid_body_handle(handle: RigidBodyHandle) -> RigidBodyHandleRaw {
     let (id, generation) = handle.into_raw_parts();
     pack_handle_parts(id, generation)
 }
 
-pub(crate) fn unpack_rigid_body_handle(handle: RigidBodyHandleRaw) -> RigidBodyHandle {
+pub fn unpack_rigid_body_handle(handle: RigidBodyHandleRaw) -> RigidBodyHandle {
     let (id, generation) = unpack_handle_parts(handle);
     RigidBodyHandle::from_raw_parts(id, generation)
 }
 
-pub(crate) fn pack_collider_handle(handle: ColliderHandle) -> ColliderHandleRaw {
+pub fn pack_collider_handle(handle: ColliderHandle) -> ColliderHandleRaw {
     let (id, generation) = handle.into_raw_parts();
     pack_handle_parts(id, generation)
 }
 
-pub(crate) fn unpack_collider_handle(handle: ColliderHandleRaw) -> ColliderHandle {
+pub fn unpack_collider_handle(handle: ColliderHandleRaw) -> ColliderHandle {
     let (id, generation) = unpack_handle_parts(handle);
     ColliderHandle::from_raw_parts(id, generation)
 }
 
-pub(crate) fn pack_impulse_joint_handle(handle: RapierImpulseJointHandle) -> ImpulseJointHandleRaw {
+pub fn pack_impulse_joint_handle(handle: RapierImpulseJointHandle) -> ImpulseJointHandleRaw {
     let (id, generation) = handle.into_raw_parts();
     pack_handle_parts(id, generation)
 }
 
-pub(crate) fn unpack_impulse_joint_handle(
+pub fn unpack_impulse_joint_handle(
     handle: ImpulseJointHandleRaw,
 ) -> RapierImpulseJointHandle {
     let (id, generation) = unpack_handle_parts(handle);

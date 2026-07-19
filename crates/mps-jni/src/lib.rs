@@ -1,5 +1,7 @@
+mod helper;
+
 use mps_ffm as abi;
-use mps_core::helper::{jbytearray_to_array, jdoublearray_to_array};
+use crate::helper::{jbytearray_to_array, jdoublearray_to_array};
 #[cfg(feature = "anvilkit-bridge")]
 use mps_core::rapier::anvilkit as ak;
 use mps_core::rapier::ffi::{
