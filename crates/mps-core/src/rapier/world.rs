@@ -86,8 +86,6 @@ pub(crate) struct PhysicsWorld {
     pub(crate) force_registry: ForceRegistry,
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) shared_arena: Option<Box<crate::rapier::shared_arena::SharedPhysicsArena>>,
-    #[cfg(target_arch = "wasm32")]
-    pub(crate) shared_arena: Option<()>,
     /// Persistent per-frame work buffers — cleared and reused each `world_step`.
     pub(crate) buffers: FrameWorkBuffers,
 }
@@ -117,6 +115,7 @@ impl PhysicsWorld {
             hooks: crate::rapier::events::CallbackPhysicsHooks::new(events.clone()),
             events,
             force_registry: ForceRegistry::new(),
+            #[cfg(not(target_arch = "wasm32"))]
             shared_arena: None,
             buffers: FrameWorkBuffers::default(),
         }
@@ -910,6 +909,7 @@ mod tests {
 /// `out_size` — receives the total arena size in bytes (for Java MemorySegment mapping)
 #[cfg(not(target_arch = "wasm32"))]
 #[unsafe(no_mangle)]
+#[cfg(not(target_arch = "wasm32"))]
 pub extern "C" fn world_create_shared_arena(
     world: *mut WorldHandle,
     max_bodies: u32,
@@ -944,12 +944,15 @@ pub extern "C" fn world_create_shared_arena(
 
 /// Destroy the shared arena (if any).
 #[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_arch = "wasm32"))]
 #[unsafe(no_mangle)]
 pub extern "C" fn world_destroy_shared_arena(world: *mut WorldHandle) {
     if let Some(world) = (unsafe { world.as_mut() }) {
         world.inner.shared_arena = None;
     }
 }
+#[cfg(not(target_arch = "wasm32"))]
+
 #[cfg(not(target_arch = "wasm32"))]
 /// Get the arena address (returns 0 if no arena).
 #[unsafe(no_mangle)]
@@ -958,6 +961,7 @@ pub extern "C" fn world_get_shared_arena_address(world: *const WorldHandle) -> u
         return 0;
     };
     world.inner.shared_arena.as_ref().map_or(0, |a| a.address())
+#[cfg(not(target_arch = "wasm32"))]
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -969,6 +973,8 @@ pub extern "C" fn world_get_shared_arena_size(world: *const WorldHandle) -> u64 
     };
     world.inner.shared_arena.as_ref().map_or(0, |a| a.size() as u64)
 }
+#[cfg(not(target_arch = "wasm32"))]
+
 #[cfg(not(target_arch = "wasm32"))]
 /// Reset the event ring (Java calls this after draining events).
 #[unsafe(no_mangle)]

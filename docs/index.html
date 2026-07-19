@@ -60,7 +60,6 @@ th{color:var(--accent);font-weight:600}
 .badge-rust{background:#dea58433;color:#dea584}.badge-wasm{background:#89b4fa33;color:#89b4fa}
 
 @media(max-width:768px){.demo-canvas{height:280px}#content{padding:16px 12px}}
-#debug-log{background:#181825;border:1px solid var(--border);border-radius:4px;padding:8px 12px;margin:8px 0;font-family:'Cascadia Code',monospace;font-size:.78em;color:#a6e3a1;max-height:180px;overflow-y:auto;white-space:pre-wrap;word-break:break-all}
 </style>
 </head>
 <body>
@@ -85,7 +84,6 @@ th{color:var(--accent);font-weight:600}
 <p>引擎加载: <span id="wasm-status" class="status-badge status-warn">加载中...</span>
 &nbsp; 刚体数: <span id="body-count" class="stats">-</span>
 &nbsp; FPS: <span id="fps-counter" class="stats">-</span></p>
-<pre id="debug-log"></pre>
 </section>
 
 <!-- ====== ORBIT DEMO ====== -->
@@ -184,22 +182,7 @@ function loop() {
 <script type="module">
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import init, { PhysicsWorld, RigidBodyDescriptor, ColliderDescriptor, BodyStatus, ShapeType, Vec3, Quat } from './pkg/mps_wasm.js';
-
-const debugLog = document.getElementById('debug-log');
-function debug(msg) {
-  const t = new Date().toISOString().slice(11, 23);
-  const line = `[${t}] ${msg}`;
-  console.log(line);
-  if (debugLog) {
-    debugLog.textContent += line + '\n';
-    debugLog.scrollTop = debugLog.scrollHeight;
-  }
-}
-window.onerror = (msg, src, line, col, err) => debug(`ERROR: ${msg} (${src}:${line})`);
-
-debug('Script started');
-debug('Importing Three.js...');
+import init, { PhysicsWorld, RigidBodyDescriptor, ColliderDescriptor, BodyStatus, ShapeType } from './pkg/mps_wasm.js';
 
 // ====== Global State ======
 let world = null;
@@ -207,29 +190,19 @@ const demoStates = {};
 
 // ====== WASM Init ======
 const wasmStatus = document.getElementById('wasm-status');
-debug('Loading WASM module...');
 try {
   await init();
   world = new PhysicsWorld(0, -9.81, 0);
   wasmStatus.textContent = '就绪';
   wasmStatus.className = 'status-badge status-ok';
-  debug('WASM ready, world created');
 } catch(e) {
   wasmStatus.textContent = '失败: ' + e.message;
-  debug(`WASM FAILED: ${e.message}`);
   console.error(e);
 }
 
 // ====== Three.js Helpers ======
-function createScene(containerId) {
-  const container = document.getElementById(containerId);
-  const canvas = document.createElement('canvas');
-  canvas.style.display = 'block';
-  canvas.style.width = '100%';
-  canvas.style.height = '100%';
-  container.innerHTML = '';
-  container.appendChild(canvas);
-
+function createScene(canvasId) {
+  const canvas = document.getElementById(canvasId);
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.shadowMap.enabled = true;
@@ -260,20 +233,15 @@ function createScene(containerId) {
   const grid = new THREE.GridHelper(30, 30, 0x45475a, 0x313148);
   scene.add(grid);
 
-  // Set initial size
-  renderer.setSize(container.clientWidth, container.clientHeight, false);
-  camera.aspect = container.clientWidth / Math.max(container.clientHeight, 1);
-  camera.updateProjectionMatrix();
+  return { renderer, scene, camera, controls, canvas };
+}
 
-  // Auto-resize
-  new ResizeObserver(() => {
-    const w = container.clientWidth, h = container.clientHeight;
-    renderer.setSize(w, h, false);
-    camera.aspect = w / Math.max(h, 1);
-    camera.updateProjectionMatrix();
-  }).observe(container);
-
-  return { renderer, scene, camera, controls, container };
+function resizeRenderer(state, canvasEl) {
+  const w = canvasEl.clientWidth;
+  const h = canvasEl.clientHeight;
+  state.renderer.setSize(w, h, false);
+  state.camera.aspect = w / Math.max(h, 1);
+  state.camera.updateProjectionMatrix();
 }
 
 // ====== Sync WASM → Three.js ======
@@ -311,7 +279,7 @@ function removeBodyMesh(scene, handle) {
 
 // ====== Orbit Demo ======
 function setupOrbitDemo() {
-  const container = document.getElementById('orbit-canvas');
+  const canvasEl = document.getElementById('orbit-canvas');
   const state = createScene('orbit-canvas');
   demoStates.orbit = state;
 
@@ -398,7 +366,7 @@ function setupOrbitDemo() {
     }
     state.bodies = [];
   };
-  document.getElementById('orbit-fullscreen').onclick = () => container.classList.toggle('fullscreen');
+  document.getElementById('orbit-fullscreen').onclick = () => canvasEl.classList.toggle('fullscreen');
 
   // Start with 3 satellites
   for (let i = 0; i < 3; i++) addSatellite();
@@ -408,7 +376,7 @@ function setupOrbitDemo() {
 
 // ====== Collision Demo ======
 function setupCollisionDemo() {
-  const container = document.getElementById('collision-canvas');
+  const canvasEl = document.getElementById('collision-canvas');
   const state = createScene('collision-canvas');
   demoStates.collision = state;
 
@@ -533,7 +501,7 @@ function setupCollisionDemo() {
     }
     state.bodies = [];
   };
-  document.getElementById('collision-fullscreen').onclick = () => container.classList.toggle('fullscreen');
+  document.getElementById('collision-fullscreen').onclick = () => canvasEl.classList.toggle('fullscreen');
 
   // Start with some objects
   for (let i = 0; i < 10; i++) { addBox(); addBall(); }
@@ -564,7 +532,9 @@ function animate(time) {
   }
 
   // Step each demo
-  for (const state of Object.values(demoStates)) {
+  for (const [name, state] of Object.entries(demoStates)) {
+    const canvasEl = document.getElementById(name === 'orbit' ? 'orbit-canvas' : 'collision-canvas');
+    resizeRenderer(state, canvasEl);
     if (state.stepFn) state.stepFn(dt);
     state.controls.update();
     state.renderer.render(state.scene, state.camera);
@@ -572,7 +542,14 @@ function animate(time) {
 }
 
 requestAnimationFrame(animate);
-debug('Animation loop started');
+
+// Resize handling
+window.addEventListener('resize', () => {
+  for (const [name, state] of Object.entries(demoStates)) {
+    const canvasEl = document.getElementById(name === 'orbit' ? 'orbit-canvas' : 'collision-canvas');
+    resizeRenderer(state, canvasEl);
+  }
+});
 </script>
 
 </body>
