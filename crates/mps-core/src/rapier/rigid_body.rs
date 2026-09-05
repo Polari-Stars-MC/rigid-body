@@ -723,6 +723,36 @@ pub extern "C" fn rigid_body_set_translation(
     })
 }
 
+#[unsafe(no_mangle)]
+pub extern "C" fn rigid_body_set_next_kinematic_position(
+    world: *mut WorldHandle,
+    handle: RigidBodyHandleRaw,
+    translation: Vec3,
+) -> Bool {
+    ffi_guard(Bool::FALSE, || {
+        let Some(world) = (unsafe { world.as_mut() }) else {
+            set_error(ERR_NULL_POINTER, "world is null");
+            return Bool::FALSE;
+        };
+        let Some(body) = world.inner.bodies.get_mut(unpack_rigid_body_handle(handle)) else {
+            set_error(ERR_NOT_FOUND, "body was not found");
+            return Bool::FALSE;
+        };
+        if !vec3_finite(translation) {
+            set_error(ERR_INVALID_ARGUMENT, "non-finite body translation");
+            return Bool::FALSE;
+        }
+
+        let rotation = *body.rotation();
+        body.set_next_kinematic_position(rapier3d::math::Pose::from_parts(
+            vec3_to_rapier(translation),
+            rotation,
+        ));
+        clear_error();
+        Bool::TRUE
+    })
+}
+
 /// # Safety
 ///
 /// `world` must be a live pointer returned by `world_create`, or null.

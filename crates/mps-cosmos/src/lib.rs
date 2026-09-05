@@ -82,6 +82,7 @@ pub mod integrator;
 pub mod orbit;
 pub mod orbit_diagnostics;
 pub mod perturbation;
+pub mod radio;
 pub mod world;
 
 pub use world::{CosmosWorld, CosmosWorldConfig};

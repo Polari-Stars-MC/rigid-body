@@ -17,8 +17,8 @@
 use std::mem::{ManuallyDrop, MaybeUninit};
 
 use ljni::JNIEnv;
-use ljni::objects::JByteArray;
-use ljni::sys::jbyteArray;
+use ljni::objects::{JByteArray, JDoubleArray};
+use ljni::sys::{jbyteArray, jdoubleArray};
 
 /// 把一个 Java `byte[]` 拷贝到 `Vec<u8>`，零填充 + 单次分配。
 ///
@@ -74,4 +74,17 @@ pub fn jbytearray_to_array(env: &JNIEnv, data: jbyteArray) -> Option<Vec<u8>> {
         }
         Err(_) => None,
     }
+}
+
+/// 把一个 Java `double[]` 拷贝到 `Vec<f64>`（CompoundBoxesArray 等用）。
+pub fn jdoublearray_to_array(env: &JNIEnv, data: jdoubleArray) -> Option<Vec<f64>> {
+    if data.is_null() {
+        return None;
+    }
+
+    let data = ManuallyDrop::new(unsafe { JDoubleArray::from_raw(data) });
+    let len = env.get_array_length(&*data).ok()? as usize;
+    let mut buf = vec![0.0f64; len];
+    env.get_double_array_region(&*data, 0, &mut buf).ok()?;
+    Some(buf)
 }

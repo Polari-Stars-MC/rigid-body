@@ -1,6 +1,6 @@
 mod helper;
 
-use crate::helper::jbytearray_to_array;
+use crate::helper::{jbytearray_to_array, jdoublearray_to_array};
 use ljni::JNIEnv;
 use ljni::sys::{jbyte, jbyteArray, jclass, jdouble, jdoubleArray, jint, jlong, jstring};
 #[cfg(feature = "anvilkit-bridge")]
@@ -276,6 +276,31 @@ macro_rules! jni_e_c {
     };
 }
 
+macro_rules! jni_space {
+    // Same shape as `jni!`, but exports under the Kelvin `SpaceNative` prefix
+    // so the orbit-physics bridge resolves through its own class. Package
+    // `org.cn_grass_block.kelvin.physical` is JNI-mangled with `_1` for each
+    // underscore (JNI spec §6.2), hence `cn_1grass_1block`.
+    (@ty $kind:ident) => { jni!(@ty $kind) };
+    (@default $kind:ident) => { jni!(@default $kind) };
+    ($ret:ident $method:ident ( $($kind:ident $arg:ident),* ) $body:block) => {
+        #[unsafe(export_name = concat!(
+            "Java_org_cn_1grass_1block_kelvin_physical_SpaceNative_",
+            stringify!($method)
+        ))]
+        #[allow(non_snake_case)]
+        pub extern "system" fn $method(_env: JNIEnv, _class: jclass, $($arg: jni_space!(@ty $kind)),*) -> jni_space!(@ty $ret) {
+            match catch_unwind(AssertUnwindSafe(|| $body)) {
+                Ok(value) => value,
+                Err(_) => {
+                    er::set_error(er::ERR_INTERNAL, "internal panic");
+                    jni_space!(@default $ret)
+                }
+            }
+        }
+    };
+}
+
 jni!(int abiVersion(){ abi::abi_version() as jint });
 jni!(boolean abiSupportsFfm() { abi::abi_supports_ffm().0 as jbyte });
 jni!(boolean abiSupportsJni() { abi::abi_supports_jni().0 as jbyte });
@@ -349,6 +374,13 @@ jni_e_c!(long colliderBuilderCreateHeightmap(env _env, class _class, long data, 
 jni!(long colliderBuilderCreateEx(int shape_type, double a, double b, double c, double d) { to_jlong(col::collider_builder_create_ex(sd(shape_type, a, b, c, d))) });
 jni!(long colliderBuilderCreateSphere(double x, double y, double z, double radius) { to_jlong(col::collider_builder_create_sphere(Sphere { center: v3(x, y, z), radius })) });
 jni!(long colliderBuilderCreateObb(double cx, double cy, double cz, double hx, double hy, double hz, double qi, double qj, double qk, double qw) { to_jlong(col::collider_builder_create_obb(Obb {center: v3(cx, cy, cz),half_extents: v3(hx, hy, hz),rotation: qt(qi, qj, qk, qw),})) });
+jni!(long colliderBuilderCreateCompoundBoxes(long box_data, int box_count) { to_jlong(col::collider_builder_create_compound_boxes(p::<f64>(box_data), u32_from_jint(box_count))) });
+jni_e_c!(long colliderBuilderCreateCompoundBoxesArray(env _env, class _class, double_array box_data, int box_count) {
+    let Some(values) = jdoublearray_to_array(&_env, box_data) else {
+        return 0;
+    };
+    to_jlong(col::collider_builder_create_compound_boxes(values.as_ptr(), u32_from_jint(box_count)))
+});
 jni!(long colliderBuilderCreateConvexHull(long points_xyz, int point_count) { to_jlong(col::collider_builder_create_convex_hull(p::<f64>(points_xyz), u32_from_jint(point_count))) });
 jni!(long colliderBuilderCreatePointCloudBounds(long points_xyz, int point_count) { to_jlong(col::collider_builder_create_point_cloud_bounds(p::<f64>(points_xyz), u32_from_jint(point_count))) });
 jni!(long colliderBuilderCreateDoubleBv(double a_min_x, double a_min_y, double a_min_z, double a_max_x, double a_max_y, double a_max_z, double b_min_x, double b_min_y, double b_min_z, double b_max_x, double b_max_y, double b_max_z) { to_jlong(col::collider_builder_create_double_bv(aa(a_min_x,a_min_y,a_min_z,a_max_x,a_max_y,a_max_z), aa(b_min_x,b_min_y,b_min_z,b_max_x,b_max_y,b_max_z))) });
@@ -450,6 +482,7 @@ jni!(void colliderBuilderSetPose(long builder, double x, double y, double z, dou
 jni!(void colliderBuilderSetSensor(long builder, int sensor) { col::collider_builder_set_sensor(m::<CBH>(builder), jb(sensor)); });
 jni!(void colliderBuilderSetFriction(long builder, double friction) { col::collider_builder_set_friction(m::<CBH>(builder), friction); });
 jni!(void colliderBuilderSetRestitution(long builder, double restitution) { col::collider_builder_set_restitution(m::<CBH>(builder), restitution); });
+jni!(void colliderBuilderSetContactSkin(long builder, double skin) { col::collider_builder_set_contact_skin(m::<CBH>(builder), skin); });
 jni!(void colliderBuilderSetDensity(long builder, double density) { col::collider_builder_set_density(m::<CBH>(builder), density); });
 jni!(void colliderBuilderSetCollisionGroups(long builder, int memberships, int filter) { col::collider_builder_set_collision_groups(m::<CBH>(builder), grp(memberships, filter)); });
 jni!(void colliderBuilderSetSolverGroups(long builder, int memberships, int filter) { col::collider_builder_set_solver_groups(m::<CBH>(builder), grp(memberships, filter)); });
@@ -532,7 +565,9 @@ jni!(boolean colliderSetTranslation(long world, long handle, double x, double y,
 jni!(boolean colliderSetRotation(long world, long handle, double qi, double qj, double qk, double qw) { col::collider_set_rotation(m::<WH>(world), handle as CRaw, qt(qi, qj, qk, qw)).0 as jbyte });
 jni!(boolean colliderSetSensor(long world, long handle, int sensor) { col::collider_set_sensor(m::<WH>(world), handle as CRaw, jb(sensor)).0 as jbyte });
 jni!(boolean colliderSetFriction(long world, long handle, double friction) { col::collider_set_friction(m::<WH>(world), handle as CRaw, friction).0 as jbyte });
+jni!(boolean colliderSetFrictionCombineRule(long world, long handle, int rule) { col::collider_set_friction_combine_rule(m::<WH>(world), handle as CRaw, u32_from_jint(rule)).0 as jbyte });
 jni!(boolean colliderSetRestitution(long world, long handle, double restitution) { col::collider_set_restitution(m::<WH>(world), handle as CRaw, restitution).0 as jbyte });
+jni!(boolean colliderSetRestitutionCombineRule(long world, long handle, int rule) { col::collider_set_restitution_combine_rule(m::<WH>(world), handle as CRaw, u32_from_jint(rule)).0 as jbyte });
 jni!(boolean colliderSetCollisionGroups(long world, long handle, int memberships, int filter) { col::collider_set_collision_groups(m::<WH>(world), handle as CRaw, grp(memberships, filter)).0 as jbyte });
 jni!(boolean colliderSetSolverGroups(long world, long handle, int memberships, int filter) { col::collider_set_solver_groups(m::<WH>(world), handle as CRaw, grp(memberships, filter)).0 as jbyte });
 jni!(boolean colliderSetActiveEvents(long world, long handle, int bits) { col::collider_set_active_events(m::<WH>(world), handle as CRaw, bits as u32).0 as jbyte });
@@ -569,6 +604,7 @@ jni!(void rigidBodyGetTranslationOut(long world, long body, long out_translation
 jni!(void rigidBodyGetRotationOut(long world, long body, long out_rotation) { rb::rigid_body_get_rotation_out(cp::<WH>(world), body as RRaw, pm::<Quat>(out_rotation)); });
 jni!(boolean rigidBodySetPose(long world, long body, double x, double y, double z, double qi, double qj, double qk, double qw, int wake_up) { rb::rigid_body_set_pose(m::<WH>(world), body as RRaw, v3(x, y, z), qt(qi, qj, qk, qw), jb(wake_up)).0 as jbyte });
 jni!(boolean rigidBodySetTranslation(long world, long body, double x, double y, double z, int wake_up) { rb::rigid_body_set_translation(m::<WH>(world), body as RRaw, v3(x, y, z), jb(wake_up)).0 as jbyte });
+jni!(boolean rigidBodySetNextKinematicPosition(long world, long body, double x, double y, double z) { rb::rigid_body_set_next_kinematic_position(m::<WH>(world), body as RRaw, v3(x, y, z)).0 as jbyte });
 jni!(boolean rigidBodySetRotation(long world, long body, double qi, double qj, double qk, double qw, int wake_up) { rb::rigid_body_set_rotation(m::<WH>(world), body as RRaw, qt(qi, qj, qk, qw), jb(wake_up)).0 as jbyte });
 jni!(double rigidBodyGetMass(long world, long body) { rb::rigid_body_get_mass(m::<WH>(world), body as RRaw) });
 jni_e_c!(double_array rigidBodyGetForce(env _env, class _class, long world, long body) { vec3_to_j_double_array(_env, rb::rigid_body_get_force(cp::<WH>(world), body as RRaw)) });
@@ -593,6 +629,9 @@ jni!(boolean rigidBodyEnableCcd(long world, long body, int enabled) { rb::rigid_
 jni!(boolean rigidBodySleep(long world, long body) { rb::rigid_body_sleep(m::<WH>(world), body as RRaw).0 as jbyte });
 jni!(boolean rigidBodyWakeUp(long world, long body, int strong) { rb::rigid_body_wake_up(m::<WH>(world), body as RRaw, jb(strong)).0 as jbyte });
 jni!(boolean rigidBodyIsSleeping(long world, long body) { rb::rigid_body_is_sleeping(cp::<WH>(world), body as RRaw).0 as jbyte });
+jni!(boolean rigidBodySetSleep(long world, long body) { rb::rigid_body_sleep(m::<WH>(world), body as RRaw).0 as jbyte });
+jni!(boolean rigidBodySetWakeUp(long world, long body, int strong) { rb::rigid_body_wake_up(m::<WH>(world), body as RRaw, jb(strong)).0 as jbyte });
+jni!(boolean rigidBodyGetIsSleeping(long world, long body) { rb::rigid_body_is_sleeping(cp::<WH>(world), body as RRaw).0 as jbyte });
 
 macro_rules! query_filter_args {
     ($flags:ident,$memberships:ident,$filter:ident,$use_groups:ident,$exclude_collider:ident,$use_exclude_collider:ident,$exclude_rigid_body:ident,$use_exclude_rigid_body:ident) => {
@@ -1777,32 +1816,32 @@ fn builder_mut(builder: jlong) -> Option<&'static mut RigidBodyBuilder> {
 
 // 构造一个动态刚体 builder（质量 kg、初始位置/速度）。返回 `*mut` 指针
 // 给 Java；后续交给 `cosmosInsertBody` 插入。
-jni!(long cosmosSatelliteBuilder(double mass, double px, double py, double pz, double vx, double vy, double vz, double radius) {
+jni_space!(long cosmosSatelliteBuilder(double mass, double px, double py, double pz, double vx, double vy, double vz, double radius) {
     to_jlong(Box::into_raw(Box::new(
         mps_cosmos::bodies::satellite_builder(mass, Vector::new(px, py, pz), Vector::new(vx, vy, vz), radius)
     )))
 });
 // 构造固定（静态）刚体 builder —— 适合做 n-body 引力源中心本体。
-jni!(long cosmosFixedBodyBuilder(double px, double py, double pz) {
+jni_space!(long cosmosFixedBodyBuilder(double px, double py, double pz) {
     to_jlong(Box::into_raw(Box::new(
         mps_cosmos::bodies::fixed_body_builder(Vector::new(px, py, pz))
     )))
 });
 // 链式设惯量/阻尼等常见 builder 属性后再交给 `cosmosInsertBody`。这里
 // 暴露线性/角阻尼、平移锁定、`gravity_scale` 几个最常用的。
-jni!(void cosmosBuilderSetLinearDamping(long builder, double value) {
+jni_space!(void cosmosBuilderSetLinearDamping(long builder, double value) {
     if let Some(b) = builder_mut(builder) { b.linear_damping = value; }
 });
-jni!(void cosmosBuilderSetAngularDamping(long builder, double value) {
+jni_space!(void cosmosBuilderSetAngularDamping(long builder, double value) {
     if let Some(b) = builder_mut(builder) { b.angular_damping = value; }
 });
-jni!(void cosmosBuilderSetGravityScale(long builder, double value) {
+jni_space!(void cosmosBuilderSetGravityScale(long builder, double value) {
     if let Some(b) = builder_mut(builder) { b.gravity_scale = value; }
 });
 // **激活**平移锁定（动态刚体不再平动，仅可转动）。
 // `RigidBodyBuilder::lock_translations` 是消费 self 的链式 API，这里
 // 把裸指针的 builder 取出、调用后再放回原地，等价于链尾 `.lock_translations()`。
-jni!(void cosmosBuilderLockTranslations(long builder) {
+jni_space!(void cosmosBuilderLockTranslations(long builder) {
     if builder != 0 {
         unsafe {
             let b = Box::from_raw(builder as *mut RigidBodyBuilder);
@@ -1813,7 +1852,7 @@ jni!(void cosmosBuilderLockTranslations(long builder) {
 });
 // 显式释放一个**未插入**的 builder。插入 `cosmosInsertBody` 后所有权已
 // 转移，**不要**再调本函数（会 double-free）。
-jni!(void cosmosBuilderDestroy(long builder) {
+jni_space!(void cosmosBuilderDestroy(long builder) {
     if builder != 0 { drop(unsafe { Box::from_raw(builder as *mut RigidBodyBuilder) }); }
 });
 
@@ -1826,7 +1865,7 @@ jni!(void cosmosBuilderDestroy(long builder) {
 //   2 = `Yoshida4`，3 = `Yoshida4Kahan`，4 = `ForestRuth8`，5 = `ForestRuth8Kahan`；
 // - `verlet_substeps`：Verlet 路径的内部子步数（≥1，仅 `Verlet` 模式生效）；
 // - `n_body_softening_sq`：n-body 互引力软化平方项（m²），0 表示无软化。
-jni!(long cosmosWorldCreate(double dt, int solver_iterations, int ccd_substeps, int orbit_integration, int verlet_substeps, double n_body_softening_sq) {
+jni_space!(long cosmosWorldCreate(double dt, int solver_iterations, int ccd_substeps, int orbit_integration, int verlet_substeps, double n_body_softening_sq) {
     let orbit_integration = match u32_from_jint(orbit_integration) {
         1 => OrbitIntegration::Verlet,
         2 => OrbitIntegration::Yoshida4,
@@ -1848,12 +1887,12 @@ jni!(long cosmosWorldCreate(double dt, int solver_iterations, int ccd_substeps, 
     };
     to_jlong(Box::into_raw(Box::new(CosmosWorld::new(cfg))))
 });
-jni!(void cosmosWorldDestroy(long world) {
+jni_space!(void cosmosWorldDestroy(long world) {
     if world != 0 { drop(unsafe { Box::from_raw(world as *mut CosmosWorld) }); }
 });
 
 // 设太阳位置（光压方向参考）。
-jni!(void cosmosWorldSetSunPosition(long world, double x, double y, double z) {
+jni_space!(void cosmosWorldSetSunPosition(long world, double x, double y, double z) {
     if let Some(w) = unsafe { (world as *mut CosmosWorld).as_mut() } {
         w.set_sun_position(Vector::new(x, y, z));
     }
@@ -1861,7 +1900,7 @@ jni!(void cosmosWorldSetSunPosition(long world, double x, double y, double z) {
 
 // 设 n-body 中心天体（按整数 id：0=Sun,1=Mercury,2=Venus,3=Earth,4=Moon,
 // 5=Mars,6=Jupiter,7=Saturn,8=Uranus,9=Neptune）。`id < 0` 清除中心天体。
-jni!(boolean cosmosWorldSetCentralBody(long world, int id) {
+jni_space!(boolean cosmosWorldSetCentralBody(long world, int id) {
     let w = unsafe { (world as *mut CosmosWorld).as_mut() };
     let Some(w) = w else { return Bool::FALSE.0 as jbyte; };
     let body = if id < 0 { None } else { celestial_by_id(id) };
@@ -1872,7 +1911,7 @@ jni!(boolean cosmosWorldSetCentralBody(long world, int id) {
 // 注册一个天体引力源。`celestial_id` 见 `cosmosWorldSetCentralBody`；
 // `max_sh_degree` 限制球谐展开最高阶（受 `body.max_degree` 上限约束）。
 // 返回注册到世界中的源索引（≥0 成功；-1 参数错）。
-jni!(int cosmosWorldAddCelestial(long world, int celestial_id, int max_sh_degree) {
+jni_space!(int cosmosWorldAddCelestial(long world, int celestial_id, int max_sh_degree) {
     let w = unsafe { (world as *mut CosmosWorld).as_mut() };
     let Some(w) = w else { return -1; };
     let Some(body) = celestial_by_id(celestial_id) else { return -1; };
@@ -1881,7 +1920,7 @@ jni!(int cosmosWorldAddCelestial(long world, int celestial_id, int max_sh_degree
 });
 
 // 把已插入的刚体登记为 n-body 互引力质点源（给定质量 kg）。
-jni!(boolean cosmosWorldAddNBody(long world, long body, double mass) {
+jni_space!(boolean cosmosWorldAddNBody(long world, long body, double mass) {
     let w = unsafe { (world as *mut CosmosWorld).as_mut() };
     let Some(w) = w else { return Bool::FALSE.0 as jbyte; };
     w.add_n_body(unpack_handle(body), mass);
@@ -1890,7 +1929,7 @@ jni!(boolean cosmosWorldAddNBody(long world, long body, double mass) {
 
 // 一步到位：插入 builder 并把其质量登记为 n-body 源。builder 所有权转移
 // （插入后不可再 `cosmosBuilderDestroy`）。返回打包的 body 句柄（0 = 失败）。
-jni!(long cosmosWorldInsertBodyAsGravitySource(long world, long builder, double mass) {
+jni_space!(long cosmosWorldInsertBodyAsGravitySource(long world, long builder, double mass) {
     let w = unsafe { (world as *mut CosmosWorld).as_mut() };
     let Some(w) = w else { return 0; };
     if builder == 0 { return 0; }
@@ -1899,7 +1938,7 @@ jni!(long cosmosWorldInsertBodyAsGravitySource(long world, long builder, double 
 });
 
 // 插入 builder，返回打包的 body 句柄（0 = 失败）。builder 所有权转移。
-jni!(long cosmosWorldInsertBody(long world, long builder) {
+jni_space!(long cosmosWorldInsertBody(long world, long builder) {
     let w = unsafe { (world as *mut CosmosWorld).as_mut() };
     let Some(w) = w else { return 0; };
     if builder == 0 { return 0; }
@@ -1912,7 +1951,7 @@ jni!(long cosmosWorldInsertBody(long world, long builder) {
 // 动摩擦签名向后兼容 由 ..Default::default() 保证 zero 即关闭）。
 // 旧 Kotlin 端用 9-arg `cosmosWorldSetPerturbation(legacy)`，新加扩展参数走
 // `cosmosWorldSetPerturbationExt` 可控开启太阳风/动摩擦等 扩展。
-jni!(boolean cosmosWorldSetPerturbation(
+jni_space!(boolean cosmosWorldSetPerturbation(
     long world, long body,
     double drag_coefficient, double area, int enable_drag,
     double reflectivity, double optical_area, int enable_solar
@@ -1929,7 +1968,7 @@ jni!(boolean cosmosWorldSetPerturbation(
 
 // 扩展版：开启所有 4 类环境扰动力（呼 参见 cosmos_world_set_perturbation。
 // 旧版仅大气阻力和光压；此为后加的太阳风动压与 Chandrasekhar 动力学摩擦）。
-jni!(boolean cosmosWorldSetPerturbationExt(
+jni_space!(boolean cosmosWorldSetPerturbationExt(
     long world, long body,
     double drag_coefficient, double area, int enable_drag,
     double reflectivity, double optical_area, int enable_solar,
@@ -1965,7 +2004,7 @@ jni!(boolean cosmosWorldSetPerturbationExt(
 // - `-4`：`Skipped(TooLarge)`（dt 超过 30s 硬上限）。
 //
 // 这个"压成单 int"的设计是为了让 Java 端的常见 `if (r > 0)` 判断简单。
-jni!(int cosmosWorldStep(long world, double dt) {
+jni_space!(int cosmosWorldStep(long world, double dt) {
     let w = unsafe { (world as *mut CosmosWorld).as_mut() };
     let Some(w) = w else { return -2; };
     match w.step(dt) {
@@ -1979,7 +2018,7 @@ jni!(int cosmosWorldStep(long world, double dt) {
 
 // `step_n`：循环 `n` 次推进 `dt`，任一步非法整批拒。
 // 返回 0 = 成功；1 = NonFinite；2 = NonPositive；3 = TooLarge。
-jni!(int cosmosWorldStepN(long world, double dt, int n) {
+jni_space!(int cosmosWorldStepN(long world, double dt, int n) {
     let w = unsafe { (world as *mut CosmosWorld).as_mut() };
     let Some(w) = w else { return 1; };
     match w.step_n(dt, u32_from_jint(n)) {
@@ -1992,7 +2031,7 @@ jni!(int cosmosWorldStepN(long world, double dt, int n) {
 
 // 取刚体当前位置（3×f64）。`out_translation` 指向 24 字节 native 缓冲。
 // 返回 1 成功 / 0 句柄无效或 world 为 null。
-jni!(int cosmosBodyTranslationOut(long world, long body, long out_translation) {
+jni_space!(int cosmosBodyTranslationOut(long world, long body, long out_translation) {
     let w = unsafe { (world as *const CosmosWorld).as_ref() };
     let Some(w) = w else { return 0; };
     let Some(p) = w.body_translation(unpack_handle(body)) else { return 0; };
@@ -2003,7 +2042,7 @@ jni!(int cosmosBodyTranslationOut(long world, long body, long out_translation) {
 });
 
 // 取刚体当前线速度（3×f64）。
-jni!(int cosmosBodyLinvelOut(long world, long body, long out_linvel) {
+jni_space!(int cosmosBodyLinvelOut(long world, long body, long out_linvel) {
     let w = unsafe { (world as *const CosmosWorld).as_ref() };
     let Some(w) = w else { return 0; };
     let Some(v) = w.body_linvel(unpack_handle(body)) else { return 0; };
@@ -2014,14 +2053,14 @@ jni!(int cosmosBodyLinvelOut(long world, long body, long out_linvel) {
 });
 
 // 取刚体质量（kg）。`NaN` 表示句柄无效。
-jni!(double cosmosBodyMass(long world, long body) {
+jni_space!(double cosmosBodyMass(long world, long body) {
     let w = unsafe { (world as *const CosmosWorld).as_ref() };
     let Some(w) = w else { return f64::NAN; };
     w.body_mass(unpack_handle(body)).unwrap_or(f64::NAN)
 });
 
 // 当前动态刚体数量。
-jni!(int cosmosWorldDynamicBodyCount(long world) {
+jni_space!(int cosmosWorldDynamicBodyCount(long world) {
     let w = unsafe { (world as *const CosmosWorld).as_ref() };
     let Some(w) = w else { return 0; };
     w.dynamic_body_count() as jint
@@ -2031,7 +2070,7 @@ jni!(int cosmosWorldDynamicBodyCount(long world) {
 // 再在 Java 端分配 `long[N]` 与 `double[N * 7]` 直接 buffer）。与 mps-core
 // `worldDynamicBodySnapshotCount` ABI 平行（见 性能分析.MD §11.1/§12.1，
 // M1 + L1 落地基线）。
-jni!(int cosmosWorldDynamicBodySnapshotCount(long world) {
+jni_space!(int cosmosWorldDynamicBodySnapshotCount(long world) {
     let w = unsafe { (world as *const CosmosWorld).as_ref() };
     let Some(w) = w else { return 0; };
     w.dynamic_body_count() as jint
@@ -2058,7 +2097,7 @@ jni!(int cosmosWorldDynamicBodySnapshotCount(long world) {
 //   // values[i*7..i*7+3] = pos, values[i*7+3..i*7+7] = quat(i,j,k,w)
 //
 // 容量非法 / world null 时返回 0；失败原因由 abiLastErrorCode() 报告。
-jni!(int cosmosWorldDynamicBodySnapshot(
+jni_space!(int cosmosWorldDynamicBodySnapshot(
         long world,
         long out_handles,
         long out_values,
@@ -2070,6 +2109,125 @@ jni!(int cosmosWorldDynamicBodySnapshot(
         out_values as isize as *mut f64,
         u32_from_jint(capacity),
     ) as jint
+});
+
+// =========================================================================
+// Cosmos Radio — 星际无线电传播（挂接在 CosmosWorld 上）
+//
+// 反射天体位置由 cosmos world 自身刚体提供（f64，无 Java 拷贝）；收发器
+// 状态与信号由 Java 经 native 内存缓冲批量提交；传播结果批量回读。
+// 每个 `cosmosWorldStep` 尾部自动推进一轮无线电。
+// =========================================================================
+
+/// 启用无线电子世界（幂等）。
+jni_space!(boolean cosmosWorldEnableRadio(long world) {
+    mps_cosmos::ffi::cosmos_world_enable_radio(world as isize as *mut CosmosWorld) as jbyte
+});
+
+/// 查询是否已启用。
+jni_space!(boolean cosmosWorldRadioEnabled(long world) {
+    mps_cosmos::ffi::cosmos_world_radio_enabled(world as isize as *const CosmosWorld) as jbyte
+});
+
+/// 注册反射天体（行星/恒星）：`body` 为打包刚体句柄，`radius` 米。
+jni_space!(boolean cosmosWorldRadioAddReflector(long world, long body, double radius) {
+    mps_cosmos::ffi::cosmos_world_radio_add_reflector(
+        world as isize as *mut CosmosWorld,
+        body as u64,
+        radius,
+    ) as jbyte
+});
+
+/// 移除反射天体。
+jni_space!(void cosmosWorldRadioRemoveReflector(long world, long body) {
+    mps_cosmos::ffi::cosmos_world_radio_remove_reflector(
+        world as isize as *mut CosmosWorld,
+        body as u64,
+    );
+});
+
+/// 批量提交收发器节点：`values` 指向 `count * 18` 个 f64（native 直接内存）。
+/// 每节点布局（f64 顺序）：
+/// `id, px,py,pz, vx,vy,vz, dx,dy,dz, frequency, power, sensitivity,
+///  rx_gain, tx_gain, beam_angle, owner_body`
+/// id/owner_body 以 `f64::from_bits(u64)` 编码（Java 用 `Double.longBitsToDouble`）。
+/// 整表覆盖语义：传入的节点集合即本帧全部在线收发器。
+jni_space!(int cosmosWorldRadioSubmitNodes(long world, long values, int count) {
+    let w = unsafe { (world as isize as *mut CosmosWorld).as_mut() };
+    let Some(w) = w else { return 0; };
+    let ptr = values as isize as *const f64;
+    let n = u32_from_jint(count) as usize;
+    let nodes = if n > 0 && !ptr.is_null() {
+        let slice = unsafe { std::slice::from_raw_parts(ptr, n * 18) };
+        slice
+            .chunks_exact(18)
+            .map(|v| mps_cosmos::radio::RadioNode {
+                id: v[0] as u64,
+                pos: Vector::new(v[1], v[2], v[3]),
+                vel: Vector::new(v[4], v[5], v[6]),
+                dir: Vector::new(v[7], v[8], v[9]),
+                frequency: v[10],
+                power: v[11],
+                sensitivity: v[12],
+                rx_gain: v[13],
+                tx_gain: v[14],
+                beam_angle: v[15],
+                owner_body: (v[16] != 0.0).then_some(v[16] as u64),
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    w.radio_set_nodes(nodes);
+    n as jint
+});
+
+/// 批量提交活跃信号：`values` 指向 `count * 18` 个 f64（native 直接内存）。
+/// 每信号布局：
+/// `id, tx_node_id, birth_ms, ox,oy,oz, ovx,ovy,ovz, odx,ody,odz,
+///  frequency, energy, tx_gain, beam_angle, owner_body`
+/// id/owner_body 同上用 `f64::from_bits(u64)` 编码。
+jni_space!(int cosmosWorldRadioSubmitSignals(long world, long values, int count) {
+    let w = unsafe { (world as isize as *mut CosmosWorld).as_mut() };
+    let Some(w) = w else { return 0; };
+    let ptr = values as isize as *const f64;
+    let n = u32_from_jint(count) as usize;
+    if n == 0 || ptr.is_null() {
+        return 0;
+    }
+    let slice = unsafe { std::slice::from_raw_parts(ptr, n * 18) };
+    let signals: Vec<mps_cosmos::radio::ActiveSignal> = slice
+        .chunks_exact(18)
+        .map(|v| mps_cosmos::radio::ActiveSignal {
+            id: v[0] as u64,
+            tx_node_id: v[1] as u64,
+            birth_ms: v[2] as u64,
+            origin: Vector::new(v[3], v[4], v[5]),
+            origin_vel: Vector::new(v[6], v[7], v[8]),
+            origin_dir: Vector::new(v[9], v[10], v[11]),
+            frequency: v[12],
+            energy: v[13],
+            tx_gain: v[14],
+            beam_angle: v[15],
+            owner_body: (v[16] != 0.0).then_some(v[16] as u64),
+        })
+        .collect();
+    w.radio_submit_signals(signals);
+    n as jint
+});
+
+/// 取走本轮传播结果：`out` 指向 `capacity * 4` 个 f64，返回实际条数。
+jni_space!(int cosmosWorldRadioTakeResults(long world, long out, int capacity) {
+    mps_cosmos::ffi::cosmos_world_radio_take_results(
+        world as isize as *mut CosmosWorld,
+        out as isize as *mut f64,
+        u32_from_jint(capacity),
+    ) as jint
+});
+
+/// 显式推进一轮无线电传播（在天体 step 之后调用）。
+jni_space!(boolean cosmosWorldRadioStep(long world) {
+    mps_cosmos::ffi::cosmos_world_radio_step(world as isize as *mut CosmosWorld) as jbyte
 });
 
 // =========================================================================
@@ -2090,7 +2248,7 @@ jni!(int cosmosWorldDynamicBodySnapshot(
 // 创建共享 arena。`out_address` / `out_size` 传 0（null）可跳过对应输出。
 // 返回 1 = 成功；0 = 已存在 / 容量非法 / world 为 null（原因见
 // `abiLastErrorCode`）。
-jni!(boolean cosmosWorldCreateSharedArena(long world, int max_bodies, int max_commands, long out_address, long out_size) {
+jni_space!(boolean cosmosWorldCreateSharedArena(long world, int max_bodies, int max_commands, long out_address, long out_size) {
     mps_cosmos::ffi::cosmos_world_create_shared_arena(
         world as isize as *mut CosmosWorld,
         u32_from_jint(max_bodies),
@@ -2101,15 +2259,15 @@ jni!(boolean cosmosWorldCreateSharedArena(long world, int max_bodies, int max_co
 });
 // 销毁共享 arena（若有的话）。world 为 null 是 no-op。销毁前 Java 必须已释放映射
 // 该 arena 的 `ByteBuffer`，否则 use-after-free。
-jni!(void cosmosWorldDestroySharedArena(long world) {
+jni_space!(void cosmosWorldDestroySharedArena(long world) {
     mps_cosmos::ffi::cosmos_world_destroy_shared_arena(world as isize as *mut CosmosWorld);
 });
 // 取 arena 基地址（无 arena 时返回 0）。供 Java 映射 `ByteBuffer` 的地址来源。
-jni!(long cosmosWorldGetSharedArenaAddress(long world) {
+jni_space!(long cosmosWorldGetSharedArenaAddress(long world) {
     mps_cosmos::ffi::cosmos_world_get_shared_arena_address(world as isize as *const CosmosWorld) as jlong
 });
 // 取 arena 总字节大小（无 arena 时返回 0）。供 Java 映射 `ByteBuffer` 的容量来源。
-jni!(long cosmosWorldGetSharedArenaSize(long world) {
+jni_space!(long cosmosWorldGetSharedArenaSize(long world) {
     mps_cosmos::ffi::cosmos_world_get_shared_arena_size(world as isize as *const CosmosWorld) as jlong
 });
 
@@ -2118,7 +2276,7 @@ jni!(long cosmosWorldGetSharedArenaSize(long world) {
 /// 与核心 `worldGetArenaDirectByteBuffer` 平行，仅指向 cosmos world 的 arena。
 /// 使用标准 JNI `NewDirectByteBuffer`：返回的 `ByteBuffer` 直接包裹 native arena
 /// 内存，Java 侧可用 `ByteBuffer` / `DoubleBuffer` 做零 JNI 读写。
-#[unsafe(export_name = "Java_org_polaris2023_mps_rapier_RapierNative_cosmosWorldGetArenaDirectByteBuffer")]
+#[unsafe(export_name = "Java_org_cn_1grass_1block_kelvin_physical_SpaceNative_cosmosWorldGetArenaDirectByteBuffer")]
 #[allow(non_snake_case)]
 pub extern "system" fn cosmosWorldGetArenaDirectByteBuffer(
     env: JNIEnv,
@@ -2403,3 +2561,9 @@ jni!(long softArticulationLinkCount(long world, int id) {
 jni!(boolean softArticulationSetJointTarget(long world, int id, int joint_index, double target_angle) {
     ar::articulation_body_set_joint_target(m::<WH>(world), id as u32, joint_index as u32, target_angle).0 as jbyte
 });
+
+// RapierConnect.RustMemoryFree: Java Cleaner legacy call. All handles passed in
+// are consumed/freed on the Rust side; keep no-op to avoid double free.
+#[unsafe(export_name = "Java_org_polaris2023_mps_rapier_RapierConnect_RustMemoryFree")]
+#[allow(non_snake_case)]
+pub extern "system" fn RustMemoryFree(_env: JNIEnv, _class: jclass, _handle: jlong) {}

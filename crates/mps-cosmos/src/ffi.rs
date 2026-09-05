@@ -747,3 +747,183 @@ pub extern "C" fn cosmos_world_dynamic_body_snapshot(
         written as u32
     })
 }
+
+// ---------------------------------------------------------------------------
+// Radio —— 星际无线电传播（Kelvin 空间坐标系）
+// ---------------------------------------------------------------------------
+
+/// 启用无线电子世界。之后天体可注册为反射体、收发器可注册/发射。
+#[unsafe(no_mangle)]
+pub extern "C" fn cosmos_world_enable_radio(world: *mut CosmosWorld) -> u8 {
+    ffi_guard(0, || {
+        let Some(w) = (unsafe { world.as_mut() }) else {
+            set_error(ERR_NULL_POINTER, "cosmos world is null");
+            return 0;
+        };
+        w.enable_radio();
+        1
+    })
+}
+
+/// 查询无线电子世界是否已启用。
+#[unsafe(no_mangle)]
+pub extern "C" fn cosmos_world_radio_enabled(world: *const CosmosWorld) -> u8 {
+    ffi_guard(0, || unsafe { world.as_ref() }.map_or(0, |w| w.radio_enabled() as u8))
+}
+
+/// 注册一个反射天体：`body` 是打包的刚体句柄（`pack_handle`），`radius` 米。
+#[unsafe(no_mangle)]
+pub extern "C" fn cosmos_world_radio_add_reflector(
+    world: *mut CosmosWorld,
+    body: u64,
+    radius: f64,
+) -> u8 {
+    ffi_guard(0, || {
+        let Some(w) = (unsafe { world.as_mut() }) else {
+            set_error(ERR_NULL_POINTER, "cosmos world is null");
+            return 0;
+        };
+        w.radio_add_reflector(unpack_handle(body), radius) as u8
+    })
+}
+
+/// 移除反射天体。
+#[unsafe(no_mangle)]
+pub extern "C" fn cosmos_world_radio_remove_reflector(world: *mut CosmosWorld, body: u64) {
+    ffi_guard((), || {
+        if let Some(w) = unsafe { world.as_mut() } {
+            w.radio_remove_reflector(unpack_handle(body));
+        }
+    });
+}
+
+/// 注册/覆盖一个收发器节点。
+///
+/// 参数布局（全部 f64，按顺序）：
+/// `id, px, py, pz, vx, vy, vz, dx, dy, dz, frequency, power, sensitivity,
+///  rx_gain, tx_gain, beam_angle, owner_body`。
+/// `owner_body`：节点所属刚体句柄（飞船），0 表示无（用于跳过源自身反射）。
+#[unsafe(no_mangle)]
+pub extern "C" fn cosmos_world_radio_register_node(world: *mut CosmosWorld, values: *const f64) -> u8 {
+    ffi_guard(0, || {
+        let Some(w) = (unsafe { world.as_mut() }) else {
+            set_error(ERR_NULL_POINTER, "cosmos world is null");
+            return 0;
+        };
+        if values.is_null() {
+            set_error(ERR_NULL_POINTER, "node values is null");
+            return 0;
+        }
+        let v = unsafe { std::slice::from_raw_parts(values, 18) };
+        w.radio_register_node(crate::radio::RadioNode {
+            id: v[0] as u64,
+            pos: Vector::new(v[1], v[2], v[3]),
+            vel: Vector::new(v[4], v[5], v[6]),
+            dir: Vector::new(v[7], v[8], v[9]).try_normalize().unwrap_or(Vector::Z),
+            frequency: v[10],
+            power: v[11],
+            sensitivity: v[12],
+            rx_gain: v[13],
+            tx_gain: v[14],
+            beam_angle: v[15],
+            owner_body: (v[16] != 0.0).then_some(v[16] as u64),
+        });
+        1
+    })
+}
+
+/// 注销收发器节点（`id` 按 u64 位型传入 f64 槽，即 `f64::from_bits(id)`）。
+#[unsafe(no_mangle)]
+pub extern "C" fn cosmos_world_radio_unregister_node(world: *mut CosmosWorld, id: f64) {
+    ffi_guard((), || {
+        if let Some(w) = unsafe { world.as_mut() } {
+            w.radio_unregister_node(id as u64);
+        }
+    });
+}
+
+/// 提交一个活跃信号（发射）。
+///
+/// 参数布局（f64，按顺序）：
+/// `id, tx_node_id, birth_ms, ox, oy, oz, ovx, ovy, ovz, odx, ody, odz,
+///  frequency, energy, tx_gain, beam_angle, owner_body`
+#[unsafe(no_mangle)]
+pub extern "C" fn cosmos_world_radio_submit_signal(
+    world: *mut CosmosWorld,
+    values: *const f64,
+) -> u8 {
+    ffi_guard(0, || {
+        let Some(w) = (unsafe { world.as_mut() }) else {
+            set_error(ERR_NULL_POINTER, "cosmos world is null");
+            return 0;
+        };
+        if values.is_null() {
+            set_error(ERR_NULL_POINTER, "signal values is null");
+            return 0;
+        }
+        let v = unsafe { std::slice::from_raw_parts(values, 18) };
+        w.radio_submit_signal(crate::radio::ActiveSignal {
+            id: v[0] as u64,
+            tx_node_id: v[1] as u64,
+            birth_ms: v[2] as u64,
+            origin: Vector::new(v[3], v[4], v[5]),
+            origin_vel: Vector::new(v[6], v[7], v[8]),
+            origin_dir: Vector::new(v[9], v[10], v[11])
+                .try_normalize()
+                .unwrap_or(Vector::Z),
+            frequency: v[12],
+            energy: v[13],
+            tx_gain: v[14],
+            beam_angle: v[15],
+            owner_body: (v[16] != 0.0).then_some(v[16] as u64),
+        });
+        1
+    })
+}
+
+/// 取走本轮传播结果：`out` 指向 `capacity * 4` 个 f64 缓冲，
+/// 每条 = `signal_id, rx_node_id, received_power, received_frequency`（f64 位型存 id）。
+/// 返回实际条数。
+#[unsafe(no_mangle)]
+pub extern "C" fn cosmos_world_radio_take_results(
+    world: *mut CosmosWorld,
+    out: *mut f64,
+    capacity: u32,
+) -> u32 {
+    ffi_guard(0, || {
+        let Some(w) = (unsafe { world.as_mut() }) else {
+            set_error(ERR_NULL_POINTER, "cosmos world is null");
+            return 0;
+        };
+        if out.is_null() || capacity == 0 {
+            return 0;
+        }
+        let results = w.radio_take_results();
+        let n = results.len().min(capacity as usize);
+        let out = unsafe { std::slice::from_raw_parts_mut(out, n * 4) };
+        for (i, r) in results.iter().take(n).enumerate() {
+            out[i * 4] = r.signal_id as f64;
+            out[i * 4 + 1] = r.rx_node_id as f64;
+            out[i * 4 + 2] = r.received_power;
+            out[i * 4 + 3] = r.received_frequency;
+        }
+        n as u32
+    })
+}
+
+/// 显式推进一轮无线电传播（节点/信号提交后调用；读取最新天体位置）。
+/// 返回 1 成功 / 0 world 无效或未启用 radio。
+#[unsafe(no_mangle)]
+pub extern "C" fn cosmos_world_radio_step(world: *mut CosmosWorld) -> u8 {
+    ffi_guard(0, || {
+        let Some(w) = (unsafe { world.as_mut() }) else {
+            set_error(ERR_NULL_POINTER, "cosmos world is null");
+            return 0;
+        };
+        if !w.radio_enabled() {
+            return 0;
+        }
+        w.radio_step();
+        1
+    })
+}

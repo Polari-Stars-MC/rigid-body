@@ -212,6 +212,10 @@ impl PhysicsWorld {
             dt: 1.0 / 60.0,
             num_solver_iterations: 4,
             max_ccd_substeps: 4,
+            normalized_prediction_distance: 0.005,
+            num_internal_stabilization_iterations: 4,
+            normalized_max_corrective_velocity: 1.0,
+            warmstart_coefficient: 0.5,
             ..IntegrationParameters::default()
         };
 

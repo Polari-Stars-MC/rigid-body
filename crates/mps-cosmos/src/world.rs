@@ -426,6 +426,9 @@ pub struct CosmosWorld {
     /// 显式积子路径在 `explicit_substep` 里按 `命令力/质量` 折成附加加速度注入；
     /// RapierForce 路径直接 `add_force` 消费，不读此缓冲。每条 `step` 尾部清空。
     arena_cmd_forces: Vec<Option<Vector>>,
+
+    /// 可选的星际无线电传播子世界。step 尾部自动推进（直接读本世界刚体位置）。
+    radio: Option<crate::radio::RadioWorld>,
 }
 
 /// 一次 `step` 的诊断结果。调用方原本只能靠 `step` 的静默 return 猜
@@ -503,6 +506,7 @@ impl CosmosWorld {
             arena_idx_map: Vec::new(),
             arena_idx_map_body_count: 0,
             arena_cmd_forces: Vec::new(),
+            radio: None,
         }
     }
 
@@ -571,6 +575,7 @@ impl CosmosWorld {
             arena_idx_map: Vec::new(),
             arena_idx_map_body_count: 0,
             arena_cmd_forces: Vec::new(),
+            radio: None,
         }
     }
 
@@ -1036,6 +1041,125 @@ impl CosmosWorld {
         self.arena_cmd_forces.clear();
 
         result
+    }
+
+    /// 无线电传播：收集反射天体最新位置 → 推进一轮。
+    /// 由 Java 在天体 step 之后显式调用（节点/信号已提交）。
+    pub fn radio_step(&mut self) {
+        let Some(radio) = self.radio.as_mut() else {
+            return;
+        };
+
+        // 先取出反射体句柄/半径，避免与下方 radio.step(&mut self) 借用冲突
+        let reflector_desc: Vec<(RigidBodyHandle, f64)> =
+            radio.reflectors().iter().map(|r| (r.handle, r.radius)).collect();
+
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+
+        // 反射天体位置：直接读本世界刚体（f64，无 Java 拷贝）
+        let mut reflector_pos: Vec<crate::radio::ReflectorState> =
+            Vec::with_capacity(reflector_desc.len());
+        for (handle, radius) in reflector_desc {
+            if let Some(pos) = self.bodies.get(handle).map(|b| b.translation()) {
+                let (idx, generation) = handle.into_raw_parts();
+                reflector_pos.push(crate::radio::ReflectorState {
+                    handle_raw: ((idx as u64) << 32) | (generation as u64),
+                    pos,
+                    radius,
+                });
+            }
+        }
+        radio.step(&reflector_pos, now_ms);
+    }
+
+    // ==================== Radio 子世界操作 ====================
+
+    /// 启用无线电传播子世界（幂等；已启用则 no-op）。
+    pub fn enable_radio(&mut self) {
+        if self.radio.is_none() {
+            self.radio = Some(crate::radio::RadioWorld::new());
+        }
+    }
+
+    /// 是否已启用无线电。
+    pub fn radio_enabled(&self) -> bool {
+        self.radio.is_some()
+    }
+
+    /// 注册一个反射天体（行星/恒星等，按刚体句柄 + 半径）。
+    /// 返回 false 表示尚未启用 radio 或句柄无效。
+    pub fn radio_add_reflector(&mut self, handle: RigidBodyHandle, radius: f64) -> bool {
+        let Some(radio) = self.radio.as_mut() else {
+            return false;
+        };
+        if self.bodies.get(handle).is_none() {
+            return false;
+        }
+        radio.add_reflector(handle, radius);
+        true
+    }
+
+    /// 移除反射天体。
+    pub fn radio_remove_reflector(&mut self, handle: RigidBodyHandle) {
+        if let Some(radio) = self.radio.as_mut() {
+            radio.remove_reflector(handle);
+        }
+    }
+
+    /// 提交一个无线电收发器（注册或按 id 覆盖）。
+    pub fn radio_register_node(&mut self, node: crate::radio::RadioNode) {
+        if let Some(radio) = self.radio.as_mut() {
+            radio.register_node(node);
+        }
+    }
+
+    /// 整表覆盖提交收发器（Java 每 tick 传全量在线节点）。
+    pub fn radio_set_nodes(&mut self, nodes: Vec<crate::radio::RadioNode>) {
+        if let Some(radio) = self.radio.as_mut() {
+            radio.set_nodes(nodes);
+        }
+    }
+
+    /// 注销收发器。
+    pub fn radio_unregister_node(&mut self, id: u64) {
+        if let Some(radio) = self.radio.as_mut() {
+            radio.unregister_node(id);
+        }
+    }
+
+    /// 提交一个信号（发射）。
+    pub fn radio_submit_signal(&mut self, signal: crate::radio::ActiveSignal) {
+        if let Some(radio) = self.radio.as_mut() {
+            radio.submit_signal(signal);
+        }
+    }
+
+    /// 批量提交信号（发射列表）。
+    pub fn radio_submit_signals(&mut self, signals: Vec<crate::radio::ActiveSignal>) {
+        if let Some(radio) = self.radio.as_mut() {
+            for signal in signals {
+                radio.submit_signal(signal);
+            }
+        }
+    }
+
+    /// 取走本轮传播结果（信号 id、接收节点 id、功率、频移）。
+    pub fn radio_take_results(&mut self) -> Vec<crate::radio::RadioResult> {
+        self.radio
+            .as_mut()
+            .map(|r| r.take_results())
+            .unwrap_or_default()
+    }
+
+    pub fn radio_node_count(&self) -> usize {
+        self.radio.as_ref().map_or(0, |r| r.node_count())
+    }
+
+    pub fn radio_reflector_count(&self) -> usize {
+        self.radio.as_ref().map_or(0, |r| r.reflector_count())
     }
 
     /// 批量推进 `n` 个步长，每步 `dt` 秒。等价于循环 `step(dt)`，但把 `dt`
@@ -1910,6 +2034,7 @@ impl Clone for CosmosWorld {
     /// 深拷贝整个物理状态。`PhysicsPipeline` 不实现 `Clone`——它是无状态
     /// 工作对象（每次 `step` 重建临时结构），克隆用 `::new()` 恢复。
     fn clone(&self) -> Self {
+        // radio 子世界（Java 独占句柄）不随 clone 复制：克隆体无 radio。
         Self {
             pipeline: PhysicsPipeline::new(),
             gravity: self.gravity,
@@ -1948,6 +2073,7 @@ impl Clone for CosmosWorld {
             arena_idx_map: Vec::new(),
             arena_idx_map_body_count: 0,
             arena_cmd_forces: Vec::new(),
+            radio: None,
         }
     }
 }

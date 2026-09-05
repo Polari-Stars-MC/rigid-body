@@ -1413,6 +1413,17 @@ uint32_t query_intersect_spherical_shell_all(const struct WorldHandle *world,
 uint32_t soft_cloth_create(struct WorldHandle *world, struct ClothDesc desc);
 
 /**
+ * Creates a compound collider builder from a packed array of axis-aligned boxes.
+ *
+ * # Safety
+ *
+ * `box_data` must point to at least `box_count * 6` readable `f64` values,
+ * each box described as min_x, min_y, min_z, max_x, max_y, max_z.
+ */
+struct ColliderBuilderHandle *collider_builder_create_compound_boxes(const double *box_data,
+                                                                     uint32_t box_count);
+
+/**
  * Creates a collider builder from a generic shape type and packed shape data.
  *
  * # Safety
@@ -1634,6 +1645,14 @@ void collider_builder_set_restitution(struct ColliderBuilderHandle *builder, dou
  * `builder` must be a valid pointer returned by a `collider_builder_create_*`
  * function and not yet consumed or destroyed.
  */
+void collider_builder_set_contact_skin(struct ColliderBuilderHandle *builder, double skin);
+
+/**
+ * # Safety
+ *
+ * `builder` must be a valid pointer returned by a `collider_builder_create_*`
+ * function and not yet consumed or destroyed.
+ */
 void collider_builder_set_density(struct ColliderBuilderHandle *builder, double density);
 
 /**
@@ -1839,6 +1858,24 @@ uint8_t collider_set_friction_flag(struct WorldHandle *world,
 Bool collider_set_restitution(struct WorldHandle *world,
                               ColliderHandleRaw handle,
                               double restitution);
+
+/**
+ * # Safety
+ *
+ * `world` must be a valid pointer returned by `world_create` and not yet destroyed.
+ */
+Bool collider_set_friction_combine_rule(struct WorldHandle *world,
+                                        ColliderHandleRaw handle,
+                                        uint32_t rule);
+
+/**
+ * # Safety
+ *
+ * `world` must be a valid pointer returned by `world_create` and not yet destroyed.
+ */
+Bool collider_set_restitution_combine_rule(struct WorldHandle *world,
+                                           ColliderHandleRaw handle,
+                                           uint32_t rule);
 
 /**
  * # Safety
@@ -5214,6 +5251,10 @@ Bool rigid_body_set_translation(struct WorldHandle *world,
                                 RigidBodyHandleRaw handle,
                                 Vec3 translation,
                                 Bool wake_up);
+
+Bool rigid_body_set_next_kinematic_position(struct WorldHandle *world,
+                                            RigidBodyHandleRaw handle,
+                                            Vec3 translation);
 
 /**
  * # Safety

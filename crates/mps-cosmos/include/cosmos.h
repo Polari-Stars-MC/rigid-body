@@ -67,6 +67,31 @@
 #define NEAR_FIELD_FACTOR 8.0
 
 /**
+ * 最大反射次数
+ */
+#define MAX_BOUNCES 3
+
+/**
+ * 每次反射能量保留比
+ */
+#define REFLECT_ATTENUATION 0.8
+
+/**
+ * 命中判定最小距离（m）
+ */
+#define HIT_EPS 1.0e-6
+
+/**
+ * 信号最长存活时间（ms）
+ */
+#define SIGNAL_TTL_MS 5000
+
+/**
+ * 灵敏度兜底下限（W）
+ */
+#define MIN_SENSITIVITY 1.0e-15
+
+/**
  * 太空物理世界。所有公开 API 自行管理内部 `RigidBodySet` 等。
  *
  * 手写 `Clone`（而非 derive）因为 `PhysicsPipeline` 不实现 `Clone`——它是
@@ -355,6 +380,64 @@ uint32_t cosmos_world_dynamic_body_snapshot(const struct CosmosWorld *world,
                                             uint64_t *out_handles,
                                             double *out_values,
                                             uint32_t capacity);
+
+/**
+ * 启用无线电子世界。之后天体可注册为反射体、收发器可注册/发射。
+ */
+uint8_t cosmos_world_enable_radio(struct CosmosWorld *world);
+
+/**
+ * 查询无线电子世界是否已启用。
+ */
+uint8_t cosmos_world_radio_enabled(const struct CosmosWorld *world);
+
+/**
+ * 注册一个反射天体：`body` 是打包的刚体句柄（`pack_handle`），`radius` 米。
+ */
+uint8_t cosmos_world_radio_add_reflector(struct CosmosWorld *world, uint64_t body, double radius);
+
+/**
+ * 移除反射天体。
+ */
+void cosmos_world_radio_remove_reflector(struct CosmosWorld *world, uint64_t body);
+
+/**
+ * 注册/覆盖一个收发器节点。
+ *
+ * 参数布局（全部 f64，按顺序）：
+ * `id, px, py, pz, vx, vy, vz, dx, dy, dz, frequency, power, sensitivity,
+ *  rx_gain, tx_gain, beam_angle, owner_body`。
+ * `owner_body`：节点所属刚体句柄（飞船），0 表示无（用于跳过源自身反射）。
+ */
+uint8_t cosmos_world_radio_register_node(struct CosmosWorld *world,
+                                         const double *values);
+
+/**
+ * 注销收发器节点（`id` 按 u64 位型传入 f64 槽，即 `f64::from_bits(id)`）。
+ */
+void cosmos_world_radio_unregister_node(struct CosmosWorld *world, double id);
+
+/**
+ * 提交一个活跃信号（发射）。
+ *
+ * 参数布局（f64，按顺序）：
+ * `id, tx_node_id, birth_ms, ox, oy, oz, ovx, ovy, ovz, odx, ody, odz,
+ *  frequency, energy, tx_gain, beam_angle, owner_body`
+ */
+uint8_t cosmos_world_radio_submit_signal(struct CosmosWorld *world, const double *values);
+
+/**
+ * 取走本轮传播结果：`out` 指向 `capacity * 4` 个 f64 缓冲，
+ * 每条 = `signal_id, rx_node_id, received_power, received_frequency`（f64 位型存 id）。
+ * 返回实际条数。
+ */
+uint32_t cosmos_world_radio_take_results(struct CosmosWorld *world, double *out, uint32_t capacity);
+
+/**
+ * 显式推进一轮无线电传播（节点/信号提交后调用；读取最新天体位置）。
+ * 返回 1 成功 / 0 world 无效或未启用 radio。
+ */
+uint8_t cosmos_world_radio_step(struct CosmosWorld *world);
 
 #ifdef __cplusplus
 }  // extern "C"
