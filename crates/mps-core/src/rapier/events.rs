@@ -1227,10 +1227,26 @@ pub extern "C" fn world_register_terrain_gravity_polyhedron(
             set_error(ERR_INVALID_ARGUMENT, "invalid polyhedron terrain gravity");
             return Bool::FALSE;
         }
-        let Some(vlen) = (n_vertices as usize).checked_mul(3) else { set_error(ERR_INVALID_ARGUMENT, "vertex count overflow"); return Bool::FALSE; };
-        let Some(flen) = (n_faces as usize).checked_mul(3) else { set_error(ERR_INVALID_ARGUMENT, "face count overflow"); return Bool::FALSE; };
-        let Some(verts) = (unsafe { crate::rapier::ffi::convert::checked_input_slice(vertices_xyz, vlen) }) else { set_error(ERR_INVALID_ARGUMENT, "invalid vertices slice"); return Bool::FALSE; };
-        let Some(faces) = (unsafe { crate::rapier::ffi::convert::checked_input_slice(face_indices, flen) }) else { set_error(ERR_INVALID_ARGUMENT, "invalid faces slice"); return Bool::FALSE; };
+        let Some(vlen) = (n_vertices as usize).checked_mul(3) else {
+            set_error(ERR_INVALID_ARGUMENT, "vertex count overflow");
+            return Bool::FALSE;
+        };
+        let Some(flen) = (n_faces as usize).checked_mul(3) else {
+            set_error(ERR_INVALID_ARGUMENT, "face count overflow");
+            return Bool::FALSE;
+        };
+        let Some(verts) =
+            (unsafe { crate::rapier::ffi::convert::checked_input_slice(vertices_xyz, vlen) })
+        else {
+            set_error(ERR_INVALID_ARGUMENT, "invalid vertices slice");
+            return Bool::FALSE;
+        };
+        let Some(faces) =
+            (unsafe { crate::rapier::ffi::convert::checked_input_slice(face_indices, flen) })
+        else {
+            set_error(ERR_INVALID_ARGUMENT, "invalid faces slice");
+            return Bool::FALSE;
+        };
 
         let source = crate::rapier::terrain_gravity::TerrainGravitySource::Polyhedron {
             vertices: verts.to_vec(),

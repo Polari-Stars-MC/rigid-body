@@ -730,11 +730,19 @@ pub extern "C" fn celestial_get_sh_coeffs(
     let body = get_celestial_body(id);
     let count = capacity.min(body.c_coeffs.len() as u32);
     if !c_coeffs_out.is_null() {
-        let dst = unsafe { std::slice::from_raw_parts_mut(c_coeffs_out, count as usize) };
+        let Some(dst) = crate::ffi::formula_result(unsafe {
+            crate::ffi::checked_output_slice(c_coeffs_out, count as usize, "c_coeffs_out")
+        }) else {
+            return 0;
+        };
         dst.copy_from_slice(&body.c_coeffs[..count as usize]);
     }
     if !s_coeffs_out.is_null() {
-        let dst = unsafe { std::slice::from_raw_parts_mut(s_coeffs_out, count as usize) };
+        let Some(dst) = crate::ffi::formula_result(unsafe {
+            crate::ffi::checked_output_slice(s_coeffs_out, count as usize, "s_coeffs_out")
+        }) else {
+            return 0;
+        };
         dst.copy_from_slice(&body.s_coeffs[..count as usize]);
     }
     count

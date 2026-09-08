@@ -263,13 +263,47 @@ pub extern "C" fn em_fdtd_yee_update(
         return Bool::FALSE;
     }
 
-    macro_rules! input { ($p:expr, $name:expr) => { match unsafe { crate::ffi::checked_input_slice($p, cell_count as usize, $name) } { Ok(v) => v, Err(e) => { crate::ffi::formula_result::<()>(Err(e)); return Bool::FALSE; } } } }
+    macro_rules! input {
+        ($p:expr, $name:expr) => {
+            match unsafe { crate::ffi::checked_input_slice($p, cell_count as usize, $name) } {
+                Ok(v) => v,
+                Err(e) => {
+                    crate::ffi::formula_result::<()>(Err(e));
+                    return Bool::FALSE;
+                }
+            }
+        };
+    }
     let electric_fields = input!(electric_fields, "electric_fields");
     let magnetic_fields = input!(magnetic_fields, "magnetic_fields");
     let curl_electric = input!(curl_electric, "curl_electric");
     let curl_magnetic = input!(curl_magnetic, "curl_magnetic");
-    let out_electric = match unsafe { crate::ffi::checked_output_slice(out_electric_fields, capacity as usize, "out_electric_fields") } { Ok(v) => v, Err(e) => { crate::ffi::formula_result::<()>(Err(e)); return Bool::FALSE; } };
-    let out_magnetic = match unsafe { crate::ffi::checked_output_slice(out_magnetic_fields, capacity as usize, "out_magnetic_fields") } { Ok(v) => v, Err(e) => { crate::ffi::formula_result::<()>(Err(e)); return Bool::FALSE; } };
+    let out_electric = match unsafe {
+        crate::ffi::checked_output_slice(
+            out_electric_fields,
+            capacity as usize,
+            "out_electric_fields",
+        )
+    } {
+        Ok(v) => v,
+        Err(e) => {
+            crate::ffi::formula_result::<()>(Err(e));
+            return Bool::FALSE;
+        }
+    };
+    let out_magnetic = match unsafe {
+        crate::ffi::checked_output_slice(
+            out_magnetic_fields,
+            capacity as usize,
+            "out_magnetic_fields",
+        )
+    } {
+        Ok(v) => v,
+        Err(e) => {
+            crate::ffi::formula_result::<()>(Err(e));
+            return Bool::FALSE;
+        }
+    };
 
     let mut max_electric_delta = 0.0;
     let mut max_magnetic_delta = 0.0;

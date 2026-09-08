@@ -261,9 +261,22 @@ pub extern "C" fn acoustic_generalized_modal_analysis(
     }
 
     let n = dof as usize;
-    let Some(nn) = n.checked_mul(n) else { set_error(ERR_INVALID_ARGUMENT, "matrix size overflow"); return Bool::FALSE; };
-    let Some(stiffness) = (unsafe { crate::ffi::checked_input_slice(stiffness_matrix, nn, "stiffness_matrix") }).ok() else { set_error(ERR_INVALID_ARGUMENT, "invalid stiffness matrix"); return Bool::FALSE; };
-    let Some(mass) = (unsafe { crate::ffi::checked_input_slice(mass_matrix, nn, "mass_matrix") }).ok() else { set_error(ERR_INVALID_ARGUMENT, "invalid mass matrix"); return Bool::FALSE; };
+    let Some(nn) = n.checked_mul(n) else {
+        set_error(ERR_INVALID_ARGUMENT, "matrix size overflow");
+        return Bool::FALSE;
+    };
+    let Some(stiffness) =
+        (unsafe { crate::ffi::checked_input_slice(stiffness_matrix, nn, "stiffness_matrix") }).ok()
+    else {
+        set_error(ERR_INVALID_ARGUMENT, "invalid stiffness matrix");
+        return Bool::FALSE;
+    };
+    let Some(mass) =
+        (unsafe { crate::ffi::checked_input_slice(mass_matrix, nn, "mass_matrix") }).ok()
+    else {
+        set_error(ERR_INVALID_ARGUMENT, "invalid mass matrix");
+        return Bool::FALSE;
+    };
     if stiffness.iter().chain(mass).any(|value| !value.is_finite()) {
         set_error(
             ERR_INVALID_ARGUMENT,
@@ -286,7 +299,17 @@ pub extern "C" fn acoustic_generalized_modal_analysis(
     let mut order = (0..n).collect::<Vec<_>>();
     order.sort_by(|&a, &b| eigenvalues[a].total_cmp(&eigenvalues[b]));
 
-    let Some(out_eigenvalues) = (unsafe { crate::ffi::checked_output_slice(out_eigenvalues, eigen_capacity as usize, "out_eigenvalues") }).ok() else { set_error(ERR_INVALID_ARGUMENT, "invalid output buffer"); return Bool::FALSE; };
+    let Some(out_eigenvalues) = (unsafe {
+        crate::ffi::checked_output_slice(
+            out_eigenvalues,
+            eigen_capacity as usize,
+            "out_eigenvalues",
+        )
+    })
+    .ok() else {
+        set_error(ERR_INVALID_ARGUMENT, "invalid output buffer");
+        return Bool::FALSE;
+    };
     let out_frequencies =
         unsafe { slice::from_raw_parts_mut(out_frequencies_hz, eigen_capacity as usize) };
     let out_modes =
@@ -417,11 +440,29 @@ pub extern "C" fn acoustic_wave_equation_step(
     }
 
     let count = cell_count as usize;
-    macro_rules! input { ($p:expr, $name:expr) => { match unsafe { crate::ffi::checked_input_slice($p, count, $name) } { Ok(v) => v, Err(e) => { crate::ffi::formula_result::<()>(Err(e)); return Bool::FALSE; } } } }
+    macro_rules! input {
+        ($p:expr, $name:expr) => {
+            match unsafe { crate::ffi::checked_input_slice($p, count, $name) } {
+                Ok(v) => v,
+                Err(e) => {
+                    crate::ffi::formula_result::<()>(Err(e));
+                    return Bool::FALSE;
+                }
+            }
+        };
+    }
     let previous = input!(previous_pressure, "previous_pressure");
     let current = input!(current_pressure, "current_pressure");
     let laplacian = input!(laplacian_pressure, "laplacian_pressure");
-    let next = match unsafe { crate::ffi::checked_output_slice(out_next_pressure, capacity as usize, "out_next_pressure") } { Ok(v) => v, Err(e) => { crate::ffi::formula_result::<()>(Err(e)); return Bool::FALSE; } };
+    let next = match unsafe {
+        crate::ffi::checked_output_slice(out_next_pressure, capacity as usize, "out_next_pressure")
+    } {
+        Ok(v) => v,
+        Err(e) => {
+            crate::ffi::formula_result::<()>(Err(e));
+            return Bool::FALSE;
+        }
+    };
     let mut max_pressure = 0.0;
     let mut acoustic_energy_acc = KahanSum::default();
     for index in 0..count {

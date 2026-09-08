@@ -659,9 +659,27 @@ pub extern "C" fn pl_poisson_solve_1d(
     }
 
     let n_u = n as usize;
-    let rho_arr = match unsafe { crate::ffi::checked_input_slice(rho, n_u, "rho") } { Ok(v) => v, Err(e) => { crate::ffi::formula_result::<()>(Err(e)); return Bool::FALSE; } };
-    let phi = match unsafe { crate::ffi::checked_output_slice(phi_out, n_u, "phi_out") } { Ok(v) => v, Err(e) => { crate::ffi::formula_result::<()>(Err(e)); return Bool::FALSE; } };
-    let e_arr = match unsafe { crate::ffi::checked_output_slice(e_out, n_u, "e_out") } { Ok(v) => v, Err(e) => { crate::ffi::formula_result::<()>(Err(e)); return Bool::FALSE; } };
+    let rho_arr = match unsafe { crate::ffi::checked_input_slice(rho, n_u, "rho") } {
+        Ok(v) => v,
+        Err(e) => {
+            crate::ffi::formula_result::<()>(Err(e));
+            return Bool::FALSE;
+        }
+    };
+    let phi = match unsafe { crate::ffi::checked_output_slice(phi_out, n_u, "phi_out") } {
+        Ok(v) => v,
+        Err(e) => {
+            crate::ffi::formula_result::<()>(Err(e));
+            return Bool::FALSE;
+        }
+    };
+    let e_arr = match unsafe { crate::ffi::checked_output_slice(e_out, n_u, "e_out") } {
+        Ok(v) => v,
+        Err(e) => {
+            crate::ffi::formula_result::<()>(Err(e));
+            return Bool::FALSE;
+        }
+    };
 
     let eps0 = VACUUM_PERMITTIVITY;
     let dx2 = dx * dx;
@@ -771,9 +789,24 @@ pub extern "C" fn pl_find_xpoint(
         return Bool::FALSE;
     }
 
-    let Some(nu) = (nx as usize).checked_mul(ny as usize) else { set_error(ERR_INVALID_ARGUMENT, "grid size overflow"); return Bool::FALSE; };
-    let bx = match unsafe { crate::ffi::checked_input_slice(bx_grid, nu, "bx_grid") } { Ok(v) => v, Err(e) => { crate::ffi::formula_result::<()>(Err(e)); return Bool::FALSE; } };
-    let by = match unsafe { crate::ffi::checked_input_slice(by_grid, nu, "by_grid") } { Ok(v) => v, Err(e) => { crate::ffi::formula_result::<()>(Err(e)); return Bool::FALSE; } };
+    let Some(nu) = (nx as usize).checked_mul(ny as usize) else {
+        set_error(ERR_INVALID_ARGUMENT, "grid size overflow");
+        return Bool::FALSE;
+    };
+    let bx = match unsafe { crate::ffi::checked_input_slice(bx_grid, nu, "bx_grid") } {
+        Ok(v) => v,
+        Err(e) => {
+            crate::ffi::formula_result::<()>(Err(e));
+            return Bool::FALSE;
+        }
+    };
+    let by = match unsafe { crate::ffi::checked_input_slice(by_grid, nu, "by_grid") } {
+        Ok(v) => v,
+        Err(e) => {
+            crate::ffi::formula_result::<()>(Err(e));
+            return Bool::FALSE;
+        }
+    };
 
     let idx = |ix: usize, iy: usize| -> usize { iy * (nx as usize) + ix };
 

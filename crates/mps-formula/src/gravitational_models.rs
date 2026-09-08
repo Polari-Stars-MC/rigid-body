@@ -622,7 +622,13 @@ pub extern "C" fn gravity_zonal_harmonics(
         set_error(ERR_INVALID_ARGUMENT, "invalid parameters");
         return Bool::FALSE;
     }
-    let jn_slice = match unsafe { crate::ffi::checked_input_slice(jn, jn_count as usize, "jn") } { Ok(v) => v, Err(e) => { crate::ffi::formula_result::<()>(Err(e)); return Bool::FALSE; } };
+    let jn_slice = match unsafe { crate::ffi::checked_input_slice(jn, jn_count as usize, "jn") } {
+        Ok(v) => v,
+        Err(e) => {
+            crate::ffi::formula_result::<()>(Err(e));
+            return Bool::FALSE;
+        }
+    };
     let accel = zonal_harmonics_acceleration(position, gm, equatorial_radius, jn_slice);
 
     unsafe {
@@ -652,7 +658,13 @@ pub extern "C" fn gravity_quadrupole_tensor(
         set_error(ERR_INVALID_ARGUMENT, "invalid parameters");
         return Bool::FALSE;
     }
-    let q = match unsafe { crate::ffi::checked_input_slice(quadrupole, 9, "quadrupole") } { Ok(v) => v, Err(e) => { crate::ffi::formula_result::<()>(Err(e)); return Bool::FALSE; } };
+    let q = match unsafe { crate::ffi::checked_input_slice(quadrupole, 9, "quadrupole") } {
+        Ok(v) => v,
+        Err(e) => {
+            crate::ffi::formula_result::<()>(Err(e));
+            return Bool::FALSE;
+        }
+    };
     let mut q_arr = [0.0f64; 9];
     q_arr.copy_from_slice(q);
     let accel = quadrupole_tensor_acceleration(position, gm, &q_arr);

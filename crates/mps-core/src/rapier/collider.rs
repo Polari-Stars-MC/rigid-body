@@ -85,7 +85,9 @@ fn points_from_xyz(points_xyz: *const f64, point_count: u32) -> Option<Vec<Vec3>
         return None;
     }
     let value_count = (point_count as usize).checked_mul(3)?;
-    let Some(values) = (unsafe { crate::rapier::ffi::convert::checked_input_slice(points_xyz, value_count) }) else {
+    let Some(values) =
+        (unsafe { crate::rapier::ffi::convert::checked_input_slice(points_xyz, value_count) })
+    else {
         set_error(ERR_INVALID_ARGUMENT, "invalid points buffer");
         return None;
     };
@@ -166,7 +168,8 @@ fn boxes_from_minmax(box_data: *const f64, box_count: u32) -> Option<Vec<(Pose, 
         return None;
     }
     let total = count.checked_mul(6)?;
-    let Some(data) = (unsafe { crate::rapier::ffi::convert::checked_input_slice(box_data, total) }) else {
+    let Some(data) = (unsafe { crate::rapier::ffi::convert::checked_input_slice(box_data, total) })
+    else {
         set_error(ERR_INVALID_ARGUMENT, "invalid box data buffer");
         return None;
     };
@@ -391,7 +394,9 @@ pub extern "C" fn collider_builder_create_heightmap(
             set_error(ERR_INVALID_ARGUMENT, "heightmap cell count exceeds limit");
             return std::ptr::null_mut();
         }
-        let Some(values) = (unsafe { crate::rapier::ffi::convert::checked_input_slice(data, value_count) }) else {
+        let Some(values) =
+            (unsafe { crate::rapier::ffi::convert::checked_input_slice(data, value_count) })
+        else {
             set_error(ERR_INVALID_ARGUMENT, "invalid collider data buffer");
             return std::ptr::null_mut();
         };
@@ -653,7 +658,9 @@ pub extern "C" fn collider_builder_create_edge_bvh(
             set_error(ERR_INVALID_ARGUMENT, "edge index count overflow");
             return std::ptr::null_mut();
         };
-        let Some(indices) = (unsafe { crate::rapier::ffi::convert::checked_input_slice(edges, index_count) }) else {
+        let Some(indices) =
+            (unsafe { crate::rapier::ffi::convert::checked_input_slice(edges, index_count) })
+        else {
             set_error(ERR_INVALID_ARGUMENT, "invalid edge index buffer");
             return std::ptr::null_mut();
         };
@@ -704,7 +711,9 @@ pub extern "C" fn collider_builder_create_medial_spheres(
             set_error(ERR_INVALID_ARGUMENT, "sphere value count overflow");
             return std::ptr::null_mut();
         };
-        let Some(values) = (unsafe { crate::rapier::ffi::convert::checked_input_slice(spheres_xyzw, value_count) }) else {
+        let Some(values) = (unsafe {
+            crate::rapier::ffi::convert::checked_input_slice(spheres_xyzw, value_count)
+        }) else {
             set_error(ERR_INVALID_ARGUMENT, "invalid sphere buffer");
             return std::ptr::null_mut();
         };

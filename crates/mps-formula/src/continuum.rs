@@ -353,7 +353,17 @@ pub extern "C" fn continuum_newmark_beta_solve(
 
     let n = dof as usize;
     let nn = n * n;
-    macro_rules! input { ($p:expr, $l:expr, $name:expr) => { match unsafe { crate::ffi::checked_input_slice($p, $l, $name) } { Ok(v) => v, Err(e) => { crate::ffi::formula_result::<()>(Err(e)); return Bool::FALSE; } } } }
+    macro_rules! input {
+        ($p:expr, $l:expr, $name:expr) => {
+            match unsafe { crate::ffi::checked_input_slice($p, $l, $name) } {
+                Ok(v) => v,
+                Err(e) => {
+                    crate::ffi::formula_result::<()>(Err(e));
+                    return Bool::FALSE;
+                }
+            }
+        };
+    }
     let mass = input!(mass_matrix, nn, "mass_matrix");
     let damping = input!(damping_matrix, nn, "damping_matrix");
     let stiffness = input!(stiffness_matrix, nn, "stiffness_matrix");
@@ -416,7 +426,17 @@ pub extern "C" fn continuum_newmark_beta_solve(
         return Bool::FALSE;
     };
 
-    macro_rules! output { ($p:expr, $name:expr) => { match unsafe { crate::ffi::checked_output_slice($p, capacity as usize, $name) } { Ok(v) => v, Err(e) => { crate::ffi::formula_result::<()>(Err(e)); return Bool::FALSE; } } } }
+    macro_rules! output {
+        ($p:expr, $name:expr) => {
+            match unsafe { crate::ffi::checked_output_slice($p, capacity as usize, $name) } {
+                Ok(v) => v,
+                Err(e) => {
+                    crate::ffi::formula_result::<()>(Err(e));
+                    return Bool::FALSE;
+                }
+            }
+        };
+    }
     let out_delta = output!(out_delta_displacement, "out_delta_displacement");
     let out_u = output!(out_next_displacement, "out_next_displacement");
     let out_v = output!(out_next_velocity, "out_next_velocity");

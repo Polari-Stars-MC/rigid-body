@@ -638,11 +638,21 @@ pub extern "C" fn world_batch_add_colliders(
             return 0;
         }
 
-        let Some(requests_slice) = (unsafe { crate::rapier::ffi::convert::checked_input_slice(requests, count as usize) }) else { set_error(ERR_INVALID_ARGUMENT, "invalid requests slice"); return 0; };
+        let Some(requests_slice) =
+            (unsafe { crate::rapier::ffi::convert::checked_input_slice(requests, count as usize) })
+        else {
+            set_error(ERR_INVALID_ARGUMENT, "invalid requests slice");
+            return 0;
+        };
         let handles = world.inner.batch_add_colliders(requests_slice, &preset);
 
         let written = handles.len().min(out_capacity as usize);
-        let Some(out) = (unsafe { crate::rapier::ffi::convert::checked_output_slice(out_handles, out_capacity as usize) }) else { set_error(ERR_INVALID_ARGUMENT, "invalid output slice"); return 0; };
+        let Some(out) = (unsafe {
+            crate::rapier::ffi::convert::checked_output_slice(out_handles, out_capacity as usize)
+        }) else {
+            set_error(ERR_INVALID_ARGUMENT, "invalid output slice");
+            return 0;
+        };
         out[..written].copy_from_slice(&handles[..written]);
 
         written as u32
@@ -680,11 +690,21 @@ pub extern "C" fn world_merge_static_shapes(
             return 0;
         }
 
-        let Some(requests_slice) = (unsafe { crate::rapier::ffi::convert::checked_input_slice(requests, count as usize) }) else { set_error(ERR_INVALID_ARGUMENT, "invalid requests slice"); return 0; };
+        let Some(requests_slice) =
+            (unsafe { crate::rapier::ffi::convert::checked_input_slice(requests, count as usize) })
+        else {
+            set_error(ERR_INVALID_ARGUMENT, "invalid requests slice");
+            return 0;
+        };
         let handles = world.inner.merge_static_shapes(requests_slice, &preset);
 
         let written = handles.len().min(out_capacity as usize);
-        let Some(out) = (unsafe { crate::rapier::ffi::convert::checked_output_slice(out_handles, out_capacity as usize) }) else { set_error(ERR_INVALID_ARGUMENT, "invalid output slice"); return 0; };
+        let Some(out) = (unsafe {
+            crate::rapier::ffi::convert::checked_output_slice(out_handles, out_capacity as usize)
+        }) else {
+            set_error(ERR_INVALID_ARGUMENT, "invalid output slice");
+            return 0;
+        };
         out[..written].copy_from_slice(&handles[..written]);
 
         written as u32

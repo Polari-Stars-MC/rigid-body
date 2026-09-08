@@ -142,7 +142,11 @@ pub extern "C" fn chaos_lorenz_integrate(
     }
     let cap = out_len as usize;
     let count = (steps as usize).min(cap);
-    let buf = unsafe { std::slice::from_raw_parts_mut(out_states, count) };
+    let Some(buf) = crate::ffi::formula_result(unsafe {
+        crate::ffi::checked_output_slice(out_states, count, "out_states")
+    }) else {
+        return 0;
+    };
 
     let dt = params.dt;
     let mut s = initial;
@@ -415,7 +419,11 @@ pub extern "C" fn chaos_lyapunov_rosenstein(
     let n = data_len as usize;
     let m = embedding_dim as usize;
     let tau = delay as usize;
-    let samples = unsafe { std::slice::from_raw_parts(data, n) };
+    let Some(samples) =
+        crate::ffi::formula_result(unsafe { crate::ffi::checked_input_slice(data, n, "data") })
+    else {
+        return Bool::FALSE;
+    };
 
     // Number of embedded vectors
     let n_vectors = n.saturating_sub((m - 1) * tau);
@@ -583,7 +591,11 @@ pub extern "C" fn chaos_bifurcation_lorenz(
         return 0;
     }
 
-    let buf = unsafe { std::slice::from_raw_parts_mut(out_points, cap) };
+    let Some(buf) = crate::ffi::formula_result(unsafe {
+        crate::ffi::checked_output_slice(out_points, cap, "out_points")
+    }) else {
+        return 0;
+    };
     let mut written = 0usize;
 
     for p_idx in 0..param_steps as usize {
@@ -899,7 +911,11 @@ pub extern "C" fn chaos_double_pendulum_integrate(
 
     let cap = out_len as usize;
     let count = (steps as usize).min(cap);
-    let buf = unsafe { std::slice::from_raw_parts_mut(out_states, count) };
+    let Some(buf) = crate::ffi::formula_result(unsafe {
+        crate::ffi::checked_output_slice(out_states, count, "out_states")
+    }) else {
+        return 0;
+    };
 
     let dt = params.dt;
     let mut s = initial;
@@ -1054,7 +1070,11 @@ pub extern "C" fn chaos_detect(
 
     // Clamp sample steps to data length
     let effective_steps = (params.sample_steps as usize).min(data_len as usize);
-    let data_slice = unsafe { std::slice::from_raw_parts(data, effective_steps) };
+    let Some(data_slice) = crate::ffi::formula_result(unsafe {
+        crate::ffi::checked_input_slice(data, effective_steps, "data")
+    }) else {
+        return Bool::FALSE;
+    };
 
     // ---- 1. Lyapunov exponent (Rosenstein) ----
     let mut lyapunov_report = LyapunovReport::default();
@@ -1253,7 +1273,11 @@ pub extern "C" fn chaos_logistic_iterate(
 
     let cap = out_len as usize;
     let count = (steps as usize).min(cap);
-    let buf = unsafe { std::slice::from_raw_parts_mut(out_values, count) };
+    let Some(buf) = crate::ffi::formula_result(unsafe {
+        crate::ffi::checked_output_slice(out_values, count, "out_values")
+    }) else {
+        return 0;
+    };
 
     let mut x = initial_x;
     for item in buf.iter_mut() {
@@ -1314,7 +1338,11 @@ pub extern "C" fn chaos_logistic_bifurcation(
         return 0;
     }
 
-    let buf = unsafe { std::slice::from_raw_parts_mut(out_points, cap) };
+    let Some(buf) = crate::ffi::formula_result(unsafe {
+        crate::ffi::checked_output_slice(out_points, cap, "out_points")
+    }) else {
+        return 0;
+    };
     let mut written = 0usize;
 
     for p_idx in 0..param_steps as usize {

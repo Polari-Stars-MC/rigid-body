@@ -403,9 +403,24 @@ pub extern "C" fn control_lqr_like_stabilizing_input(
     }
     let n = state_count as usize;
     let m = input_count as usize;
-    let x = match unsafe { crate::ffi::checked_input_slice(state, n, "state") } { Ok(v) => v, Err(e) => { crate::ffi::formula_result::<()>(Err(e)); return Bool::FALSE; } };
-    let Some(mn) = m.checked_mul(n) else { set_error(ERR_INVALID_ARGUMENT, "gain matrix size overflow"); return Bool::FALSE; };
-    let k = match unsafe { crate::ffi::checked_input_slice(gain_matrix, mn, "gain_matrix") } { Ok(v) => v, Err(e) => { crate::ffi::formula_result::<()>(Err(e)); return Bool::FALSE; } };
+    let x = match unsafe { crate::ffi::checked_input_slice(state, n, "state") } {
+        Ok(v) => v,
+        Err(e) => {
+            crate::ffi::formula_result::<()>(Err(e));
+            return Bool::FALSE;
+        }
+    };
+    let Some(mn) = m.checked_mul(n) else {
+        set_error(ERR_INVALID_ARGUMENT, "gain matrix size overflow");
+        return Bool::FALSE;
+    };
+    let k = match unsafe { crate::ffi::checked_input_slice(gain_matrix, mn, "gain_matrix") } {
+        Ok(v) => v,
+        Err(e) => {
+            crate::ffi::formula_result::<()>(Err(e));
+            return Bool::FALSE;
+        }
+    };
     if x.iter().chain(k).any(|value| !finite(*value)) {
         set_error(
             ERR_INVALID_ARGUMENT,
@@ -413,7 +428,15 @@ pub extern "C" fn control_lqr_like_stabilizing_input(
         );
         return Bool::FALSE;
     }
-    let out = match unsafe { crate::ffi::checked_output_slice(out_control, capacity as usize, "out_control") } { Ok(v) => v, Err(e) => { crate::ffi::formula_result::<()>(Err(e)); return Bool::FALSE; } };
+    let out = match unsafe {
+        crate::ffi::checked_output_slice(out_control, capacity as usize, "out_control")
+    } {
+        Ok(v) => v,
+        Err(e) => {
+            crate::ffi::formula_result::<()>(Err(e));
+            return Bool::FALSE;
+        }
+    };
     for row in 0..m {
         let mut value = 0.0;
         for col in 0..n {

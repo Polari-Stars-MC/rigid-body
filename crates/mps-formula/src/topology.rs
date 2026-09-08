@@ -1,4 +1,3 @@
-
 use crate::error::{ERR_CAPACITY, ERR_INVALID_ARGUMENT, ERR_NULL_POINTER, clear_error, set_error};
 use crate::ffi::{
     Bool, DensityFieldStats, SimpMaterialReport, TopologyOptimizationParams,
@@ -193,9 +192,33 @@ pub extern "C" fn topology_oc_update(
         set_error(ERR_INVALID_ARGUMENT, "invalid topology OC parameters");
         return Bool::FALSE;
     }
-    let densities = match unsafe { crate::ffi::checked_input_slice(densities, cell_count as usize, "densities") } { Ok(v) => v, Err(e) => { crate::ffi::formula_result::<()>(Err(e)); return Bool::FALSE; } };
-    let sensitivities = match unsafe { crate::ffi::checked_input_slice(sensitivities, cell_count as usize, "sensitivities") } { Ok(v) => v, Err(e) => { crate::ffi::formula_result::<()>(Err(e)); return Bool::FALSE; } };
-    let out = match unsafe { crate::ffi::checked_output_slice(out_densities, capacity as usize, "out_densities") } { Ok(v) => v, Err(e) => { crate::ffi::formula_result::<()>(Err(e)); return Bool::FALSE; } };
+    let densities = match unsafe {
+        crate::ffi::checked_input_slice(densities, cell_count as usize, "densities")
+    } {
+        Ok(v) => v,
+        Err(e) => {
+            crate::ffi::formula_result::<()>(Err(e));
+            return Bool::FALSE;
+        }
+    };
+    let sensitivities = match unsafe {
+        crate::ffi::checked_input_slice(sensitivities, cell_count as usize, "sensitivities")
+    } {
+        Ok(v) => v,
+        Err(e) => {
+            crate::ffi::formula_result::<()>(Err(e));
+            return Bool::FALSE;
+        }
+    };
+    let out = match unsafe {
+        crate::ffi::checked_output_slice(out_densities, capacity as usize, "out_densities")
+    } {
+        Ok(v) => v,
+        Err(e) => {
+            crate::ffi::formula_result::<()>(Err(e));
+            return Bool::FALSE;
+        }
+    };
     if densities.iter().any(|density| !density_valid(*density))
         || sensitivities
             .iter()
@@ -276,8 +299,24 @@ pub extern "C" fn topology_density_filter_2d(
     }
     let width = width as usize;
     let height = height as usize;
-    let densities = match unsafe { crate::ffi::checked_input_slice(densities, cell_count as usize, "densities") } { Ok(v) => v, Err(e) => { crate::ffi::formula_result::<()>(Err(e)); return Bool::FALSE; } };
-    let out = match unsafe { crate::ffi::checked_output_slice(out_densities, capacity as usize, "out_densities") } { Ok(v) => v, Err(e) => { crate::ffi::formula_result::<()>(Err(e)); return Bool::FALSE; } };
+    let densities = match unsafe {
+        crate::ffi::checked_input_slice(densities, cell_count as usize, "densities")
+    } {
+        Ok(v) => v,
+        Err(e) => {
+            crate::ffi::formula_result::<()>(Err(e));
+            return Bool::FALSE;
+        }
+    };
+    let out = match unsafe {
+        crate::ffi::checked_output_slice(out_densities, capacity as usize, "out_densities")
+    } {
+        Ok(v) => v,
+        Err(e) => {
+            crate::ffi::formula_result::<()>(Err(e));
+            return Bool::FALSE;
+        }
+    };
     if densities.iter().any(|density| !density_valid(*density)) {
         set_error(
             ERR_INVALID_ARGUMENT,
@@ -354,8 +393,24 @@ pub extern "C" fn topology_density_to_voxels(
         set_error(ERR_INVALID_ARGUMENT, "invalid density voxel threshold");
         return Bool::FALSE;
     }
-    let densities = match unsafe { crate::ffi::checked_input_slice(densities, cell_count as usize, "densities") } { Ok(v) => v, Err(e) => { crate::ffi::formula_result::<()>(Err(e)); return Bool::FALSE; } };
-    let voxels = match unsafe { crate::ffi::checked_output_slice(out_voxels, capacity as usize, "out_voxels") } { Ok(v) => v, Err(e) => { crate::ffi::formula_result::<()>(Err(e)); return Bool::FALSE; } };
+    let densities = match unsafe {
+        crate::ffi::checked_input_slice(densities, cell_count as usize, "densities")
+    } {
+        Ok(v) => v,
+        Err(e) => {
+            crate::ffi::formula_result::<()>(Err(e));
+            return Bool::FALSE;
+        }
+    };
+    let voxels = match unsafe {
+        crate::ffi::checked_output_slice(out_voxels, capacity as usize, "out_voxels")
+    } {
+        Ok(v) => v,
+        Err(e) => {
+            crate::ffi::formula_result::<()>(Err(e));
+            return Bool::FALSE;
+        }
+    };
     if densities.iter().any(|density| !density_valid(*density)) {
         set_error(
             ERR_INVALID_ARGUMENT,
@@ -407,8 +462,24 @@ pub extern "C" fn topology_runtime_shape_density_step(
         set_error(ERR_INVALID_ARGUMENT, "invalid runtime topology parameters");
         return Bool::FALSE;
     }
-    let densities_slice = match unsafe { crate::ffi::checked_input_slice(densities, cell_count as usize, "densities") } { Ok(v) => v, Err(e) => { crate::ffi::formula_result::<()>(Err(e)); return Bool::FALSE; } };
-    let energies = match unsafe { crate::ffi::checked_input_slice(element_energies, cell_count as usize, "element_energies") } { Ok(v) => v, Err(e) => { crate::ffi::formula_result::<()>(Err(e)); return Bool::FALSE; } };
+    let densities_slice = match unsafe {
+        crate::ffi::checked_input_slice(densities, cell_count as usize, "densities")
+    } {
+        Ok(v) => v,
+        Err(e) => {
+            crate::ffi::formula_result::<()>(Err(e));
+            return Bool::FALSE;
+        }
+    };
+    let energies = match unsafe {
+        crate::ffi::checked_input_slice(element_energies, cell_count as usize, "element_energies")
+    } {
+        Ok(v) => v,
+        Err(e) => {
+            crate::ffi::formula_result::<()>(Err(e));
+            return Bool::FALSE;
+        }
+    };
     if energies.iter().any(|energy| !finite_non_negative(*energy)) {
         set_error(
             ERR_INVALID_ARGUMENT,
