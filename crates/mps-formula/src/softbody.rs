@@ -108,11 +108,11 @@ pub extern "C" fn softbody_predict_positions(
     }
 
     let count = particle_count as usize;
-    let positions = unsafe { slice::from_raw_parts(positions, count) };
-    let velocities = unsafe { slice::from_raw_parts(velocities, count) };
-    let inverse_masses = unsafe { slice::from_raw_parts(inverse_masses, count) };
+    let positions = match unsafe { crate::ffi::checked_input_slice(positions, count, "positions") } { Ok(v) => v, Err(e) => { crate::ffi::formula_result::<()>(Err(e)); return Bool::FALSE; } };
+    let velocities = match unsafe { crate::ffi::checked_input_slice(velocities, count, "velocities") } { Ok(v) => v, Err(e) => { crate::ffi::formula_result::<()>(Err(e)); return Bool::FALSE; } };
+    let inverse_masses = match unsafe { crate::ffi::checked_input_slice(inverse_masses, count, "inverse_masses") } { Ok(v) => v, Err(e) => { crate::ffi::formula_result::<()>(Err(e)); return Bool::FALSE; } };
     let write_count = count.min(capacity as usize);
-    let out_positions = unsafe { slice::from_raw_parts_mut(out_predicted_positions, write_count) };
+    let out_positions = match unsafe { crate::ffi::checked_output_slice(out_predicted_positions, write_count, "out_predicted_positions") } { Ok(v) => v, Err(e) => { crate::ffi::formula_result::<()>(Err(e)); return Bool::FALSE; } };
     let gravity = vec3_to_rapier(gravity);
     let velocity_scale = (1.0 - damping * dt).max(0.0);
     let mut active_particles = 0;
@@ -190,11 +190,11 @@ pub extern "C" fn softbody_mass_spring_forces(
     }
 
     let count = particle_count as usize;
-    let positions = unsafe { slice::from_raw_parts(positions, count) };
-    let velocities = unsafe { slice::from_raw_parts(velocities, count) };
-    let springs = unsafe { slice::from_raw_parts(springs, spring_count as usize) };
+    let positions = match unsafe { crate::ffi::checked_input_slice(positions, count, "positions") } { Ok(v) => v, Err(e) => { crate::ffi::formula_result::<()>(Err(e)); return Bool::FALSE; } };
+    let velocities = match unsafe { crate::ffi::checked_input_slice(velocities, count, "velocities") } { Ok(v) => v, Err(e) => { crate::ffi::formula_result::<()>(Err(e)); return Bool::FALSE; } };
+    let springs = if spring_count == 0 { &[] } else { match unsafe { crate::ffi::checked_input_slice(springs, spring_count as usize, "springs") } { Ok(v) => v, Err(e) => { crate::ffi::formula_result::<()>(Err(e)); return Bool::FALSE; } } };
     let write_count = count.min(force_capacity as usize);
-    let out_forces = unsafe { slice::from_raw_parts_mut(out_forces, write_count) };
+    let out_forces = match unsafe { crate::ffi::checked_output_slice(out_forces, write_count, "out_forces") } { Ok(v) => v, Err(e) => { crate::ffi::formula_result::<()>(Err(e)); return Bool::FALSE; } };
     out_forces[..write_count].fill(Vec3::default());
 
     let mut total_error_acc = KahanSum::default();
@@ -286,9 +286,9 @@ pub extern "C" fn softbody_solve_xpbd_distance_constraints(
         set_error(ERR_INVALID_ARGUMENT, "invalid XPBD distance timestep");
         return Bool::FALSE;
     }
-    let positions = unsafe { slice::from_raw_parts_mut(positions, particle_count as usize) };
-    let inverse_masses = unsafe { slice::from_raw_parts(inverse_masses, particle_count as usize) };
-    let constraints = unsafe { slice::from_raw_parts_mut(constraints, constraint_count as usize) };
+    let positions = match unsafe { crate::ffi::checked_output_slice(positions, particle_count as usize, "positions") } { Ok(v) => v, Err(e) => { crate::ffi::formula_result::<()>(Err(e)); return Bool::FALSE; } };
+    let inverse_masses = match unsafe { crate::ffi::checked_input_slice(inverse_masses, particle_count as usize, "inverse_masses") } { Ok(v) => v, Err(e) => { crate::ffi::formula_result::<()>(Err(e)); return Bool::FALSE; } };
+    let constraints = if constraint_count == 0 { &mut [] } else { match unsafe { crate::ffi::checked_output_slice(constraints, constraint_count as usize, "constraints") } { Ok(v) => v, Err(e) => { crate::ffi::formula_result::<()>(Err(e)); return Bool::FALSE; } } };
     let mut total_error_acc = KahanSum::default();
     let mut max_correction = 0.0;
     for _ in 0..iterations.max(1) {
@@ -429,9 +429,9 @@ pub extern "C" fn softbody_solve_sphere_collision_constraints(
         set_error(ERR_NULL_POINTER, "soft collision pointers are null");
         return Bool::FALSE;
     }
-    let positions = unsafe { slice::from_raw_parts_mut(positions, particle_count as usize) };
-    let inverse_masses = unsafe { slice::from_raw_parts(inverse_masses, particle_count as usize) };
-    let spheres = unsafe { slice::from_raw_parts(spheres, sphere_count as usize) };
+    let positions = match unsafe { crate::ffi::checked_output_slice(positions, particle_count as usize, "positions") } { Ok(v) => v, Err(e) => { crate::ffi::formula_result::<()>(Err(e)); return Bool::FALSE; } };
+    let inverse_masses = match unsafe { crate::ffi::checked_input_slice(inverse_masses, particle_count as usize, "inverse_masses") } { Ok(v) => v, Err(e) => { crate::ffi::formula_result::<()>(Err(e)); return Bool::FALSE; } };
+    let spheres = if sphere_count == 0 { &[] } else { match unsafe { crate::ffi::checked_input_slice(spheres, sphere_count as usize, "spheres") } { Ok(v) => v, Err(e) => { crate::ffi::formula_result::<()>(Err(e)); return Bool::FALSE; } } };
     let mut total_error_acc = KahanSum::default();
     let mut max_correction = 0.0;
     for sphere in spheres {

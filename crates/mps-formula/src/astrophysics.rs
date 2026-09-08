@@ -1,5 +1,3 @@
-use std::slice;
-
 use crate::math::Vector3f64;
 use std::f64::consts::PI;
 
@@ -238,12 +236,28 @@ pub extern "C" fn astro_nbody_direct_accelerations(
         set_error(ERR_INVALID_ARGUMENT, "invalid N-body direct parameters");
         return Bool::FALSE;
     }
-    let particles = unsafe { slice::from_raw_parts(particles, particle_count as usize) };
+    let particles = match unsafe {
+        crate::ffi::checked_input_slice(particles, particle_count as usize, "particles")
+    } {
+        Ok(v) => v,
+        Err(e) => {
+            crate::ffi::formula_result::<()>(Err(e));
+            return Bool::FALSE;
+        }
+    };
     if particles.iter().any(|particle| !particle_valid(*particle)) {
         set_error(ERR_INVALID_ARGUMENT, "invalid N-body particle");
         return Bool::FALSE;
     }
-    let out = unsafe { slice::from_raw_parts_mut(out_accelerations, capacity as usize) };
+    let out = match unsafe {
+        crate::ffi::checked_output_slice(out_accelerations, capacity as usize, "out_accelerations")
+    } {
+        Ok(v) => v,
+        Err(e) => {
+            crate::ffi::formula_result::<()>(Err(e));
+            return Bool::FALSE;
+        }
+    };
     // G×m 对每个天体是常量，预计算一次
     let gm: Vec<f64> = particles
         .iter()
@@ -303,8 +317,24 @@ pub unsafe extern "C" fn astro_nbody_direct_accelerations_bare(
     out_accelerations: *mut Vec3,
     capacity: u32,
 ) {
-    let particles = unsafe { slice::from_raw_parts(particles, particle_count as usize) };
-    let out = unsafe { slice::from_raw_parts_mut(out_accelerations, capacity as usize) };
+    if capacity < particle_count {
+        set_error(ERR_CAPACITY, "insufficient acceleration capacity");
+        return;
+    }
+    if particle_count == 0 {
+        clear_error();
+        return;
+    }
+    let Some(particles) = crate::ffi::formula_result(unsafe {
+        crate::ffi::checked_input_slice(particles, particle_count as usize, "particles")
+    }) else {
+        return;
+    };
+    let Some(out) = crate::ffi::formula_result(unsafe {
+        crate::ffi::checked_output_slice(out_accelerations, capacity as usize, "out_accelerations")
+    }) else {
+        return;
+    };
 
     // G×m 对每个天体是常量，预缓存一次
     let gm: Vec<f64> = particles
@@ -359,7 +389,11 @@ pub extern "C" fn astro_nbody_barnes_hut_accelerations(
         set_error(ERR_INVALID_ARGUMENT, "invalid Barnes-Hut parameters");
         return Bool::FALSE;
     }
-    let particles = unsafe { slice::from_raw_parts(particles, particle_count as usize) };
+    let Some(particles) = crate::ffi::formula_result(unsafe {
+        crate::ffi::checked_input_slice(particles, particle_count as usize, "particles")
+    }) else {
+        return Bool::FALSE;
+    };
     if particles.iter().any(|particle| !particle_valid(*particle)) {
         set_error(ERR_INVALID_ARGUMENT, "invalid Barnes-Hut particle");
         return Bool::FALSE;
@@ -374,7 +408,11 @@ pub extern "C" fn astro_nbody_barnes_hut_accelerations(
     for index in 0..particles.len() {
         insert_particle(&mut nodes, 0, index, particles);
     }
-    let out = unsafe { slice::from_raw_parts_mut(out_accelerations, capacity as usize) };
+    let Some(out) = crate::ffi::formula_result(unsafe {
+        crate::ffi::checked_output_slice(out_accelerations, capacity as usize, "out_accelerations")
+    }) else {
+        return Bool::FALSE;
+    };
     let mut report = NBodyForceReport {
         body_count: particle_count,
         ..NBodyForceReport::default()

@@ -1,4 +1,3 @@
-use std::slice;
 
 use crate::error::{ERR_CAPACITY, ERR_INVALID_ARGUMENT, ERR_NULL_POINTER, clear_error, set_error};
 use crate::ffi::{
@@ -183,10 +182,11 @@ pub extern "C" fn physchem_gray_scott_step_2d(
     let count = cell_count as usize;
     let width_usize = width as usize;
     let height_usize = height as usize;
-    let u_values = unsafe { slice::from_raw_parts(u_values, count) };
-    let v_values = unsafe { slice::from_raw_parts(v_values, count) };
-    let out_u = unsafe { slice::from_raw_parts_mut(out_u_values, capacity as usize) };
-    let out_v = unsafe { slice::from_raw_parts_mut(out_v_values, capacity as usize) };
+    macro_rules! input { ($p:expr, $name:expr) => { match unsafe { crate::ffi::checked_input_slice($p, count, $name) } { Ok(v) => v, Err(e) => { crate::ffi::formula_result::<()>(Err(e)); return Bool::FALSE; } } } }
+    let u_values = input!(u_values, "u_values");
+    let v_values = input!(v_values, "v_values");
+    let out_u = match unsafe { crate::ffi::checked_output_slice(out_u_values, capacity as usize, "out_u_values") } { Ok(v) => v, Err(e) => { crate::ffi::formula_result::<()>(Err(e)); return Bool::FALSE; } };
+    let out_v = match unsafe { crate::ffi::checked_output_slice(out_v_values, capacity as usize, "out_v_values") } { Ok(v) => v, Err(e) => { crate::ffi::formula_result::<()>(Err(e)); return Bool::FALSE; } };
     if u_values
         .iter()
         .chain(v_values)

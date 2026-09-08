@@ -58,7 +58,7 @@ impl ForceQueueHeader {
     /// Number of u64 words in the bitmap array.
     #[inline]
     pub fn bitmap_words(&self) -> usize {
-        self.capacity.div_ceil(64) as usize
+        self.capacity.checked_add(63).map(|v| (v / 64) as usize).unwrap_or(usize::MAX)
     }
 
     /// Byte offset from start of header to the bitmap array.
@@ -70,13 +70,13 @@ impl ForceQueueHeader {
     /// Byte offset from start of header to the payload array.
     #[inline]
     pub fn payload_offset(&self) -> usize {
-        self.bitmap_offset() + self.bitmap_words() * 8
+        self.bitmap_offset().checked_add(self.bitmap_words().checked_mul(8).unwrap_or(usize::MAX)).unwrap_or(usize::MAX)
     }
 
     /// Total size in bytes of the entire queue (header + bitmap + payload).
     #[inline]
     pub fn total_size(&self) -> usize {
-        self.payload_offset() + (self.capacity as usize) * (self.stride as usize) * 8
+        self.payload_offset().checked_add((self.capacity as usize).checked_mul(self.stride as usize).and_then(|v| v.checked_mul(8)).unwrap_or(usize::MAX)).unwrap_or(usize::MAX)
     }
 
     /// Returns a pointer to the bitmap array (as `AtomicU64` slice).
@@ -86,6 +86,7 @@ impl ForceQueueHeader {
     /// with sufficient trailing capacity for bitmap + payload.
     #[inline]
     pub unsafe fn bitmap(&self) -> &[AtomicU64] {
+        if self.bitmap_words() == usize::MAX { return &[]; }
         unsafe {
             let ptr = (self as *const Self).byte_add(self.bitmap_offset()) as *const AtomicU64;
             core::slice::from_raw_parts(ptr, self.bitmap_words())
@@ -98,9 +99,10 @@ impl ForceQueueHeader {
     /// Same as `bitmap()`.
     #[inline]
     pub unsafe fn payload(&self) -> &[f64] {
+        let Some(len) = (self.capacity as usize).checked_mul(self.stride as usize) else { return &[]; };
         unsafe {
             let ptr = (self as *const Self).byte_add(self.payload_offset()) as *const f64;
-            core::slice::from_raw_parts(ptr, (self.capacity as usize) * (self.stride as usize))
+            core::slice::from_raw_parts(ptr, len)
         }
     }
 
@@ -110,9 +112,10 @@ impl ForceQueueHeader {
     /// Same as `bitmap()`. Caller must ensure exclusive access (producer side).
     #[inline]
     pub unsafe fn payload_mut(&mut self) -> &mut [f64] {
+        let Some(len) = (self.capacity as usize).checked_mul(self.stride as usize) else { return &mut []; };
         unsafe {
             let ptr = (self as *mut Self).byte_add(self.payload_offset()) as *mut f64;
-            core::slice::from_raw_parts_mut(ptr, (self.capacity as usize) * (self.stride as usize))
+            core::slice::from_raw_parts_mut(ptr, len)
         }
     }
 

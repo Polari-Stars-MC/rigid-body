@@ -1,5 +1,3 @@
-use std::slice;
-
 use crate::error::{ERR_CAPACITY, ERR_INVALID_ARGUMENT, ERR_NULL_POINTER, clear_error, set_error};
 use crate::ffi::{
     Bool, FemHeatDiffusionReport, FemHeatEdge, FemHeatNode, HeatConductionReport,
@@ -300,10 +298,34 @@ pub extern "C" fn thermal_fem_diffusion_step(
         return Bool::FALSE;
     }
 
-    let nodes = unsafe { slice::from_raw_parts(nodes, node_count as usize) };
-    let edges = unsafe { slice::from_raw_parts(edges, edge_count as usize) };
-    let out_temperatures =
-        unsafe { slice::from_raw_parts_mut(out_temperatures, capacity as usize) };
+    let nodes =
+        match unsafe { crate::ffi::checked_input_slice(nodes, node_count as usize, "nodes") } {
+            Ok(v) => v,
+            Err(e) => {
+                crate::ffi::formula_result::<()>(Err(e));
+                return Bool::FALSE;
+            }
+        };
+    let edges = if edge_count == 0 {
+        &[]
+    } else {
+        match unsafe { crate::ffi::checked_input_slice(edges, edge_count as usize, "edges") } {
+            Ok(v) => v,
+            Err(e) => {
+                crate::ffi::formula_result::<()>(Err(e));
+                return Bool::FALSE;
+            }
+        }
+    };
+    let out_temperatures = match unsafe {
+        crate::ffi::checked_output_slice(out_temperatures, capacity as usize, "out_temperatures")
+    } {
+        Ok(v) => v,
+        Err(e) => {
+            crate::ffi::formula_result::<()>(Err(e));
+            return Bool::FALSE;
+        }
+    };
     // Use out_temperatures as temporary scratch before writing final values:
     // first pass accumulates heat_rates into out_temperatures directly,
     // second pass converts to temperature deltas in-place.

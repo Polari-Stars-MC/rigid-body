@@ -1,5 +1,4 @@
 use std::f64::consts::PI;
-use std::slice;
 
 use crate::error::{ERR_CAPACITY, ERR_INVALID_ARGUMENT, ERR_NULL_POINTER, clear_error, set_error};
 use crate::ffi::{
@@ -264,12 +263,13 @@ pub extern "C" fn em_fdtd_yee_update(
         return Bool::FALSE;
     }
 
-    let electric_fields = unsafe { slice::from_raw_parts(electric_fields, cell_count as usize) };
-    let magnetic_fields = unsafe { slice::from_raw_parts(magnetic_fields, cell_count as usize) };
-    let curl_electric = unsafe { slice::from_raw_parts(curl_electric, cell_count as usize) };
-    let curl_magnetic = unsafe { slice::from_raw_parts(curl_magnetic, cell_count as usize) };
-    let out_electric = unsafe { slice::from_raw_parts_mut(out_electric_fields, capacity as usize) };
-    let out_magnetic = unsafe { slice::from_raw_parts_mut(out_magnetic_fields, capacity as usize) };
+    macro_rules! input { ($p:expr, $name:expr) => { match unsafe { crate::ffi::checked_input_slice($p, cell_count as usize, $name) } { Ok(v) => v, Err(e) => { crate::ffi::formula_result::<()>(Err(e)); return Bool::FALSE; } } } }
+    let electric_fields = input!(electric_fields, "electric_fields");
+    let magnetic_fields = input!(magnetic_fields, "magnetic_fields");
+    let curl_electric = input!(curl_electric, "curl_electric");
+    let curl_magnetic = input!(curl_magnetic, "curl_magnetic");
+    let out_electric = match unsafe { crate::ffi::checked_output_slice(out_electric_fields, capacity as usize, "out_electric_fields") } { Ok(v) => v, Err(e) => { crate::ffi::formula_result::<()>(Err(e)); return Bool::FALSE; } };
+    let out_magnetic = match unsafe { crate::ffi::checked_output_slice(out_magnetic_fields, capacity as usize, "out_magnetic_fields") } { Ok(v) => v, Err(e) => { crate::ffi::formula_result::<()>(Err(e)); return Bool::FALSE; } };
 
     let mut max_electric_delta = 0.0;
     let mut max_magnetic_delta = 0.0;

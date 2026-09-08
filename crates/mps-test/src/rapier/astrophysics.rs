@@ -13,6 +13,58 @@ mod tests {
     }
 
     #[test]
+    fn nbody_checked_buffers_reject_misalignment_without_writing() {
+        use mps_formula::astrophysics::*;
+        use mps_formula::error::{ERR_INVALID_ARGUMENT, error_code};
+        for solver in [
+            astro_nbody_direct_accelerations,
+            astro_nbody_barnes_hut_accelerations,
+        ] {
+            let storage = [0_u64; 16];
+            let particles = unsafe { storage.as_ptr().cast::<u8>().add(1) }.cast::<NBodyParticle>();
+            let mut out = [Vec3 {
+                x: 12.0,
+                y: 13.0,
+                z: 14.0,
+            }];
+            assert_eq!(
+                solver(
+                    particles,
+                    1,
+                    params(),
+                    out.as_mut_ptr(),
+                    1,
+                    std::ptr::null_mut()
+                ),
+                Bool::FALSE
+            );
+            assert_eq!(error_code(), ERR_INVALID_ARGUMENT);
+            assert_eq!((out[0].x, out[0].y, out[0].z), (12.0, 13.0, 14.0));
+        }
+    }
+
+    #[test]
+    fn nbody_bare_rejects_short_output_before_reading_input() {
+        use mps_formula::error::{ERR_CAPACITY, error_code};
+        let mut out = [Vec3 {
+            x: 12.0,
+            y: 13.0,
+            z: 14.0,
+        }];
+        unsafe {
+            mps_formula::astrophysics::astro_nbody_direct_accelerations_bare(
+                std::ptr::null(),
+                2,
+                1.0,
+                out.as_mut_ptr(),
+                1,
+            );
+        }
+        assert_eq!(error_code(), ERR_CAPACITY);
+        assert_eq!((out[0].x, out[0].y, out[0].z), (12.0, 13.0, 14.0));
+    }
+
+    #[test]
     fn direct_nbody_accelerates_toward_mass() {
         let particles = [
             NBodyParticle {

@@ -353,13 +353,14 @@ pub extern "C" fn continuum_newmark_beta_solve(
 
     let n = dof as usize;
     let nn = n * n;
-    let mass = unsafe { slice::from_raw_parts(mass_matrix, nn) };
-    let damping = unsafe { slice::from_raw_parts(damping_matrix, nn) };
-    let stiffness = unsafe { slice::from_raw_parts(stiffness_matrix, nn) };
-    let u = unsafe { slice::from_raw_parts(displacement, n) };
-    let v = unsafe { slice::from_raw_parts(velocity, n) };
-    let a = unsafe { slice::from_raw_parts(acceleration, n) };
-    let force = unsafe { slice::from_raw_parts(external_force, n) };
+    macro_rules! input { ($p:expr, $l:expr, $name:expr) => { match unsafe { crate::ffi::checked_input_slice($p, $l, $name) } { Ok(v) => v, Err(e) => { crate::ffi::formula_result::<()>(Err(e)); return Bool::FALSE; } } } }
+    let mass = input!(mass_matrix, nn, "mass_matrix");
+    let damping = input!(damping_matrix, nn, "damping_matrix");
+    let stiffness = input!(stiffness_matrix, nn, "stiffness_matrix");
+    let u = input!(displacement, n, "displacement");
+    let v = input!(velocity, n, "velocity");
+    let a = input!(acceleration, n, "acceleration");
+    let force = input!(external_force, n, "external_force");
     if mass
         .iter()
         .chain(damping)
@@ -415,10 +416,11 @@ pub extern "C" fn continuum_newmark_beta_solve(
         return Bool::FALSE;
     };
 
-    let out_delta = unsafe { slice::from_raw_parts_mut(out_delta_displacement, capacity as usize) };
-    let out_u = unsafe { slice::from_raw_parts_mut(out_next_displacement, capacity as usize) };
-    let out_v = unsafe { slice::from_raw_parts_mut(out_next_velocity, capacity as usize) };
-    let out_a = unsafe { slice::from_raw_parts_mut(out_next_acceleration, capacity as usize) };
+    macro_rules! output { ($p:expr, $name:expr) => { match unsafe { crate::ffi::checked_output_slice($p, capacity as usize, $name) } { Ok(v) => v, Err(e) => { crate::ffi::formula_result::<()>(Err(e)); return Bool::FALSE; } } } }
+    let out_delta = output!(out_delta_displacement, "out_delta_displacement");
+    let out_u = output!(out_next_displacement, "out_next_displacement");
+    let out_v = output!(out_next_velocity, "out_next_velocity");
+    let out_a = output!(out_next_acceleration, "out_next_acceleration");
     let mut max_delta = 0.0;
     for i in 0..n {
         let next_acceleration = a0 * delta[i];

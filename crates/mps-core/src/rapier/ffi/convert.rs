@@ -17,6 +17,50 @@ use crate::rapier::forces::ForceLawType;
 pub(crate) const MAX_OUTPUT_CAPACITY: u32 = 1_000_000;
 pub(crate) const MAX_TREE_ENTRIES: usize = 1_000_000;
 
+#[inline]
+pub(crate) fn checked_product(a: usize, b: usize) -> Option<usize> {
+    a.checked_mul(b)
+}
+
+#[inline]
+pub(crate) fn checked_product3(a: usize, b: usize, c: usize) -> Option<usize> {
+    a.checked_mul(b)?.checked_mul(c)
+}
+
+/// # Safety
+/// `ptr` must point to `len` initialized, properly aligned values for the duration of the borrow.
+pub(crate) unsafe fn checked_input_slice<'a, T>(ptr: *const T, len: usize) -> Option<&'a [T]> {
+    if len == 0 {
+        return Some(&[]);
+    }
+    let bytes = len.checked_mul(std::mem::size_of::<T>())?;
+    if ptr.is_null()
+        || !ptr.is_aligned()
+        || bytes > isize::MAX as usize
+        || (ptr as usize).checked_add(bytes).is_none()
+    {
+        return None;
+    }
+    Some(unsafe { std::slice::from_raw_parts(ptr, len) })
+}
+
+/// # Safety
+/// `ptr` must point to `len` writable, properly aligned values for the duration of the borrow.
+pub(crate) unsafe fn checked_output_slice<'a, T>(ptr: *mut T, len: usize) -> Option<&'a mut [T]> {
+    if len == 0 {
+        return Some(&mut []);
+    }
+    let bytes = len.checked_mul(std::mem::size_of::<T>())?;
+    if ptr.is_null()
+        || !ptr.is_aligned()
+        || bytes > isize::MAX as usize
+        || (ptr as usize).checked_add(bytes).is_none()
+    {
+        return None;
+    }
+    Some(unsafe { std::slice::from_raw_parts_mut(ptr, len) })
+}
+
 const INVALID_HANDLE_RAW: u64 = u64::MAX;
 
 fn pack_handle_parts(id: u32, generation: u32) -> u64 {

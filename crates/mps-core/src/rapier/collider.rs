@@ -28,7 +28,6 @@ thread_local! {
         std::cell::RefCell::new(None);
 }
 use smallvec::SmallVec;
-use std::slice;
 
 const MIN_HALF_EXTENT: f64 = 1.0e-9;
 const MAX_RAW_POINTS: u32 = 1_000_000;
@@ -86,7 +85,10 @@ fn points_from_xyz(points_xyz: *const f64, point_count: u32) -> Option<Vec<Vec3>
         return None;
     }
     let value_count = (point_count as usize).checked_mul(3)?;
-    let values = unsafe { slice::from_raw_parts(points_xyz, value_count) };
+    let Some(values) = (unsafe { crate::rapier::ffi::convert::checked_input_slice(points_xyz, value_count) }) else {
+        set_error(ERR_INVALID_ARGUMENT, "invalid points buffer");
+        return None;
+    };
     let mut points = Vec::with_capacity(point_count as usize);
     for chunk in values.as_chunks::<3>().0 {
         let point = Vec3 {
@@ -164,7 +166,10 @@ fn boxes_from_minmax(box_data: *const f64, box_count: u32) -> Option<Vec<(Pose, 
         return None;
     }
     let total = count.checked_mul(6)?;
-    let data = unsafe { slice::from_raw_parts(box_data, total) };
+    let Some(data) = (unsafe { crate::rapier::ffi::convert::checked_input_slice(box_data, total) }) else {
+        set_error(ERR_INVALID_ARGUMENT, "invalid box data buffer");
+        return None;
+    };
 
     let mut parts = Vec::with_capacity(count);
     for chunk in data.as_chunks::<6>().0 {
@@ -386,7 +391,10 @@ pub extern "C" fn collider_builder_create_heightmap(
             set_error(ERR_INVALID_ARGUMENT, "heightmap cell count exceeds limit");
             return std::ptr::null_mut();
         }
-        let values = unsafe { slice::from_raw_parts(data, value_count) };
+        let Some(values) = (unsafe { crate::rapier::ffi::convert::checked_input_slice(data, value_count) }) else {
+            set_error(ERR_INVALID_ARGUMENT, "invalid collider data buffer");
+            return std::ptr::null_mut();
+        };
         let mut heightfield = Array2::<f64>::zeros(data_x as usize, data_y as usize);
         for x in 0..data_x as usize {
             for y in 0..data_y as usize {
@@ -645,7 +653,10 @@ pub extern "C" fn collider_builder_create_edge_bvh(
             set_error(ERR_INVALID_ARGUMENT, "edge index count overflow");
             return std::ptr::null_mut();
         };
-        let indices = unsafe { slice::from_raw_parts(edges, index_count) };
+        let Some(indices) = (unsafe { crate::rapier::ffi::convert::checked_input_slice(edges, index_count) }) else {
+            set_error(ERR_INVALID_ARGUMENT, "invalid edge index buffer");
+            return std::ptr::null_mut();
+        };
         let mut parts = Vec::with_capacity(edge_count as usize);
         for edge in indices.as_chunks::<2>().0 {
             let Some(a) = vertices.get(edge[0] as usize).copied() else {
@@ -693,7 +704,10 @@ pub extern "C" fn collider_builder_create_medial_spheres(
             set_error(ERR_INVALID_ARGUMENT, "sphere value count overflow");
             return std::ptr::null_mut();
         };
-        let values = unsafe { slice::from_raw_parts(spheres_xyzw, value_count) };
+        let Some(values) = (unsafe { crate::rapier::ffi::convert::checked_input_slice(spheres_xyzw, value_count) }) else {
+            set_error(ERR_INVALID_ARGUMENT, "invalid sphere buffer");
+            return std::ptr::null_mut();
+        };
         let mut parts = Vec::with_capacity(sphere_count as usize);
         for chunk in values.as_chunks::<4>().0 {
             let center = Vec3 {
