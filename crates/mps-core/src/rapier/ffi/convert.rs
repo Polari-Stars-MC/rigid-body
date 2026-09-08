@@ -17,16 +17,6 @@ use crate::rapier::forces::ForceLawType;
 pub(crate) const MAX_OUTPUT_CAPACITY: u32 = 1_000_000;
 pub(crate) const MAX_TREE_ENTRIES: usize = 1_000_000;
 
-#[inline]
-pub(crate) fn checked_product(a: usize, b: usize) -> Option<usize> {
-    a.checked_mul(b)
-}
-
-#[inline]
-pub(crate) fn checked_product3(a: usize, b: usize, c: usize) -> Option<usize> {
-    a.checked_mul(b)?.checked_mul(c)
-}
-
 /// # Safety
 /// `ptr` must point to `len` initialized, properly aligned values for the duration of the borrow.
 pub(crate) unsafe fn checked_input_slice<'a, T>(ptr: *const T, len: usize) -> Option<&'a [T]> {

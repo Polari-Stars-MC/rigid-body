@@ -74,21 +74,17 @@ impl ForceQueueHeader {
     #[inline]
     pub fn payload_offset(&self) -> usize {
         self.bitmap_offset()
-            .checked_add(self.bitmap_words().checked_mul(8).unwrap_or(usize::MAX))
-            .unwrap_or(usize::MAX)
+            .saturating_add(self.bitmap_words().saturating_mul(8))
     }
 
     /// Total size in bytes of the entire queue (header + bitmap + payload).
     #[inline]
     pub fn total_size(&self) -> usize {
-        self.payload_offset()
-            .checked_add(
-                (self.capacity as usize)
-                    .checked_mul(self.stride as usize)
-                    .and_then(|v| v.checked_mul(8))
-                    .unwrap_or(usize::MAX),
-            )
-            .unwrap_or(usize::MAX)
+        self.payload_offset().saturating_add(
+            (self.capacity as usize)
+                .saturating_mul(self.stride as usize)
+                .saturating_mul(8),
+        )
     }
 
     /// Returns a pointer to the bitmap array (as `AtomicU64` slice).
