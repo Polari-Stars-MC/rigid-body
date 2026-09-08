@@ -365,8 +365,25 @@ pub extern "C" fn pl_interpolate_field(
         return Bool::FALSE;
     }
 
-    let cells =
-        unsafe { std::slice::from_raw_parts(grid, (nx as usize) * (ny as usize) * (nz as usize)) };
+    let cell_count = match crate::ffi::checked_product3(
+        nx as usize,
+        ny as usize,
+        nz as usize,
+        "grid dimensions",
+    ) {
+        Ok(value) => value,
+        Err(error) => {
+            crate::ffi::formula_result::<()>(Err(error));
+            return Bool::FALSE;
+        }
+    };
+    let cells = match unsafe { crate::ffi::checked_input_slice(grid, cell_count, "grid") } {
+        Ok(value) => value,
+        Err(error) => {
+            crate::ffi::formula_result::<()>(Err(error));
+            return Bool::FALSE;
+        }
+    };
 
     // Compute grid indices (cell-centre coordinates)
     let ix_f = (particle_x - origin_x) / cell_size;

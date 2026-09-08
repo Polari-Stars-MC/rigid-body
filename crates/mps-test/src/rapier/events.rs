@@ -1624,3 +1624,40 @@ mod verify_friction_hoist {
         );
     }
 }
+
+/// `world_step` and the Java-facing ring drain are the two concurrent users
+/// permitted by `CollectingEventHandler`'s `Send`/`Sync` contract. Repeating
+/// both paths catches accidental lock scope regressions and validates that
+/// the step/init guards do not alias the producer cache.
+#[test]
+fn event_ring_concurrent_step_and_drain_stays_safe() {
+    use mps_core::rapier::events::{
+        world_collision_event_ring_len, world_contact_force_event_ring_len,
+        world_drain_collision_event_ring, world_drain_contact_force_event_ring,
+        world_init_collision_event_ring, world_init_contact_force_event_ring,
+    };
+    use mps_core::rapier::ffi::{
+        Bool, CollisionEventRecord, ContactForceEventRecord, Vec3, WorldHandle,
+    };
+    use std::thread;
+    let world = mps_core::rapier::world::world_create(Vec3::default());
+    assert_eq!(world_init_collision_event_ring(world, 128), Bool::TRUE);
+    assert_eq!(world_init_contact_force_event_ring(world, 128), Bool::TRUE);
+    let world_addr = world as usize;
+    let stepper = thread::spawn(move || {
+        let world = world_addr as *mut WorldHandle;
+        for _ in 0..2_000 {
+            mps_core::rapier::world::world_step(world, 1.0 / 60.0);
+        }
+    });
+    let mut collisions = vec![CollisionEventRecord::default(); 128];
+    let mut forces = vec![ContactForceEventRecord::default(); 128];
+    for _ in 0..2_000 {
+        let _ = world_drain_collision_event_ring(world, collisions.as_mut_ptr(), 128);
+        let _ = world_drain_contact_force_event_ring(world, forces.as_mut_ptr(), 128);
+    }
+    stepper.join().unwrap();
+    assert_eq!(world_collision_event_ring_len(world), 0);
+    assert_eq!(world_contact_force_event_ring_len(world), 0);
+    mps_core::rapier::world::world_destroy(world);
+}

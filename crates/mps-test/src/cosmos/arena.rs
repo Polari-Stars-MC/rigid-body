@@ -113,3 +113,140 @@ fn flush_all_bodies_parallel_matches_body_state() {
         }
     }
 }
+
+/// Stress the published generation protocol with one writer and one reader
+/// per slot. Readers only accept an even generation that is unchanged across
+/// the payload copy; a torn or partially published record must never pass.
+#[test]
+fn body_slot_seqlock_concurrent_readers_never_accept_torn_payload() {
+    use std::sync::{
+        Arc, Barrier,
+        atomic::{AtomicU64, Ordering},
+    };
+    use std::thread;
+    const SLOTS: usize = 4;
+    const ITERS: u64 = 50_000;
+    let arena = Arc::new(mps_cosmos::arena::SharedArena::new(SLOTS as u32, 4).unwrap());
+    let start = Arc::new(Barrier::new(SLOTS * 2));
+    let mut threads = Vec::new();
+    for slot_index in 0..SLOTS {
+        let writer_arena = Arc::clone(&arena);
+        let writer_start = Arc::clone(&start);
+        threads.push(thread::spawn(move || {
+            writer_start.wait();
+            let base = writer_arena.address() as *mut u8;
+            let slot = unsafe { base.add(HEADER_SIZE + slot_index * BODY_SLOT_STRIDE as usize) };
+            let generation = unsafe { &*(slot as *const AtomicU64) };
+            for value in 1..=ITERS {
+                let odd = value * 2 - 1;
+                generation.store(odd, Ordering::Release);
+                unsafe {
+                    (&*(slot.add(8) as *const AtomicU64)).store(value, Ordering::Relaxed);
+                    (&*(slot.add(16) as *const AtomicU64)).store(!value, Ordering::Relaxed);
+                    (&*(slot.add(24) as *const AtomicU64)).store(value ^ 0xA5A5, Ordering::Relaxed);
+                }
+                generation.store(value * 2, Ordering::Release);
+            }
+        }));
+        let reader_arena = Arc::clone(&arena);
+        let reader_start = Arc::clone(&start);
+        threads.push(thread::spawn(move || {
+            reader_start.wait();
+            let base = reader_arena.address() as *const u8;
+            let slot = unsafe { base.add(HEADER_SIZE + slot_index * BODY_SLOT_STRIDE as usize) };
+            let generation = unsafe { &*(slot as *const AtomicU64) };
+            let mut accepted = 0;
+            while accepted < ITERS {
+                let before = generation.load(Ordering::Acquire);
+                if before == 0 || before & 1 != 0 {
+                    continue;
+                }
+                let (a, b, c) = unsafe {
+                    (
+                        (&*(slot.add(8) as *const AtomicU64)).load(Ordering::Relaxed),
+                        (&*(slot.add(16) as *const AtomicU64)).load(Ordering::Relaxed),
+                        (&*(slot.add(24) as *const AtomicU64)).load(Ordering::Relaxed),
+                    )
+                };
+                let after = generation.load(Ordering::Acquire);
+                if before == after && after & 1 == 0 {
+                    assert_eq!((b, c), (!a, a ^ 0xA5A5));
+                    accepted += 1;
+                }
+            }
+        }));
+    }
+    for thread in threads {
+        thread.join().unwrap();
+    }
+}
+
+/// Repeatedly publish a complete SPSC batch and drain it. This specifically
+/// exercises reset-after-drain and ring wrap-around without violating the
+/// documented single-producer/single-consumer ownership rule.
+#[test]
+fn command_ring_spsc_batches_reset_without_loss() {
+    use std::sync::{
+        Arc, Barrier,
+        atomic::{AtomicU32, Ordering},
+    };
+    use std::thread;
+    const BATCHES: u32 = 2_000;
+    const CAPACITY: u32 = 32;
+    let arena = Arc::new(mps_cosmos::arena::SharedArena::new(1, CAPACITY).unwrap());
+    let start = Arc::new(Barrier::new(2));
+    let producer_arena = Arc::clone(&arena);
+    let producer_start = Arc::clone(&start);
+    let producer = thread::spawn(move || {
+        producer_start.wait();
+        let base = producer_arena.address() as *mut u8;
+        let ring_offset =
+            unsafe { (base.add(OFF_CMD_RING) as *const u64).read_unaligned() as usize };
+        for batch in 0..BATCHES {
+            for index in 0..CAPACITY {
+                let slot =
+                    unsafe { base.add(ring_offset + index as usize * CMD_SLOT_STRIDE as usize) };
+                unsafe {
+                    (slot as *mut u32).write_unaligned(2);
+                    (slot.add(8) as *mut u32).write_unaligned(index);
+                    (slot.add(16) as *mut f64).write_unaligned(batch as f64);
+                }
+            }
+            unsafe {
+                (&*(base.add(OFF_CMD_WRITE) as *const AtomicU32))
+                    .store(CAPACITY, Ordering::Release);
+            }
+            while unsafe {
+                (&*(base.add(OFF_CMD_WRITE) as *const AtomicU32)).load(Ordering::Acquire) != 0
+            } {
+                thread::yield_now();
+            }
+        }
+    });
+    start.wait();
+    let mut seen = vec![false; BATCHES as usize];
+    for _batch in 0..BATCHES {
+        loop {
+            let header = unsafe {
+                let header_ptr =
+                    (arena.address() as *const u8).add(OFF_CMD_WRITE) as *const AtomicU32;
+                (&*header_ptr).load(Ordering::Acquire)
+            };
+            if header == 0 {
+                thread::yield_now();
+                continue;
+            }
+            let commands = arena.drain_commands();
+            assert!(!commands.is_empty());
+            assert_eq!(commands.len(), CAPACITY as usize);
+            let observed = commands[0].2 as usize;
+            assert!(observed < BATCHES as usize);
+            assert!(commands.iter().all(|command| command.2 == observed as f64));
+            assert!(!seen[observed], "batch {observed} drained twice");
+            seen[observed] = true;
+            break;
+        }
+    }
+    producer.join().unwrap();
+    assert!(seen.into_iter().all(|value| value));
+}

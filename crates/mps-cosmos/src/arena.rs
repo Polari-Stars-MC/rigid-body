@@ -24,6 +24,10 @@
 //! consumer): Java writes a 32-byte slot then bumps `cmd_write` (header offset
 //! 44); Rust drains `[0, cmd_write)` at the top of `step` and resets the index
 //! to 0.
+//!
+//! Payload words are stored as atomic integer bit patterns. Java readers must
+//! use Acquire/volatile reads for payload words between the two generation
+//! reads, preserving the byte layout while preventing torn `f64` values.
 
 use std::alloc::{Layout, alloc_zeroed, dealloc};
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
@@ -183,17 +187,17 @@ impl SharedArena {
         self.ptr as u64
     }
 
-    /// Header u32 accessor (relaxed — header is written once at `new()` and the
-    /// only live field Rust mutates is `cmd_write`, which Rust itself reads
-    /// under the single-drainer invariant).
+    /// Header u32 accessor. Header fields are shared with Java, so even
+    /// metadata reads use an atomic load to avoid a Rust data race with the
+    /// producer's `cmd_write` publication.
     pub(super) fn header_u32(&self, offset: usize) -> u32 {
-        unsafe { (self.ptr.add(offset) as *const u32).read_unaligned() }
+        debug_assert_eq!(offset % std::mem::align_of::<AtomicU32>(), 0);
+        unsafe { (&*(self.ptr.add(offset) as *const AtomicU32)).load(Ordering::Acquire) }
     }
 
     pub(super) fn set_header_u32(&self, offset: usize, value: u32) {
-        unsafe {
-            (self.ptr.add(offset) as *mut u32).write_unaligned(value);
-        }
+        debug_assert_eq!(offset % std::mem::align_of::<AtomicU32>(), 0);
+        unsafe { (&*(self.ptr.add(offset) as *const AtomicU32)).store(value, Ordering::Release) }
     }
 
     /// Pointer to a body slot.
@@ -230,18 +234,21 @@ impl SharedArena {
             let gen_ptr = &*(slot as *const AtomicU64);
             let current_gen = gen_ptr.load(Ordering::Relaxed);
             gen_ptr.store(current_gen.wrapping_add(1) | 1, Ordering::Release);
-            (slot.add(8) as *mut f64).write_unaligned(pos_x);
-            (slot.add(16) as *mut f64).write_unaligned(pos_y);
-            (slot.add(24) as *mut f64).write_unaligned(pos_z);
-            (slot.add(32) as *mut f64).write_unaligned(vel_x);
-            (slot.add(40) as *mut f64).write_unaligned(vel_y);
-            (slot.add(48) as *mut f64).write_unaligned(vel_z);
-            (slot.add(56) as *mut f64).write_unaligned(angvel_x);
-            (slot.add(64) as *mut f64).write_unaligned(angvel_y);
-            (slot.add(72) as *mut f64).write_unaligned(angvel_z);
-            (slot.add(80) as *mut u32).write_unaligned(body_type);
-            (slot.add(84) as *mut u32).write_unaligned(sleeping);
-            (slot.add(88) as *mut u64).write_unaligned(user_data);
+            // Payload is written with relaxed atomics. The final even
+            // generation Release publishes all preceding stores; readers use
+            // Acquire around their seqlock validation.
+            (&*(slot.add(8) as *const AtomicU64)).store(pos_x.to_bits(), Ordering::Relaxed);
+            (&*(slot.add(16) as *const AtomicU64)).store(pos_y.to_bits(), Ordering::Relaxed);
+            (&*(slot.add(24) as *const AtomicU64)).store(pos_z.to_bits(), Ordering::Relaxed);
+            (&*(slot.add(32) as *const AtomicU64)).store(vel_x.to_bits(), Ordering::Relaxed);
+            (&*(slot.add(40) as *const AtomicU64)).store(vel_y.to_bits(), Ordering::Relaxed);
+            (&*(slot.add(48) as *const AtomicU64)).store(vel_z.to_bits(), Ordering::Relaxed);
+            (&*(slot.add(56) as *const AtomicU64)).store(angvel_x.to_bits(), Ordering::Relaxed);
+            (&*(slot.add(64) as *const AtomicU64)).store(angvel_y.to_bits(), Ordering::Relaxed);
+            (&*(slot.add(72) as *const AtomicU64)).store(angvel_z.to_bits(), Ordering::Relaxed);
+            (&*(slot.add(80) as *const AtomicU32)).store(body_type, Ordering::Relaxed);
+            (&*(slot.add(84) as *const AtomicU32)).store(sleeping, Ordering::Relaxed);
+            (&*(slot.add(88) as *const AtomicU64)).store(user_data, Ordering::Relaxed);
             gen_ptr.store(current_gen.wrapping_add(2), Ordering::Release);
         }
     }
@@ -265,7 +272,7 @@ impl SharedArena {
             let slot = self
                 .ptr
                 .add(self.body_handle_map_offset + index as usize * 8);
-            (slot as *mut u64).write_unaligned(handle_raw);
+            (&*(slot as *const AtomicU64)).store(handle_raw, Ordering::Relaxed);
         }
     }
 

@@ -21,8 +21,8 @@ pub const SCIENTIST: ScientistRecord = ScientistRecord {
 
 /// 该科学家名下的公式实现（从各域模块迁移而来）。
 pub mod formulas {
+    use crate::domain::{self, FormulaError};
     use crate::ffi::*;
-    use crate::math::*;
     fn aero_surface_valid(surface: &AeroSurface) -> bool {
         vec3_finite(surface.point)
             && vec3_finite(surface.normal)
@@ -42,15 +42,29 @@ pub mod formulas {
         gravity: f64,
         elevation: f64,
     ) -> f64 {
-        if !total_pressure.is_finite()
-            || !finite_positive(density)
-            || !finite_non_negative(velocity)
-            || !gravity.is_finite()
-            || !elevation.is_finite()
-        {
-            return f64::NAN;
-        }
-        total_pressure - 0.5 * density * velocity * velocity - density * gravity * elevation
+        bernoulli_pressure_checked(total_pressure, density, velocity, gravity, elevation)
+            .unwrap_or(f64::NAN)
+    }
+
+    /// Checked static pressure. Density must be positive and speed nonnegative;
+    /// signed pressure, gravity and elevation are allowed. All inputs and
+    /// results must be finite. Zero gravity is valid for pressure calculation.
+    pub fn bernoulli_pressure_checked(
+        total_pressure: f64,
+        density: f64,
+        velocity: f64,
+        gravity: f64,
+        elevation: f64,
+    ) -> Result<f64, FormulaError> {
+        domain::finite(total_pressure, "total_pressure")?;
+        domain::positive(density, "density")?;
+        domain::nonnegative(velocity, "velocity")?;
+        domain::finite(gravity, "gravity")?;
+        domain::finite(elevation, "elevation")?;
+        domain::finite_result(
+            total_pressure - 0.5 * density * velocity * velocity - density * gravity * elevation,
+            "static pressure",
+        )
     }
 
     /// Bernoulli report.
@@ -61,21 +75,37 @@ pub mod formulas {
         gravity: f64,
         elevation: f64,
     ) -> Option<BernoulliReport> {
-        if !pressure.is_finite()
-            || !finite_positive(density)
-            || !finite_non_negative(velocity)
-            || !gravity.is_finite()
-            || !elevation.is_finite()
-        {
-            return None;
-        }
-        let dynamic_pressure = 0.5 * density * velocity * velocity;
-        let total_pressure = pressure + dynamic_pressure + density * gravity * elevation;
-        Some(BernoulliReport {
+        bernoulli_report_checked(pressure, density, velocity, gravity, elevation).ok()
+    }
+
+    /// Checked Bernoulli report. Unlike static pressure, total head divides by
+    /// gravity, so zero gravity (of either sign) is a domain error. No infinite
+    /// head is returned. Density is positive, speed nonnegative, all values finite.
+    pub fn bernoulli_report_checked(
+        pressure: f64,
+        density: f64,
+        velocity: f64,
+        gravity: f64,
+        elevation: f64,
+    ) -> Result<BernoulliReport, FormulaError> {
+        domain::finite(pressure, "pressure")?;
+        domain::positive(density, "density")?;
+        domain::nonnegative(velocity, "velocity")?;
+        domain::finite(gravity, "gravity")?;
+        domain::finite(elevation, "elevation")?;
+        let dynamic_pressure =
+            domain::finite_result(0.5 * density * velocity * velocity, "dynamic pressure")?;
+        let weight = domain::finite_result(density * gravity, "specific weight")?;
+        let total_pressure = domain::finite_result(
+            pressure + dynamic_pressure + weight * elevation,
+            "total pressure",
+        )?;
+        let total_head = domain::divide(total_pressure, weight)?;
+        Ok(BernoulliReport {
             pressure,
             velocity,
             elevation,
-            total_head: total_pressure / (density * gravity),
+            total_head,
             dynamic_pressure,
         })
     }

@@ -24,7 +24,51 @@ fn material_valid(material: MaterialProperties) -> bool {
         && material.thermal_expansion.is_finite()
 }
 
+/// Pure Fourier conduction with explicit domain errors.
+///
+/// Temperatures must be finite (signed values are valid on a Celsius scale).
+/// Conductivity and area must be finite and nonnegative; thickness must be
+/// finite and positive. All computed quantities must be finite except for
+/// thermal resistance: exactly zero conductivity or area models an insulator
+/// and intentionally returns positive infinity. Infinite inputs are never accepted.
+pub fn fourier_conduction_checked(
+    hot_temperature: f64,
+    cold_temperature: f64,
+    conductivity: f64,
+    area: f64,
+    thickness: f64,
+) -> Result<HeatConductionReport, crate::FormulaError> {
+    use crate::domain;
+    domain::finite(hot_temperature, "hot_temperature")?;
+    domain::finite(cold_temperature, "cold_temperature")?;
+    domain::nonnegative(conductivity, "conductivity")?;
+    domain::nonnegative(area, "area")?;
+    domain::positive(thickness, "thickness")?;
+    let temperature_delta =
+        domain::finite_result(hot_temperature - cold_temperature, "temperature delta")?;
+    let temperature_gradient = domain::divide(temperature_delta, thickness)?;
+    let heat_flux = domain::finite_result(conductivity * temperature_gradient, "heat flux")?;
+    let heat_rate = domain::finite_result(heat_flux * area, "heat rate")?;
+    let thermal_resistance = if conductivity == 0.0 || area == 0.0 {
+        f64::INFINITY
+    } else {
+        let denominator = domain::finite_result(conductivity * area, "conductivity times area")?;
+        domain::divide(thickness, denominator)?
+    };
+    Ok(HeatConductionReport {
+        temperature_delta,
+        temperature_gradient,
+        heat_flux,
+        heat_rate,
+        thermal_resistance,
+    })
+}
+
 /// Fourier heat conduction through a slab: flux, heat rate, and thermal resistance.
+///
+/// Uses [`fourier_conduction_checked`]; domain errors set `ERR_INVALID_ARGUMENT`
+/// without writing the output. Zero conductivity or area intentionally produces
+/// positive infinite thermal resistance. NaN and infinite inputs are rejected.
 ///
 /// # Safety
 ///
@@ -40,37 +84,20 @@ pub extern "C" fn thermal_fourier_conduction(
     thickness: f64,
     out_report: *mut HeatConductionReport,
 ) -> Bool {
-    if !hot_temperature.is_finite()
-        || !cold_temperature.is_finite()
-        || !finite_non_negative(conductivity)
-        || !finite_non_negative(area)
-        || !finite_positive(thickness)
-    {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "invalid Fourier conduction parameters",
-        );
+    let Some(report) = crate::ffi::formula_result(fourier_conduction_checked(
+        hot_temperature,
+        cold_temperature,
+        conductivity,
+        area,
+        thickness,
+    )) else {
         return Bool::FALSE;
-    }
-    let temperature_delta = hot_temperature - cold_temperature;
-    let temperature_gradient = temperature_delta / thickness;
-    let heat_flux = conductivity * temperature_gradient;
-    let heat_rate = heat_flux * area;
+    };
     let Some(out_report) = (unsafe { out_report.as_mut() }) else {
         set_error(ERR_NULL_POINTER, "heat conduction output is null");
         return Bool::FALSE;
     };
-    *out_report = HeatConductionReport {
-        temperature_delta,
-        temperature_gradient,
-        heat_flux,
-        heat_rate,
-        thermal_resistance: if conductivity > 0.0 && area > 0.0 {
-            thickness / (conductivity * area)
-        } else {
-            f64::INFINITY
-        },
-    };
+    *out_report = report;
     clear_error();
     Bool::TRUE
 }

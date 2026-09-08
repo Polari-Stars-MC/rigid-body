@@ -54,6 +54,84 @@ fn unpack_handle(packed: u64) -> (u32, u32) {
 }
 
 #[test]
+fn radio_buffers_reject_null_and_misaligned_pointers() {
+    use mps_cosmos::ffi::{
+        cosmos_world_radio_register_node, cosmos_world_radio_submit_signal,
+        cosmos_world_radio_take_results,
+    };
+    use mps_formula::error::{ERR_INVALID_ARGUMENT, ERR_NULL_POINTER, clear_error, error_code};
+
+    let mut world = empty_world();
+    world.enable_radio();
+    let mut storage = [0.0_f64; 18];
+    // The offset stays within a live allocation but violates f64 alignment.
+    let misaligned = storage
+        .as_mut_ptr()
+        .cast::<u8>()
+        .wrapping_add(1)
+        .cast::<f64>();
+    for ptr in [std::ptr::null_mut(), misaligned] {
+        let expected = if ptr.is_null() {
+            ERR_NULL_POINTER
+        } else {
+            ERR_INVALID_ARGUMENT
+        };
+        clear_error();
+        assert_eq!(cosmos_world_radio_register_node(&mut world, ptr), 0);
+        assert_eq!(error_code(), expected);
+        clear_error();
+        assert_eq!(cosmos_world_radio_submit_signal(&mut world, ptr), 0);
+        assert_eq!(error_code(), expected);
+        clear_error();
+        assert_eq!(cosmos_world_radio_take_results(&mut world, ptr, 1), 0);
+        assert_eq!(error_code(), expected);
+    }
+    assert_eq!(storage, [0.0; 18]);
+}
+
+#[test]
+fn radio_buffers_accept_documented_seventeen_field_layout() {
+    use mps_cosmos::ffi::{cosmos_world_radio_register_node, cosmos_world_radio_submit_signal};
+    let mut world = empty_world();
+    world.enable_radio();
+    let node = [
+        1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1e9, 1.0, 1e-12, 1.0, 1.0, 1.0, 0.0,
+    ];
+    let signal = [
+        1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1e9, 1.0, 1.0, 1.0, 0.0,
+    ];
+    assert_eq!(
+        cosmos_world_radio_register_node(&mut world, node.as_ptr()),
+        1
+    );
+    assert_eq!(
+        cosmos_world_radio_submit_signal(&mut world, signal.as_ptr()),
+        1
+    );
+}
+
+#[test]
+fn snapshot_rejects_misaligned_outputs_without_writing() {
+    use mps_formula::error::{ERR_INVALID_ARGUMENT, clear_error, error_code};
+    let mut storage = [0_u64; 8];
+    let mut values = [0.0_f64; 7];
+    let world = empty_world();
+    let ptr = storage
+        .as_mut_ptr()
+        .cast::<u8>()
+        .wrapping_add(1)
+        .cast::<u64>();
+    clear_error();
+    assert_eq!(
+        cosmos_world_dynamic_body_snapshot(&world, ptr, values.as_mut_ptr(), 1),
+        0
+    );
+    assert_eq!(error_code(), ERR_INVALID_ARGUMENT);
+    assert_eq!(storage, [0; 8]);
+    assert_eq!(values, [0.0; 7]);
+}
+
+#[test]
 fn snapshot_count_matches_world_dynamic_body_count() {
     let mut world = empty_world();
     // 起先无 body。

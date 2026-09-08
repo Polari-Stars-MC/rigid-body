@@ -43,7 +43,7 @@ use rapier3d::prelude::{
 use smallvec::SmallVec;
 use std::cell::UnsafeCell;
 use std::mem;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicU32, AtomicUsize, Ordering};
 
 use crate::rapier::error::{
     ERR_CAPACITY, ERR_INVALID_ARGUMENT, ERR_NULL_POINTER, ERR_UNSUPPORTED, clear_error, ffi_guard,
@@ -78,10 +78,7 @@ pub(crate) struct CollectingEventHandler {
     /// Runtime contract guard: raised for the whole duration of `world_step`.
     /// Init-time-only FFI calls check it via `init_guard()` and fail with
     /// `ERR_UNSUPPORTED` instead of aliasing the `UnsafeCell` producer cache.
-    step_active: AtomicBool,
-    /// Runtime contract guard: held while an init-time-only FFI call mutates
-    /// the producer cache. Catches two init-time calls racing each other.
-    init_active: AtomicBool,
+    state: AtomicU8,
 }
 
 /// RAII guard released when an init-time-only FFI call returns. Created by
@@ -93,7 +90,7 @@ pub(crate) struct EventInitGuard<'a> {
 
 impl Drop for EventInitGuard<'_> {
     fn drop(&mut self) {
-        self.events.init_active.store(false, Ordering::Release);
+        self.events.state.store(0, Ordering::Release);
     }
 }
 
@@ -104,7 +101,7 @@ pub(crate) struct StepGuard<'a> {
 
 impl Drop for StepGuard<'_> {
     fn drop(&mut self) {
-        self.events.step_active.store(false, Ordering::Release);
+        self.events.state.store(0, Ordering::Release);
     }
 }
 
@@ -132,11 +129,10 @@ impl CollectingEventHandler {
     /// (returns `None`) if an init-time call currently holds the producer
     /// cache — stepping then would race the init-time `&mut`.
     pub(crate) fn step_guard(&self) -> Option<StepGuard<'_>> {
-        if self.init_active.load(Ordering::Acquire) {
-            return None;
-        }
-        self.step_active.store(true, Ordering::Release);
-        Some(StepGuard { events: self })
+        self.state
+            .compare_exchange(0, 1, Ordering::AcqRel, Ordering::Acquire)
+            .ok()
+            .map(|_| StepGuard { events: self })
     }
 
     /// Begin an init-time-only producer-cache mutation. Fails (returns
@@ -144,11 +140,8 @@ impl CollectingEventHandler {
     /// active — the caller must report an error instead of touching the
     /// `UnsafeCell` producer cache.
     pub(crate) fn init_guard(&self) -> Option<EventInitGuard<'_>> {
-        if self.step_active.load(Ordering::Acquire) {
-            return None;
-        }
-        self.init_active
-            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        self.state
+            .compare_exchange(0, 2, Ordering::AcqRel, Ordering::Acquire)
             .ok()
             .map(|_| EventInitGuard { events: self })
     }

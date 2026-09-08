@@ -51,6 +51,18 @@ pub(crate) struct CharacterBody {
     pub collisions: Vec<CharacterCollision>,
 }
 
+macro_rules! character_mut {
+    ($world:expr, $id:expr) => {{
+        match $world.inner.character_bodies.get_mut($id) {
+            Some(value) => value,
+            None => {
+                set_error(ERR_NOT_FOUND, "character body handle is no longer valid");
+                return Default::default();
+            }
+        }
+    }};
+}
+
 /// Create a character body in `world` from a collider shape and an initial
 /// translation. Returns a stable id, or `u32::MAX` on bad arguments. The character
 /// is a `KinematicPositionBased` rigid body so its position is driven externally
@@ -190,12 +202,26 @@ pub extern "C" fn character_body_move(
 
         // Resolve the desired movement against the world (read-only query). Exclude
         // the character's own collider so its shape-cast never catches itself.
-        let body = world.inner.character_bodies.get(id).unwrap().body;
-        let self_collider = world.inner.character_bodies.get(id).unwrap().collider;
-        let current = world.inner.bodies.get(body).unwrap().translation();
+        let Some(character) = world.inner.character_bodies.get(id) else {
+            set_error(ERR_NOT_FOUND, "character_body_move: unknown id");
+            return EffectiveCharacterMovement::default();
+        };
+        let body = character.body;
+        let self_collider = character.collider;
+        let Some(body_ref) = world.inner.bodies.get(body) else {
+            set_error(
+                ERR_NOT_FOUND,
+                "character_body_move: backing rigid body missing",
+            );
+            return EffectiveCharacterMovement::default();
+        };
+        let current = body_ref.translation();
         let mut collected: Vec<CharacterCollision> = Vec::new();
         let movement = {
-            let cb = world.inner.character_bodies.get(id).unwrap();
+            let Some(cb) = world.inner.character_bodies.get(id) else {
+                set_error(ERR_NOT_FOUND, "character_body_move: unknown id");
+                return EffectiveCharacterMovement::default();
+            };
             let shape = shape_from_desc(cb.shape);
             let query = world.inner.broad_phase.as_query_pipeline(
                 world.inner.narrow_phase.query_dispatcher(),
@@ -213,7 +239,7 @@ pub extern "C" fn character_body_move(
             )
         };
         // Store this step's collisions for read-back / impulse solving.
-        world.inner.character_bodies.get_mut(id).unwrap().collisions = collected;
+        character_mut!(world, id).collisions = collected;
 
         // `movement.translation` is the *delta* to apply this step; add it to the
         // current pose and queue it as the next kinematic translation so the
@@ -228,12 +254,7 @@ pub extern "C" fn character_body_move(
             grounded: movement.grounded.into(),
             is_sliding_down_slope: movement.is_sliding_down_slope.into(),
         };
-        world
-            .inner
-            .character_bodies
-            .get_mut(id)
-            .unwrap()
-            .last_movement = result;
+        character_mut!(world, id).last_movement = result;
         clear_error();
         result
     })
@@ -259,13 +280,7 @@ pub extern "C" fn character_body_set_up(world: *mut WorldHandle, id: u32, up: Ve
             set_error(ERR_INVALID_ARGUMENT, "character_body_set_up: non-finite up");
             return Bool::FALSE;
         }
-        world
-            .inner
-            .character_bodies
-            .get_mut(id)
-            .unwrap()
-            .controller
-            .up = vec3_to_rapier(up);
+        character_mut!(world, id).controller.up = vec3_to_rapier(up);
         clear_error();
         Bool::TRUE
     })
@@ -297,13 +312,7 @@ pub extern "C" fn character_body_set_offset_absolute(
             );
             return Bool::FALSE;
         }
-        world
-            .inner
-            .character_bodies
-            .get_mut(id)
-            .unwrap()
-            .controller
-            .offset = CharacterLength::Absolute(offset);
+        character_mut!(world, id).controller.offset = CharacterLength::Absolute(offset);
         clear_error();
         Bool::TRUE
     })
@@ -336,13 +345,7 @@ pub extern "C" fn character_body_set_offset_relative(
             );
             return Bool::FALSE;
         }
-        world
-            .inner
-            .character_bodies
-            .get_mut(id)
-            .unwrap()
-            .controller
-            .offset = CharacterLength::Relative(offset);
+        character_mut!(world, id).controller.offset = CharacterLength::Relative(offset);
         clear_error();
         Bool::TRUE
     })
@@ -381,13 +384,7 @@ pub extern "C" fn character_body_set_autostep(
             );
             return Bool::FALSE;
         }
-        world
-            .inner
-            .character_bodies
-            .get_mut(id)
-            .unwrap()
-            .controller
-            .autostep = if enabled.0 != 0 {
+        character_mut!(world, id).controller.autostep = if enabled.0 != 0 {
             Some(CharacterAutostep {
                 max_height: CharacterLength::Absolute(max_height),
                 min_width: CharacterLength::Absolute(min_width),
@@ -429,13 +426,7 @@ pub extern "C" fn character_body_set_snap_to_ground(
             );
             return Bool::FALSE;
         }
-        world
-            .inner
-            .character_bodies
-            .get_mut(id)
-            .unwrap()
-            .controller
-            .snap_to_ground = if enabled.0 != 0 {
+        character_mut!(world, id).controller.snap_to_ground = if enabled.0 != 0 {
             Some(CharacterLength::Absolute(distance))
         } else {
             None
@@ -467,7 +458,7 @@ pub extern "C" fn character_body_set_slope_angles(
             set_error(ERR_INVALID_ARGUMENT, "slope angles must be finite");
             return Bool::FALSE;
         }
-        let cb = world.inner.character_bodies.get_mut(id).unwrap();
+        let cb = character_mut!(world, id);
         cb.controller.max_slope_climb_angle = max_climb_angle;
         cb.controller.min_slope_slide_angle = min_slide_angle;
         clear_error();
@@ -489,13 +480,7 @@ pub extern "C" fn character_body_set_slide(world: *mut WorldHandle, id: u32, sli
             set_error(ERR_NOT_FOUND, "character_body_set_slide: unknown id");
             return Bool::FALSE;
         }
-        world
-            .inner
-            .character_bodies
-            .get_mut(id)
-            .unwrap()
-            .controller
-            .slide = slide.0 != 0;
+        character_mut!(world, id).controller.slide = slide.0 != 0;
         clear_error();
         Bool::TRUE
     })
@@ -682,7 +667,10 @@ pub extern "C" fn character_body_solve_impulses(
         // — the displacement the character *wanted* but was blocked from taking — as the
         // push vector, and apply `mass * v` (v = remaining/dt) to the contacted dynamic
         // body. This is the "character pushes crates" behaviour, with no fork changes.
-        let cb = world.inner.character_bodies.get(id).unwrap();
+        let Some(cb) = world.inner.character_bodies.get(id) else {
+            set_error(ERR_NOT_FOUND, "character_body_solve_impulses: unknown id");
+            return Bool::FALSE;
+        };
         if !cb.apply_impulses_to_dynamic_bodies {
             clear_error();
             return Bool::TRUE;
@@ -783,18 +771,51 @@ pub extern "C" fn character_body_move_with_terrain(
         let mut desired = vec3_to_rapier(desired);
         if let Some(source) = &world.inner.terrain_gravity_source {
             let accel = crate::rapier::terrain_gravity::terrain_gravity_acceleration(source, {
-                let body = world.inner.character_bodies.get(id).unwrap().body;
-                vec3_from_rapier(world.inner.bodies.get(body).unwrap().translation())
+                let Some(character) = world.inner.character_bodies.get(id) else {
+                    set_error(
+                        ERR_NOT_FOUND,
+                        "character_body_move_with_terrain: unknown id",
+                    );
+                    return EffectiveCharacterMovement::default();
+                };
+                let Some(body) = world.inner.bodies.get(character.body) else {
+                    set_error(
+                        ERR_NOT_FOUND,
+                        "character_body_move_with_terrain: backing body missing",
+                    );
+                    return EffectiveCharacterMovement::default();
+                };
+                vec3_from_rapier(body.translation())
             });
             desired += vec3_to_rapier(accel) * (0.5 * dt * dt);
         }
 
         // Delegate the resolve + kinematic write-back to the shared move path.
-        let body = world.inner.character_bodies.get(id).unwrap().body;
-        let current = world.inner.bodies.get(body).unwrap().translation();
+        let Some(character) = world.inner.character_bodies.get(id) else {
+            set_error(
+                ERR_NOT_FOUND,
+                "character_body_move_with_terrain: unknown id",
+            );
+            return EffectiveCharacterMovement::default();
+        };
+        let body = character.body;
+        let Some(body_ref) = world.inner.bodies.get(body) else {
+            set_error(
+                ERR_NOT_FOUND,
+                "character_body_move_with_terrain: backing body missing",
+            );
+            return EffectiveCharacterMovement::default();
+        };
+        let current = body_ref.translation();
         let mut collected: Vec<CharacterCollision> = Vec::new();
         let movement = {
-            let cb = world.inner.character_bodies.get(id).unwrap();
+            let Some(cb) = world.inner.character_bodies.get(id) else {
+                set_error(
+                    ERR_NOT_FOUND,
+                    "character_body_move_with_terrain: unknown id",
+                );
+                return EffectiveCharacterMovement::default();
+            };
             let shape = shape_from_desc(cb.shape);
             let query = world.inner.broad_phase.as_query_pipeline(
                 world.inner.narrow_phase.query_dispatcher(),
@@ -811,7 +832,7 @@ pub extern "C" fn character_body_move_with_terrain(
                 |collision| collected.push(collision),
             )
         };
-        world.inner.character_bodies.get_mut(id).unwrap().collisions = collected;
+        character_mut!(world, id).collisions = collected;
 
         let new_pos = current + movement.translation;
         if let Some(rb) = world.inner.bodies.get_mut(body) {
@@ -823,12 +844,7 @@ pub extern "C" fn character_body_move_with_terrain(
             grounded: movement.grounded.into(),
             is_sliding_down_slope: movement.is_sliding_down_slope.into(),
         };
-        world
-            .inner
-            .character_bodies
-            .get_mut(id)
-            .unwrap()
-            .last_movement = result;
+        character_mut!(world, id).last_movement = result;
         clear_error();
         result
     })
@@ -886,7 +902,14 @@ pub extern "C" fn character_body_get_translation(
         };
         match world.inner.character_bodies.get(id) {
             Some(cb) => {
-                let t = world.inner.bodies.get(cb.body).unwrap().translation();
+                let Some(body) = world.inner.bodies.get(cb.body) else {
+                    set_error(
+                        ERR_NOT_FOUND,
+                        "character_body_get_translation: backing body missing",
+                    );
+                    return Bool::FALSE;
+                };
+                let t = body.translation();
                 if !out.is_null() {
                     unsafe { *out = vec3_from_rapier(t) };
                 }

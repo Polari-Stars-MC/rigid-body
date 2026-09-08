@@ -118,11 +118,11 @@ pub extern "C" fn space_hohmann_transfer(
 #[unsafe(no_mangle)]
 pub extern "C" fn space_kepler_period(mu: f64, semi_major_axis: f64) -> f64 {
     ffi_guard(0.0, || {
-        if !finite(&[mu, semi_major_axis]) || mu <= 0.0 || semi_major_axis <= 0.0 {
-            return invalid_nan("invalid Kepler period parameters");
-        }
-        clear_error();
-        TAU * (semi_major_axis.powi(3) / mu).sqrt()
+        mps_formula::ffi::formula_result(mps_formula::spaceflight::kepler_period_checked(
+            mu,
+            semi_major_axis,
+        ))
+        .unwrap_or(f64::NAN)
     })
 }
 
@@ -181,19 +181,17 @@ pub extern "C" fn space_semi_major_axis_decay_rate(
     mu: f64,
 ) -> f64 {
     ffi_guard(0.0, || {
-        if !finite(&[semi_major_axis, density, drag_coefficient, area, mass, mu])
-            || semi_major_axis <= 0.0
-            || density < 0.0
-            || drag_coefficient < 0.0
-            || area < 0.0
-            || mass <= 0.0
-            || mu <= 0.0
-        {
-            return invalid_nan("invalid semi-major-axis decay parameters");
-        }
-        clear_error();
-        let v = (mu / semi_major_axis).sqrt();
-        -density * drag_coefficient * area / mass * semi_major_axis * v
+        mps_formula::ffi::formula_result(
+            mps_formula::spaceflight::semi_major_axis_decay_rate_checked(
+                semi_major_axis,
+                density,
+                drag_coefficient,
+                area,
+                mass,
+                mu,
+            ),
+        )
+        .unwrap_or(f64::NAN)
     })
 }
 
@@ -299,16 +297,12 @@ pub extern "C" fn space_tsiolkovsky_delta_v(
     final_mass: f64,
 ) -> f64 {
     ffi_guard(0.0, || {
-        if !finite(&[specific_impulse, standard_gravity, initial_mass, final_mass])
-            || specific_impulse <= 0.0
-            || standard_gravity <= 0.0
-            || initial_mass <= 0.0
-            || final_mass <= 0.0
-            || initial_mass < final_mass
-        {
-            return invalid_nan("invalid Tsiolkovsky parameters");
-        }
-        clear_error();
-        specific_impulse * standard_gravity * (initial_mass / final_mass).ln()
+        mps_formula::ffi::formula_result(mps_formula::spaceflight::tsiolkovsky_delta_v_checked(
+            specific_impulse,
+            standard_gravity,
+            initial_mass,
+            final_mass,
+        ))
+        .unwrap_or(f64::NAN)
     })
 }

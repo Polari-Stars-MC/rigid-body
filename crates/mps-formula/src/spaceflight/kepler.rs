@@ -10,17 +10,25 @@
 //! downstream `mps-core::rapier::spaceflight::*` path stable.
 
 use super::*;
+use crate::domain::{self, FormulaError};
 
 /// Ballistic coefficient: beta = m / (Cd * A_ref)
 pub fn ballistic_coefficient(mass: f64, drag_coefficient: f64, reference_area: f64) -> Option<f64> {
-    if !finite(&[mass, drag_coefficient, reference_area])
-        || mass <= 0.0
-        || drag_coefficient <= 0.0
-        || reference_area <= 0.0
-    {
-        return None;
-    }
-    Some(mass / (drag_coefficient * reference_area))
+    ballistic_coefficient_checked(mass, drag_coefficient, reference_area).ok()
+}
+
+/// Checked ballistic coefficient. All inputs must be finite and positive;
+/// zero drag or area is rejected instead of returning an infinite coefficient.
+pub fn ballistic_coefficient_checked(
+    mass: f64,
+    drag_coefficient: f64,
+    reference_area: f64,
+) -> Result<f64, FormulaError> {
+    domain::positive(mass, "mass")?;
+    domain::positive(drag_coefficient, "drag_coefficient")?;
+    domain::positive(reference_area, "reference_area")?;
+    let denominator = domain::finite_result(drag_coefficient * reference_area, "drag area")?;
+    domain::divide(mass, denominator)
 }
 
 /// Bi-elliptic transfer total delta-V for triple-impulse maneuver.
@@ -167,10 +175,17 @@ pub fn hohmann_transfer(mu: f64, radius1: f64, radius2: f64) -> Option<HohmannTr
 }
 
 pub fn kepler_period(mu: f64, semi_major_axis: f64) -> Option<f64> {
-    if !finite(&[mu, semi_major_axis]) || mu <= 0.0 || semi_major_axis <= 0.0 {
-        return None;
-    }
-    Some(TAU * (semi_major_axis.powi(3) / mu).sqrt())
+    kepler_period_checked(mu, semi_major_axis).ok()
+}
+
+/// Checked orbital period for a bound ellipse. Inputs must be finite and
+/// positive; non-finite intermediate values or periods are rejected.
+pub fn kepler_period_checked(mu: f64, semi_major_axis: f64) -> Result<f64, FormulaError> {
+    domain::positive(mu, "mu")?;
+    domain::positive(semi_major_axis, "semi_major_axis")?;
+    let cube = domain::finite_result(semi_major_axis.powi(3), "semi-major axis cubed")?;
+    let period = TAU * domain::sqrt(domain::divide(cube, mu)?)?;
+    domain::finite_result(period, "orbital period")
 }
 
 pub fn kepler_semi_major_axis(mu: f64, period: f64) -> Option<f64> {
@@ -298,18 +313,35 @@ pub fn semi_major_axis_decay_rate(
     mass: f64,
     mu: f64,
 ) -> Option<f64> {
-    if !finite(&[semi_major_axis, density, drag_coefficient, area, mass, mu])
-        || semi_major_axis <= 0.0
-        || density < 0.0
-        || drag_coefficient < 0.0
-        || area < 0.0
-        || mass <= 0.0
-        || mu <= 0.0
-    {
-        return None;
+    semi_major_axis_decay_rate_checked(semi_major_axis, density, drag_coefficient, area, mass, mu)
+        .ok()
+}
+
+/// Checked atmospheric decay rate. Density, drag coefficient and area may
+/// be zero, but cannot be negative. Axis, mass and mu must be positive.
+/// Every input and the computed rate must be finite.
+pub fn semi_major_axis_decay_rate_checked(
+    semi_major_axis: f64,
+    density: f64,
+    drag_coefficient: f64,
+    area: f64,
+    mass: f64,
+    mu: f64,
+) -> Result<f64, FormulaError> {
+    domain::positive(semi_major_axis, "semi_major_axis")?;
+    domain::nonnegative(density, "density")?;
+    domain::nonnegative(drag_coefficient, "drag_coefficient")?;
+    domain::nonnegative(area, "area")?;
+    domain::positive(mass, "mass")?;
+    domain::positive(mu, "mu")?;
+    if density == 0.0 || drag_coefficient == 0.0 || area == 0.0 {
+        return Ok(0.0);
     }
-    let v = (mu / semi_major_axis).sqrt();
-    Some(-density * drag_coefficient * area / mass * semi_major_axis * v)
+    let v = domain::sqrt(domain::divide(mu, semi_major_axis)?)?;
+    domain::finite_result(
+        -density * drag_coefficient * area / mass * semi_major_axis * v,
+        "decay rate",
+    )
 }
 
 pub fn state_to_elements(state: StateVector, mu: f64) -> Option<OrbitalElements> {
@@ -388,16 +420,36 @@ pub fn tsiolkovsky_delta_v(
     initial_mass: f64,
     final_mass: f64,
 ) -> Option<f64> {
-    if !finite(&[specific_impulse, standard_gravity, initial_mass, final_mass])
-        || specific_impulse <= 0.0
-        || standard_gravity <= 0.0
-        || initial_mass <= 0.0
-        || final_mass <= 0.0
-        || initial_mass < final_mass
-    {
-        return None;
+    tsiolkovsky_delta_v_checked(specific_impulse, standard_gravity, initial_mass, final_mass).ok()
+}
+
+/// Checked rocket equation. Inputs must be finite and positive, and initial
+/// mass must be at least final mass. Equal masses yield zero delta-v; zero
+/// final mass is rejected rather than treated as an infinite delta-v limit.
+pub fn tsiolkovsky_delta_v_checked(
+    specific_impulse: f64,
+    standard_gravity: f64,
+    initial_mass: f64,
+    final_mass: f64,
+) -> Result<f64, FormulaError> {
+    domain::positive(specific_impulse, "specific_impulse")?;
+    domain::positive(standard_gravity, "standard_gravity")?;
+    domain::positive(initial_mass, "initial_mass")?;
+    domain::positive(final_mass, "final_mass")?;
+    if initial_mass < final_mass {
+        return Err(FormulaError::OutOfDomain {
+            parameter: "initial_mass",
+            requirement: "at least final_mass",
+        });
     }
-    Some(specific_impulse * standard_gravity * (initial_mass / final_mass).ln())
+    if initial_mass == final_mass {
+        return Ok(0.0);
+    }
+    let ratio = domain::divide(initial_mass, final_mass)?;
+    domain::finite_result(
+        specific_impulse * standard_gravity * domain::ln(ratio)?,
+        "delta-v",
+    )
 }
 
 // ---------------------------------------------------------------------------

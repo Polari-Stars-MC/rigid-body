@@ -7,6 +7,9 @@ pub use crate::scientists::daniel_bernoulli::formulas::bernoulli_report;
 pub use crate::scientists::daniel_bernoulli::formulas::darcy_friction_factor;
 pub use crate::scientists::daniel_bernoulli::formulas::flow_regime;
 pub use crate::scientists::daniel_bernoulli::formulas::re_n;
+pub use crate::scientists::daniel_bernoulli::formulas::{
+    bernoulli_pressure_checked, bernoulli_report_checked,
+};
 pub use crate::scientists::george_stokes::formulas::area_mach_ratio;
 pub use crate::scientists::george_stokes::formulas::bingham_stress;
 pub use crate::scientists::george_stokes::formulas::doublet_stream_function_2d;

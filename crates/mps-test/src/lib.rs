@@ -39,6 +39,7 @@ pub mod rapier {
     pub mod crbtree;
     pub mod cross_validate;
     pub mod disasters;
+    pub mod domain;
     pub mod dop;
     pub mod electromagnetism;
     pub mod emag;

@@ -13,8 +13,6 @@ use mps_formula::disciplines::mechanics::{
     sph_poly6_kernel, sph_spiky_gradient, sph_viscosity_laplacian,
 };
 
-use mps_formula::disciplines::fluid::{bernoulli_pressure, bernoulli_report};
-
 /// # Safety
 ///
 /// `out_report` may be null or must point to writable space for one
@@ -337,7 +335,14 @@ pub extern "C" fn fluid_bernoulli_pressure(
     elevation: f64,
 ) -> f64 {
     ffi_guard(0.0, || {
-        bernoulli_pressure(total_pressure, density, velocity, gravity, elevation)
+        mps_formula::ffi::formula_result(mps_formula::fluid::bernoulli_pressure_checked(
+            total_pressure,
+            density,
+            velocity,
+            gravity,
+            elevation,
+        ))
+        .unwrap_or(f64::NAN)
     })
 }
 
@@ -354,8 +359,11 @@ pub extern "C" fn fluid_bernoulli_report(
     out_report: *mut BernoulliReport,
 ) -> Bool {
     ffi_guard(Bool::FALSE, || {
-        let Some(report) = bernoulli_report(pressure, density, velocity, gravity, elevation) else {
-            set_error(ERR_INVALID_ARGUMENT, "invalid Bernoulli parameters");
+        let Some(report) =
+            mps_formula::ffi::formula_result(mps_formula::fluid::bernoulli_report_checked(
+                pressure, density, velocity, gravity, elevation,
+            ))
+        else {
             return Bool::FALSE;
         };
         let Some(out_report) = (unsafe { out_report.as_mut() }) else {

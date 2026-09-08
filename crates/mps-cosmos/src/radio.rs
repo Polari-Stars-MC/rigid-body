@@ -328,7 +328,9 @@ fn first_blocker(
         .enumerate()
         .filter(|(i, _)| Some(*i) != skip_source && Some(*i) != skip_target)
         .filter_map(|(_, r)| ray_sphere_hit(a, dir, max_dist, r.pos, r.radius))
-        .min_by(|x, y| x.partial_cmp(y).unwrap())
+        // `total_cmp` gives a deterministic ordering even when a malformed
+        // input contains NaN, so radio queries cannot panic at the FFI edge.
+        .min_by(|x, y| x.total_cmp(y))
 }
 
 /// 返回首个截断 A→B 的天体索引（无截断返回 None）。
@@ -346,7 +348,7 @@ fn first_blocker_idx(
         .enumerate()
         .filter(|(i, _)| Some(*i) != skip_source && Some(*i) != skip_target)
         .filter_map(|(i, r)| ray_sphere_hit(a, dir, max_dist, r.pos, r.radius).map(|t| (i, t)))
-        .min_by(|(_, x), (_, y)| x.partial_cmp(y).unwrap())
+        .min_by(|(_, x), (_, y)| x.total_cmp(y))
         .map(|(i, _)| i)
 }
 

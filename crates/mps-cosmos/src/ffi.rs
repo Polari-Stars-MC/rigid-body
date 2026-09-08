@@ -41,6 +41,36 @@ fn celestial_by_id(id: i32) -> Option<&'static mps_formula::celestial_data::Cele
 /// 此常量在本 crate 内独立定义；改动时请两边同步）。
 const MAX_OUTPUT_CAPACITY: u32 = 1_000_000;
 
+#[inline]
+fn finite(values: &[f64]) -> bool {
+    values.iter().all(|value| value.is_finite())
+}
+
+// Checks metadata only. Allocation validity and aliasing remain caller obligations.
+fn buffer_len<T>(ptr: *const T, count: usize, stride: usize) -> Option<usize> {
+    if ptr.is_null() {
+        set_error(ERR_NULL_POINTER, "buffer is null");
+        return None;
+    }
+    if !ptr.is_aligned() {
+        set_error(ERR_INVALID_ARGUMENT, "buffer is misaligned");
+        return None;
+    }
+    let len = count.checked_mul(stride);
+    let bytes = len.and_then(|len| len.checked_mul(std::mem::size_of::<T>()));
+    match bytes {
+        Some(bytes)
+            if bytes <= isize::MAX as usize && (ptr as usize).checked_add(bytes).is_some() =>
+        {
+            len
+        }
+        _ => {
+            set_error(ERR_CAPACITY, "buffer length overflow");
+            None
+        }
+    }
+}
+
 /// 把 `RigidBodyHandle` 打包为 `u64`：`(idx << 32) | generation`。
 fn pack_handle(h: RigidBodyHandle) -> u64 {
     let (idx, generation) = h.into_raw_parts();
@@ -83,6 +113,13 @@ pub extern "C" fn cosmos_satellite_builder(
     radius: f64,
 ) -> *mut RigidBodyBuilder {
     ffi_guard(std::ptr::null_mut(), || {
+        if !finite(&[mass, px, py, pz, vx, vy, vz, radius]) || mass <= 0.0 || radius <= 0.0 {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "satellite parameters must be finite and positive where required",
+            );
+            return std::ptr::null_mut();
+        }
         Box::into_raw(Box::new(satellite_builder(
             mass,
             Vector::new(px, py, pz),
@@ -96,6 +133,10 @@ pub extern "C" fn cosmos_satellite_builder(
 #[unsafe(no_mangle)]
 pub extern "C" fn cosmos_fixed_body_builder(px: f64, py: f64, pz: f64) -> *mut RigidBodyBuilder {
     ffi_guard(std::ptr::null_mut(), || {
+        if !finite(&[px, py, pz]) {
+            set_error(ERR_INVALID_ARGUMENT, "position must be finite");
+            return std::ptr::null_mut();
+        }
         Box::into_raw(Box::new(fixed_body_builder(Vector::new(px, py, pz))))
     })
 }
@@ -179,6 +220,15 @@ pub extern "C" fn cosmos_world_create(
     n_body_softening_sq: f64,
 ) -> *mut CosmosWorld {
     ffi_guard(std::ptr::null_mut(), || {
+        if !dt.is_finite()
+            || dt <= 0.0
+            || dt > 30.0
+            || !n_body_softening_sq.is_finite()
+            || n_body_softening_sq < 0.0
+        {
+            set_error(ERR_INVALID_ARGUMENT, "invalid world integration parameters");
+            return std::ptr::null_mut();
+        }
         let orbit_integration = match orbit_integration {
             1 => OrbitIntegration::Verlet,
             2 => OrbitIntegration::Yoshida4,
@@ -692,10 +742,12 @@ pub extern "C" fn cosmos_world_dynamic_body_snapshot(
         }
 
         let capacity = capacity as usize;
-        let Some(value_capacity) = capacity.checked_mul(7) else {
-            set_error(ERR_CAPACITY, "snapshot capacity overflow");
+        let Some(value_capacity) = buffer_len(out_values, capacity, 7) else {
             return 0;
         };
+        if buffer_len(out_handles, capacity, 1).is_none() {
+            return 0;
+        }
         let handles_out = unsafe { std::slice::from_raw_parts_mut(out_handles, capacity) };
         let values = unsafe { std::slice::from_raw_parts_mut(out_values, value_capacity) };
 
@@ -785,6 +837,13 @@ pub extern "C" fn cosmos_world_radio_add_reflector(
             set_error(ERR_NULL_POINTER, "cosmos world is null");
             return 0;
         };
+        if !radius.is_finite() || radius <= 0.0 {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "reflector radius must be finite and positive",
+            );
+            return 0;
+        }
         w.radio_add_reflector(unpack_handle(body), radius) as u8
     })
 }
@@ -819,7 +878,10 @@ pub extern "C" fn cosmos_world_radio_register_node(
             set_error(ERR_NULL_POINTER, "node values is null");
             return 0;
         }
-        let v = unsafe { std::slice::from_raw_parts(values, 18) };
+        let Some(len) = buffer_len(values, 17, 1) else {
+            return 0;
+        };
+        let v = unsafe { std::slice::from_raw_parts(values, len) };
         w.radio_register_node(crate::radio::RadioNode {
             id: v[0] as u64,
             pos: Vector::new(v[1], v[2], v[3]),
@@ -868,7 +930,10 @@ pub extern "C" fn cosmos_world_radio_submit_signal(
             set_error(ERR_NULL_POINTER, "signal values is null");
             return 0;
         }
-        let v = unsafe { std::slice::from_raw_parts(values, 18) };
+        let Some(len) = buffer_len(values, 17, 1) else {
+            return 0;
+        };
+        let v = unsafe { std::slice::from_raw_parts(values, len) };
         w.radio_submit_signal(crate::radio::ActiveSignal {
             id: v[0] as u64,
             tx_node_id: v[1] as u64,
@@ -902,7 +967,10 @@ pub extern "C" fn cosmos_world_radio_take_results(
             set_error(ERR_NULL_POINTER, "cosmos world is null");
             return 0;
         };
-        if out.is_null() || capacity == 0 {
+        if buffer_len(out, capacity as usize, 4).is_none() {
+            return 0;
+        }
+        if capacity == 0 {
             return 0;
         }
         let results = w.radio_take_results();

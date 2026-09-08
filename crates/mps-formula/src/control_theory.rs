@@ -10,6 +10,30 @@ const MAX_INPUT_COUNT: u32 = 32;
 const MAX_OUTPUT_COUNT: u32 = 64;
 const MAX_HORIZON: u32 = 64;
 
+macro_rules! checked_input {
+    ($ptr:expr, $len:expr, $name:expr) => {{
+        match unsafe { crate::ffi::checked_input_slice($ptr, $len, $name) } {
+            Ok(value) => value,
+            Err(error) => {
+                crate::ffi::formula_result::<()>(Err(error));
+                return Bool::FALSE;
+            }
+        }
+    }};
+}
+
+macro_rules! checked_output {
+    ($ptr:expr, $len:expr, $name:expr) => {{
+        match unsafe { crate::ffi::checked_output_slice($ptr, $len, $name) } {
+            Ok(value) => value,
+            Err(error) => {
+                crate::ffi::formula_result::<()>(Err(error));
+                return Bool::FALSE;
+            }
+        }
+    }};
+}
+
 fn vec_norm(values: &[f64]) -> f64 {
     values.iter().map(|value| value * value).sum::<f64>().sqrt()
 }
@@ -196,12 +220,12 @@ pub extern "C" fn control_state_space_step(
     let n = state_count as usize;
     let m = input_count as usize;
     let p = output_count as usize;
-    let a = unsafe { slice::from_raw_parts(a_matrix, n * n) };
-    let b = unsafe { slice::from_raw_parts(b_matrix, n * m) };
-    let c = unsafe { slice::from_raw_parts(c_matrix, p * n) };
-    let d = unsafe { slice::from_raw_parts(d_matrix, p * m) };
-    let x = unsafe { slice::from_raw_parts(state, n) };
-    let u = unsafe { slice::from_raw_parts(input, m) };
+    let a = checked_input!(a_matrix, n * n, "a_matrix");
+    let b = checked_input!(b_matrix, n * m, "b_matrix");
+    let c = checked_input!(c_matrix, p * n, "c_matrix");
+    let d = checked_input!(d_matrix, p * m, "d_matrix");
+    let x = checked_input!(state, n, "state");
+    let u = checked_input!(input, m, "input");
     if a.iter()
         .chain(b)
         .chain(c)
@@ -220,8 +244,8 @@ pub extern "C" fn control_state_space_step(
     let bu = mat_vec(b, n, m, u);
     let cx = mat_vec(c, p, n, x);
     let du = mat_vec(d, p, m, u);
-    let out_x = unsafe { slice::from_raw_parts_mut(out_next_state, state_capacity as usize) };
-    let out_y = unsafe { slice::from_raw_parts_mut(out_output, output_capacity as usize) };
+    let out_x = checked_output!(out_next_state, state_capacity as usize, "out_next_state");
+    let out_y = checked_output!(out_output, output_capacity as usize, "out_output");
     let mut max_state_delta = 0.0;
     for i in 0..n {
         out_x[i] = ax[i] + bu[i];
