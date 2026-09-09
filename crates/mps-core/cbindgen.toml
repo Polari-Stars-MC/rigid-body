@@ -10,6 +10,7 @@ parse_deps = false
 
 [export]
 include = [
+  "WorldCollisionMode",
   "AabbDesc",
   "AcousticContactDesc",
   "AcousticExcitationReport",

@@ -84,6 +84,7 @@ impl Default for FrameWorkBuffers {
 }
 
 pub struct PhysicsWorld {
+    pub(crate) default_collision_mode: super::collision_mode::WorldCollisionMode,
     pub(crate) pipeline: PhysicsPipeline,
     pub(crate) gravity: Vector,
     pub(crate) integration_parameters: IntegrationParameters,
@@ -231,6 +232,7 @@ impl PhysicsWorld {
 
         let events = Arc::new(crate::rapier::events::CollectingEventHandler::default());
         Self {
+            default_collision_mode: super::collision_mode::WorldCollisionMode::Simple,
             pipeline: PhysicsPipeline::new(),
             gravity: vec3_to_rapier(gravity),
             integration_parameters,

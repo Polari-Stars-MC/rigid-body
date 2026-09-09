@@ -328,6 +328,10 @@ pub extern "system" fn abiLastErrorMessage(env: JNIEnv, _class: jclass) -> jstri
 
 //世界管理
 jni!(long worldCreate(double gravity_x, double gravity_y, double gravity_z) { to_jlong(wo::world_create(v3(gravity_x, gravity_y, gravity_z))) });
+jni!(long worldCreateWithCollisionMode(double gravity_x, double gravity_y, double gravity_z, int mode) { to_jlong(mps_core::rapier::collision_mode::world_create_with_collision_mode(v3(gravity_x, gravity_y, gravity_z), mode as u32)) });
+jni!(boolean worldSetDefaultCollisionMode(long world, int mode) { mps_core::rapier::collision_mode::world_set_default_collision_mode(m::<WH>(world), mode as u32).0 as jbyte });
+jni!(int worldGetDefaultCollisionMode(long world) { mps_core::rapier::collision_mode::world_get_default_collision_mode(cp::<WH>(world)) as jint });
+jni!(long worldInsertDefaultCollider(long world, long body, long simple_builder, long compound_builder) { mps_core::rapier::collision_mode::world_insert_default_collider(m::<WH>(world), body as u64, cp::<CBH>(simple_builder), cp::<CBH>(compound_builder)) as jlong });
 jni!(void worldDestroy(long world) { wo::world_destroy(m::<WH>(world)); });
 jni!(void worldStep(long world, double delta_seconds) { wo::world_step(m::<WH>(world), delta_seconds); });
 

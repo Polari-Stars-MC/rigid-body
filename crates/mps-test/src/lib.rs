@@ -32,6 +32,7 @@ pub mod rapier {
     pub mod character_body;
     pub mod cloth;
     pub mod collider;
+    pub mod collision_mode;
     pub mod continuum;
     pub mod control_theory;
     pub mod controller;

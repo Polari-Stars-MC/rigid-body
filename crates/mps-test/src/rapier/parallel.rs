@@ -28,13 +28,151 @@ const SERIAL_N: u32 = 100;
 
 const DT: f64 = 0.5;
 
+use mps_core::rapier::collision_mode::WorldCollisionMode as ColliderMode;
+
+#[test]
+fn extreme_concurrent_independent_world_steps_remain_finite() {
+    let workers = std::thread::available_parallelism()
+        .map_or(2, |n| n.get())
+        .min(4);
+    let rounds = 8;
+    let mut joins = Vec::with_capacity(workers);
+    for _worker in 0..workers {
+        joins.push(std::thread::spawn(move || {
+            const EXTREME_BODIES: u32 = 100_000;
+            let world = make_world(EXTREME_BODIES, true);
+            for _round in 0..rounds {
+                mps_core::rapier::world::world_step(world, DT);
+                let w = unsafe { &(*world).inner };
+                assert!(w.bodies.iter().all(|(_, body)| {
+                    let p = body.translation();
+                    let v = body.linvel();
+                    p.x.is_finite()
+                        && p.y.is_finite()
+                        && p.z.is_finite()
+                        && v.x.is_finite()
+                        && v.y.is_finite()
+                        && v.z.is_finite()
+                }));
+            }
+            mps_core::rapier::world::world_destroy(world);
+        }));
+    }
+    for join in joins {
+        join.join().expect("concurrent world worker panicked");
+    }
+}
+
+#[test]
+#[ignore = "long-running performance benchmark"]
+fn million_body_single_world_step_benchmark() {
+    const MILLION_BODIES: u32 = 1_000_000;
+    let start = std::time::Instant::now();
+    let world = make_world(MILLION_BODIES, true);
+    let created = start.elapsed();
+    let step_start = std::time::Instant::now();
+    mps_core::rapier::world::world_step(world, DT);
+    let stepped = step_start.elapsed();
+    let w = unsafe { &(*world).inner };
+    let validate_start = std::time::Instant::now();
+    assert_eq!(w.bodies.len(), MILLION_BODIES as usize);
+    assert!(
+        w.bodies
+            .iter()
+            .all(|(_, body)| body.translation().x.is_finite())
+    );
+    let validated = validate_start.elapsed();
+    let destroy_start = std::time::Instant::now();
+    mps_core::rapier::world::world_destroy(world);
+    eprintln!(
+        "million body timings: create={created:?}, step={stepped:?}, validate={validated:?}, destroy={:?}, total={:?}",
+        destroy_start.elapsed(),
+        start.elapsed()
+    );
+}
+
+#[test]
+#[ignore = "long-running performance benchmark"]
+fn tiered_body_scale_performance_benchmark() {
+    for bodies in [100_000_u32, 500_000, 1_000_000] {
+        let total_start = std::time::Instant::now();
+        let create_start = std::time::Instant::now();
+        let world = make_world(bodies, true);
+        let create = create_start.elapsed();
+        let step_start = std::time::Instant::now();
+        mps_core::rapier::world::world_step(world, DT);
+        let step = step_start.elapsed();
+        let validate_start = std::time::Instant::now();
+        let w = unsafe { &(*world).inner };
+        assert_eq!(w.bodies.len(), bodies as usize);
+        assert!(w.bodies.iter().all(|(_, body)| {
+            let p = body.translation();
+            p.x.is_finite() && p.y.is_finite() && p.z.is_finite()
+        }));
+        let validate = validate_start.elapsed();
+        let destroy_start = std::time::Instant::now();
+        mps_core::rapier::world::world_destroy(world);
+        let destroy = destroy_start.elapsed();
+        eprintln!(
+            "scale={bodies}: create={create:?}, step={step:?}, validate={validate:?}, destroy={destroy:?}, total={:?}",
+            total_start.elapsed()
+        );
+    }
+}
+
+#[test]
+#[ignore = "long-running performance benchmark"]
+fn collider_mode_performance_benchmark() {
+    for mode in [
+        ColliderMode::None,
+        ColliderMode::Simple,
+        ColliderMode::Compound,
+    ] {
+        let start = std::time::Instant::now();
+        let world = make_world_with_colliders(100_000, true, mode);
+        let created = start.elapsed();
+        let step_start = std::time::Instant::now();
+        mps_core::rapier::world::world_step(world, DT);
+        let step = step_start.elapsed();
+        mps_core::rapier::world::world_destroy(world);
+        eprintln!("collider_mode={mode:?}: create={created:?}, step={step:?}");
+    }
+}
+
 /// Deterministic body layout: grid positions in x/y, spread z, and varied
 /// velocities. Ball colliders (r = 0.5, density 1) give every dynamic body a
 /// positive mass; spacing 2.0 keeps bodies out of contact so only the law
 /// under test produces forces.
 fn make_world(n_bodies: u32, with_velocity: bool) -> *mut WorldHandle {
-    let world = mps_core::rapier::world::world_create(Vec3::default());
-    let w = unsafe { &mut (*world).inner };
+    make_world_with_colliders(n_bodies, with_velocity, ColliderMode::Simple)
+}
+
+fn make_world_with_colliders(
+    n_bodies: u32,
+    with_velocity: bool,
+    mode: ColliderMode,
+) -> *mut WorldHandle {
+    use mps_core::rapier::collider::{
+        collider_builder_create, collider_builder_create_compound_boxes, collider_builder_destroy,
+    };
+    use mps_core::rapier::collision_mode::{
+        world_create_with_collision_mode, world_insert_default_collider,
+    };
+    let world = world_create_with_collision_mode(Vec3::default(), mode as u32);
+    assert!(!world.is_null());
+    let simple = collider_builder_create(
+        0,
+        Vec3 {
+            x: 0.5,
+            y: 0.0,
+            z: 0.0,
+        },
+    );
+    let boxes = [
+        -0.5, -0.25, -0.25, 0.0, 0.25, 0.25, 0.0, -0.25, -0.25, 0.5, 0.25, 0.25,
+    ];
+    let compound = collider_builder_create_compound_boxes(boxes.as_ptr(), 2);
+    assert!(!simple.is_null() && !compound.is_null());
     for i in 0..n_bodies {
         let x = (i % 16) as f64 * 2.0 - 15.0;
         let y = ((i / 16) % 16) as f64 * 2.0 - 15.0;
@@ -49,11 +187,20 @@ fn make_world(n_bodies: u32, with_velocity: bool) -> *mut WorldHandle {
             let vz = ((i % 3) as f64 - 1.0) * 20.0;
             rb = rb.linvel(Vector::new(vx, vy, vz));
         }
-        let handle = w.bodies.insert(rb.build());
-        let collider = ColliderBuilder::ball(0.5).density(1.0).build();
-        w.colliders
-            .insert_with_parent(collider, handle, &mut w.bodies);
+        if mode == ColliderMode::None {
+            rb = rb.additional_mass(1.0);
+        }
+        let handle = unsafe { (*world).inner.bodies.insert(rb.build()) };
+        let collider = world_insert_default_collider(
+            world,
+            mps_core::rapier::ffi::pack_rigid_body_handle(handle),
+            simple,
+            compound,
+        );
+        assert_eq!(collider == 0, mode == ColliderMode::None);
     }
+    collider_builder_destroy(simple);
+    collider_builder_destroy(compound);
     world
 }
 

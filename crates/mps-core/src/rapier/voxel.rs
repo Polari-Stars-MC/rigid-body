@@ -33,6 +33,7 @@ pub struct VoxelGrid<'a> {
     pub origin: Vec3,
 }
 
+#[derive(Clone)]
 pub(crate) struct OwnedVoxelGrid {
     voxels: Vec<u8>,
     size_x: usize,
@@ -87,6 +88,7 @@ impl OwnedVoxelGrid {
 ///
 /// Only colliders built from `collider_builder_create_voxels*` / `*_aabb` /
 /// `*_obb` carry a cache entry; everything else is `None`.
+#[derive(Clone)]
 pub(crate) struct VoxelCache {
     pub(crate) grid: OwnedVoxelGrid,
     pub(crate) options: VoxelColliderOptions,

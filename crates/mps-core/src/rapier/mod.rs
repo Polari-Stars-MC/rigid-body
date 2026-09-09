@@ -13,6 +13,7 @@ pub mod cloth;
 pub use mps_formula::celestial_data;
 pub use mps_formula::chaos;
 pub mod collider;
+pub mod collision_mode;
 pub mod compat;
 pub use mps_formula::continuum;
 pub use mps_formula::control_theory;

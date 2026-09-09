@@ -165,6 +165,40 @@ typedef uint8_t CrossValidateAggregation;
 #endif // __STDC_VERSION__ >= 202311L
 #endif // __cplusplus
 
+/**
+ * Policy used when inserting a collider through `world_insert_default_collider`.
+ *
+ */
+enum WorldCollisionMode
+#if defined(__cplusplus) || __STDC_VERSION__ >= 202311L
+  : uint32_t
+#endif // defined(__cplusplus) || __STDC_VERSION__ >= 202311L
+ {
+  /**
+   * No collider is inserted. Set body mass explicitly if needed.
+   */
+  WorldCollisionMode_None = 0,
+  /**
+   * Select the non-compound builder supplied by the caller.
+   */
+  WorldCollisionMode_Simple = 1,
+  /**
+   * Select the compound builder supplied by the caller.
+   */
+  WorldCollisionMode_Compound = 2,
+  /**
+   * Select compound when available, otherwise simple.
+   */
+  WorldCollisionMode_Adaptive = 3,
+};
+#ifndef __cplusplus
+#if __STDC_VERSION__ >= 202311L
+typedef enum WorldCollisionMode WorldCollisionMode;
+#else
+typedef uint32_t WorldCollisionMode;
+#endif // __STDC_VERSION__ >= 202311L
+#endif // __cplusplus
+
 typedef struct AnvilKitAppHandle AnvilKitAppHandle;
 
 typedef struct CRbTreeHandle CRbTreeHandle;
@@ -1982,6 +2016,41 @@ uint8_t collider_set_contact_force_event_threshold_flag(struct WorldHandle *worl
  * `world` must be a valid pointer returned by `world_create` and not yet destroyed.
  */
 double collider_get_density(const struct WorldHandle *world, ColliderHandleRaw handle);
+
+/**
+ * Creates a world with a default collider policy (0=None, 1=Simple, 2=Compound, 3=Adaptive).
+ * Invalid mode returns null. Gravity follows `world_create` semantics.
+ */
+struct WorldHandle *world_create_with_collision_mode(Vec3 gravity, uint32_t mode);
+
+/**
+ * Changes the default policy for future default insertions only.
+ * # Safety
+ * `world` must be live and exclusively accessible, including relative to step.
+ */
+Bool world_set_default_collision_mode(struct WorldHandle *world, uint32_t mode);
+
+/**
+ * Returns the policy or `u32::MAX` on error.
+ * # Safety
+ * `world` must be live, with no concurrent mutation.
+ */
+uint32_t world_get_default_collision_mode(const struct WorldHandle *world);
+
+/**
+ * Inserts a collider selected by the world's default policy. Builders are
+ * borrowed, not consumed, and can be reused. None mode returns 0 with ERR_OK;
+ * errors return 0 with a nonzero last error. Only the selected builder is read.
+ * Compound mode requires a compound shape; Simple rejects compound shapes.
+ * Repeated calls add colliders; existing colliders are never removed/replaced.
+ * # Safety
+ * `world` must be live and exclusively accessible. The selected builder must
+ * be live, aligned, and not concurrently mutated; unused builders may be null.
+ */
+ColliderHandleRaw world_insert_default_collider(struct WorldHandle *world,
+                                                RigidBodyHandleRaw body,
+                                                const struct ColliderBuilderHandle *simple_builder,
+                                                const struct ColliderBuilderHandle *compound_builder);
 
 /**
  * Insert a dynamic rigid body built from a list of cuboids.
