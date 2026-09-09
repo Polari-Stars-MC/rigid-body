@@ -9568,6 +9568,25 @@ Bool collider_voxel_ray_pick(const struct WorldHandle *world,
                              struct VoxelCoord *out_block);
 
 /**
+ * Applies settings to the current world's bodies and colliders, preserving
+ * unrelated event flags and custom sleeping thresholds. New objects retain
+ * their builder settings; call again after inserting a batch to apply globally.
+ * This explicit operation never runs an O(n) configuration pass inside step.
+ * Binary arguments accept only 0/1. Disabling events does not erase queued events.
+ * Disabling CCD sets effective CCD substeps to zero, including this fork's
+ * automatic sweeps against fixed colliders. Re-enable with the desired substeps.
+ * # Safety
+ * The world must be live and exclusively accessible, including relative to step.
+ */
+Bool world_apply_runtime_settings(struct WorldHandle *world,
+                                  uint32_t solver_iterations,
+                                  uint32_t ccd_substeps,
+                                  uint32_t collision_events,
+                                  uint32_t contact_force_events,
+                                  uint32_t enable_ccd,
+                                  uint32_t enable_sleeping);
+
+/**
  * Create a new physics world.  Non-finite gravity components fall back to zero.
  *
  * The returned pointer is owned by Rust; release it with `world_destroy`.
@@ -9596,6 +9615,39 @@ void world_destroy(struct WorldHandle *world);
 void world_step(struct WorldHandle *world, double delta_seconds);
 
 /**
+ * Writes the latest Rapier stage timings in milliseconds:
+ * update, broad phase, narrow phase, island construction, solver, CCD, total.
+ * Returns the number of values written (7), or 0 on invalid arguments.
+ * Timings are zero without the `profiler` feature. Event and hook callback
+ * costs are included in their calling stages, not reported independently.
+ * # Safety
+ * `world` must be live and not concurrently stepped; `out_values` must point
+ * to at least `capacity` writable `f64` values.
+ */
+uint32_t world_get_pipeline_timings(const struct WorldHandle *world,
+                                    double *out_values,
+                                    uint32_t capacity);
+
+/**
+ * Enables or suspends dynamic bodies inside a spherical spatial region.
+ * Suspended bodies are put to sleep and excluded from active islands until
+ * they are re-enabled. Returns the number of affected bodies.
+ */
+uint32_t world_set_region_active(struct WorldHandle *world,
+                                 Vec3 center,
+                                 double radius,
+                                 Bool active);
+
+Bool world_set_region_step_interval(struct WorldHandle *world,
+                                    Vec3 center,
+                                    double radius,
+                                    uint32_t interval);
+
+uint32_t world_wake_region(struct WorldHandle *world, Vec3 center, double radius);
+
+uint32_t world_get_region_body_count(const struct WorldHandle *world, Vec3 center, double radius);
+
+/**
  * Set integration parameters (dt, solver iterations, CCD substeps).
  *
  * # Safety
@@ -9608,6 +9660,8 @@ Bool world_set_integration_parameters(struct WorldHandle *world,
 
 /**
  * Read integration parameters into `out_values` (dt, iterations, CCD substeps).
+ *
+ * See also `world_apply_runtime_settings` for body/collider feature switches.
  *
  * # Safety
  * `world` must be a valid world pointer (or null); `out_values` must point to

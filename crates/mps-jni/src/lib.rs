@@ -334,6 +334,12 @@ jni!(int worldGetDefaultCollisionMode(long world) { mps_core::rapier::collision_
 jni!(long worldInsertDefaultCollider(long world, long body, long simple_builder, long compound_builder) { mps_core::rapier::collision_mode::world_insert_default_collider(m::<WH>(world), body as u64, cp::<CBH>(simple_builder), cp::<CBH>(compound_builder)) as jlong });
 jni!(void worldDestroy(long world) { wo::world_destroy(m::<WH>(world)); });
 jni!(void worldStep(long world, double delta_seconds) { wo::world_step(m::<WH>(world), delta_seconds); });
+jni!(boolean worldApplyRuntimeSettings(long world, int solver_iterations, int ccd_substeps, int collision_events, int contact_force_events, int enable_ccd, int enable_sleeping) { wo::world_apply_runtime_settings(m::<WH>(world), solver_iterations as u32, ccd_substeps as u32, collision_events as u32, contact_force_events as u32, enable_ccd as u32, enable_sleeping as u32).0 as jbyte });
+jni!(int worldGetPipelineTimings(long world, long out_values, int capacity) { wo::world_get_pipeline_timings(cp::<WH>(world), pm::<f64>(out_values), u32_from_jint(capacity)) as jint });
+jni!(int worldSetRegionActive(long world, double x, double y, double z, double radius, boolean active) { wo::world_set_region_active(m::<WH>(world), v3(x,y,z), radius, if active != 0 { mps_core::rapier::ffi::Bool::TRUE } else { mps_core::rapier::ffi::Bool::FALSE }) as jint });
+jni!(boolean worldSetRegionStepInterval(long world, double x, double y, double z, double radius, int interval) { wo::world_set_region_step_interval(m::<WH>(world), v3(x,y,z), radius, interval as u32).0 as jbyte });
+jni!(int worldWakeRegion(long world, double x, double y, double z, double radius) { wo::world_wake_region(m::<WH>(world), v3(x,y,z), radius) as jint });
+jni!(int worldGetRegionBodyCount(long world, double x, double y, double z, double radius) { wo::world_get_region_body_count(cp::<WH>(world), v3(x,y,z), radius) as jint });
 
 jni!(void worldSetGravity(long world, double x, double y, double z) { wo::world_set_gravity(m::<WH>(world), v3(x, y, z)); });
 

@@ -22,6 +22,7 @@ mps-bindgen-macro = { path = "../mps-bindgen-macro" }
 default = []
 anvilkit-bridge = ["dep:anvilkit", "dep:bevy_ecs"]
 relative-force = []
+profiler = ["rapier3d/profiler"]
 
 [build-dependencies]
 cbindgen = "0.29.4"

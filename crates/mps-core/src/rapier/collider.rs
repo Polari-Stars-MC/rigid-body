@@ -1119,7 +1119,8 @@ pub extern "C" fn world_insert_collider(
             return 0;
         }
 
-        let built = unsafe { *Box::from_raw(memory_handle) };
+        let mut built = unsafe { *Box::from_raw(memory_handle) };
+        world.inner.runtime_settings.apply_collider(&mut built);
         let handle = world.inner.colliders.insert(built);
         if let Some(cache) = PENDING_VOXEL_CACHE.with(|slot| slot.borrow_mut().take()) {
             world
@@ -1152,7 +1153,8 @@ pub extern "C" fn world_insert_collider_with_parent(
             return 0;
         }
 
-        let built = unsafe { *Box::from_raw(memory_handle) };
+        let mut built = unsafe { *Box::from_raw(memory_handle) };
+        world.inner.runtime_settings.apply_collider(&mut built);
         let handle = world.inner.colliders.insert_with_parent(
             built,
             unpack_rigid_body_handle(parent),

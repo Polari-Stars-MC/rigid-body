@@ -139,6 +139,133 @@ fn collider_mode_performance_benchmark() {
     }
 }
 
+#[test]
+#[ignore = "long-running performance benchmark"]
+fn dense_contact_solver_performance_benchmark() {
+    const BODIES: u32 = 10_000;
+    let start = std::time::Instant::now();
+    let world = mps_core::rapier::world::world_create(Vec3 {
+        x: 0.0,
+        y: -9.81,
+        z: 0.0,
+    });
+    let w = unsafe { &mut (*world).inner };
+    for i in 0..BODIES {
+        let x = (i % 100) as f64 * 0.75;
+        let y = (i / 100) as f64 * 0.75;
+        let body = w.bodies.insert(
+            RigidBodyBuilder::dynamic()
+                .translation(Vector::new(x, y, 0.0))
+                .build(),
+        );
+        w.colliders.insert_with_parent(
+            ColliderBuilder::ball(0.5).density(1.0).build(),
+            body,
+            &mut w.bodies,
+        );
+    }
+    let created = start.elapsed();
+    let step_start = std::time::Instant::now();
+    mps_core::rapier::world::world_step(world, DT);
+    let step = step_start.elapsed();
+    let mut timings = [0.0; 7];
+    assert_eq!(
+        mps_core::rapier::world::world_get_pipeline_timings(world, timings.as_mut_ptr(), 7),
+        7
+    );
+    eprintln!(
+        "dense Rapier pipeline counters (ms): update={:.3}, broad={:.3}, narrow={:.3}, island={:.3}, solver={:.3}, ccd={:.3}, total={:.3}",
+        timings[0], timings[1], timings[2], timings[3], timings[4], timings[5], timings[6]
+    );
+    eprintln!("dense contacts: bodies={BODIES}, create={created:?}, step={step:?}");
+    mps_core::rapier::world::world_destroy(world);
+}
+
+#[test]
+#[ignore = "long-running performance benchmark"]
+fn dense_contact_solver_iteration_sweep() {
+    const BODIES: u32 = 5_000;
+    for iterations in [1_u8, 2, 4, 8] {
+        let world = mps_core::rapier::world::world_create(Vec3 {
+            x: 0.0,
+            y: -9.81,
+            z: 0.0,
+        });
+        let w = unsafe { &mut (*world).inner };
+        for i in 0..BODIES {
+            let x = (i % 100) as f64 * 0.75;
+            let y = (i / 100) as f64 * 0.75;
+            let body = w.bodies.insert(
+                RigidBodyBuilder::dynamic()
+                    .translation(Vector::new(x, y, 0.0))
+                    .build(),
+            );
+            w.colliders.insert_with_parent(
+                ColliderBuilder::ball(0.5).density(1.0).build(),
+                body,
+                &mut w.bodies,
+            );
+        }
+        assert_eq!(
+            mps_core::rapier::world::world_set_integration_parameters(
+                world,
+                DT,
+                iterations as u32,
+                1
+            ),
+            Bool::TRUE
+        );
+        let start = std::time::Instant::now();
+        mps_core::rapier::world::world_step(world, DT);
+        eprintln!(
+            "dense solver iterations={iterations}: step={:?}",
+            start.elapsed()
+        );
+        mps_core::rapier::world::world_destroy(world);
+    }
+}
+
+#[test]
+#[ignore = "long-running performance benchmark"]
+fn dense_contact_ccd_substep_sweep() {
+    const BODIES: u32 = 5_000;
+    for ccd_substeps in [0_u32, 1, 2, 4] {
+        let world = mps_core::rapier::world::world_create(Vec3 {
+            x: 0.0,
+            y: -9.81,
+            z: 0.0,
+        });
+        let w = unsafe { &mut (*world).inner };
+        for i in 0..BODIES {
+            let body = w.bodies.insert(
+                RigidBodyBuilder::dynamic()
+                    .translation(Vector::new(
+                        (i % 100) as f64 * 0.75,
+                        (i / 100) as f64 * 0.75,
+                        0.0,
+                    ))
+                    .build(),
+            );
+            w.colliders.insert_with_parent(
+                ColliderBuilder::ball(0.5).density(1.0).build(),
+                body,
+                &mut w.bodies,
+            );
+        }
+        assert_eq!(
+            mps_core::rapier::world::world_set_integration_parameters(world, DT, 2, ccd_substeps),
+            Bool::TRUE
+        );
+        let start = std::time::Instant::now();
+        mps_core::rapier::world::world_step(world, DT);
+        eprintln!(
+            "dense CCD substeps={ccd_substeps}: step={:?}",
+            start.elapsed()
+        );
+        mps_core::rapier::world::world_destroy(world);
+    }
+}
+
 /// Deterministic body layout: grid positions in x/y, spread z, and varied
 /// velocities. Ball colliders (r = 0.5, density 1) give every dynamic body a
 /// positive mass; spacing 2.0 keeps bodies out of contact so only the law

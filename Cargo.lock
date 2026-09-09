@@ -4821,6 +4821,7 @@ dependencies = [
  "simba 0.10.2",
  "static_assertions",
  "thiserror 2.0.18",
+ "web-time",
 ]
 
 [[package]]

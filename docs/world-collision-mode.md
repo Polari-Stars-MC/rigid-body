@@ -41,6 +41,12 @@ collider contributes mass or inertia.
 All mutation calls require exclusive world access, including relative to
 `worldStep`. Getters also require no concurrent world mutation.
 
+`worldGetPipelineTimings(world, outValues, 7)` exposes the latest Rapier
+counter values in milliseconds, in this order: update, broad phase, narrow
+phase, island construction, solver, CCD, total. Counters are updated by the
+last completed `worldStep`; before the first step they are zero. This is the
+production profiling path and is preferable to parsing ETL symbols.
+
 C/FFM equivalents are declared in generated `rigid_body.h`:
 `world_create_with_collision_mode`, `world_set_default_collision_mode`,
 `world_get_default_collision_mode`, `world_insert_default_collider`.

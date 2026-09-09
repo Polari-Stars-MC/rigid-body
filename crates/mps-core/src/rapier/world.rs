@@ -27,6 +27,163 @@ use crate::rapier::terrain_gravity::TerrainGravitySource;
 
 const MAX_STEP_SECONDS: f64 = 1.0;
 
+#[derive(Clone, Copy)]
+pub(crate) struct WorldRegion {
+    pub center: Vector,
+    pub radius2: f64,
+    pub active: bool,
+    pub step_interval: u32,
+}
+
+fn apply_region_state(bodies: &mut RigidBodySet, region: WorldRegion) {
+    for (_, body) in bodies.iter_mut() {
+        if body.is_dynamic()
+            && (body.translation() - region.center).length_squared() <= region.radius2
+        {
+            if region.active {
+                body.wake_up(true);
+            } else {
+                body.sleep();
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct WorldRuntimeSettings {
+    pub solver_iterations: usize,
+    pub ccd_substeps: usize,
+    pub collision_events: bool,
+    pub contact_force_events: bool,
+    pub enable_ccd: bool,
+    pub enable_sleeping: bool,
+}
+
+impl Default for WorldRuntimeSettings {
+    fn default() -> Self {
+        Self {
+            solver_iterations: 4,
+            ccd_substeps: 4,
+            collision_events: false,
+            contact_force_events: false,
+            enable_ccd: false,
+            enable_sleeping: true,
+        }
+    }
+}
+
+impl WorldRuntimeSettings {
+    pub(crate) fn apply_body(&self, body: &mut rapier3d::dynamics::RigidBody) {
+        body.enable_ccd(self.enable_ccd);
+        if !self.enable_sleeping {
+            body.activation_mut().normalized_linear_threshold = -1.0;
+            body.activation_mut().angular_threshold = -1.0;
+        }
+    }
+    pub(crate) fn apply_collider(&self, collider: &mut rapier3d::geometry::Collider) {
+        let mut flags = collider.active_events();
+        flags.set(
+            rapier3d::prelude::ActiveEvents::COLLISION_EVENTS,
+            self.collision_events,
+        );
+        flags.set(
+            rapier3d::prelude::ActiveEvents::CONTACT_FORCE_EVENTS,
+            self.contact_force_events,
+        );
+        collider.set_active_events(flags);
+    }
+}
+
+/// Applies settings to the current world's bodies and colliders, preserving
+/// unrelated event flags and custom sleeping thresholds. New objects retain
+/// their builder settings; call again after inserting a batch to apply globally.
+/// This explicit operation never runs an O(n) configuration pass inside step.
+/// Binary arguments accept only 0/1. Disabling events does not erase queued events.
+/// Disabling CCD sets effective CCD substeps to zero, including this fork's
+/// automatic sweeps against fixed colliders. Re-enable with the desired substeps.
+/// # Safety
+/// The world must be live and exclusively accessible, including relative to step.
+#[unsafe(no_mangle)]
+pub extern "C" fn world_apply_runtime_settings(
+    world: *mut WorldHandle,
+    solver_iterations: u32,
+    ccd_substeps: u32,
+    collision_events: u32,
+    contact_force_events: u32,
+    enable_ccd: u32,
+    enable_sleeping: u32,
+) -> Bool {
+    ffi_guard(Bool::FALSE, || {
+        if solver_iterations == 0
+            || solver_iterations > 255
+            || ccd_substeps > 255
+            || [
+                collision_events,
+                contact_force_events,
+                enable_ccd,
+                enable_sleeping,
+            ]
+            .iter()
+            .any(|v| *v > 1)
+        {
+            set_error(ERR_INVALID_ARGUMENT, "invalid runtime settings");
+            return Bool::FALSE;
+        }
+        let Some(w) = (unsafe { world.as_mut() }) else {
+            set_error(ERR_NULL_POINTER, "world is null");
+            return Bool::FALSE;
+        };
+        w.inner.runtime_settings = WorldRuntimeSettings {
+            solver_iterations: solver_iterations as usize,
+            ccd_substeps: ccd_substeps as usize,
+            collision_events: collision_events != 0,
+            contact_force_events: contact_force_events != 0,
+            enable_ccd: enable_ccd != 0,
+            enable_sleeping: enable_sleeping != 0,
+        };
+        w.inner.integration_parameters.num_solver_iterations =
+            w.inner.runtime_settings.solver_iterations;
+        w.inner.integration_parameters.max_ccd_substeps = if enable_ccd != 0 {
+            w.inner.runtime_settings.ccd_substeps
+        } else {
+            0
+        };
+        for (_, body) in w.inner.bodies.iter_mut() {
+            body.enable_ccd(enable_ccd != 0);
+            let activation = body.activation_mut();
+            if enable_sleeping == 0 {
+                activation.normalized_linear_threshold = -1.0;
+                activation.angular_threshold = -1.0;
+                body.wake_up(true);
+            } else {
+                if activation.normalized_linear_threshold < 0.0 {
+                    activation.normalized_linear_threshold =
+                        rapier3d::prelude::RigidBodyActivation::default_normalized_linear_threshold(
+                        );
+                }
+                if activation.angular_threshold < 0.0 {
+                    activation.angular_threshold =
+                        rapier3d::prelude::RigidBodyActivation::default_angular_threshold();
+                }
+            }
+        }
+        for (_, collider) in w.inner.colliders.iter_mut() {
+            let mut flags = collider.active_events();
+            flags.set(
+                rapier3d::prelude::ActiveEvents::COLLISION_EVENTS,
+                collision_events != 0,
+            );
+            flags.set(
+                rapier3d::prelude::ActiveEvents::CONTACT_FORCE_EVENTS,
+                contact_force_events != 0,
+            );
+            collider.set_active_events(flags);
+        }
+        clear_error();
+        Bool::TRUE
+    })
+}
+
 /// Preallocated working storage reused each frame to avoid per-step heap allocations.
 pub(crate) struct FrameWorkBuffers {
     /// Per-body force log: indexed by handle index for O(1) access without hashing.
@@ -84,6 +241,9 @@ impl Default for FrameWorkBuffers {
 }
 
 pub struct PhysicsWorld {
+    pub(crate) regions: Vec<WorldRegion>,
+    pub(crate) region_tick: u64,
+    pub(crate) runtime_settings: WorldRuntimeSettings,
     pub(crate) default_collision_mode: super::collision_mode::WorldCollisionMode,
     pub(crate) pipeline: PhysicsPipeline,
     pub(crate) gravity: Vector,
@@ -232,6 +392,9 @@ impl PhysicsWorld {
 
         let events = Arc::new(crate::rapier::events::CollectingEventHandler::default());
         Self {
+            regions: Vec::new(),
+            region_tick: 0,
+            runtime_settings: WorldRuntimeSettings::default(),
             default_collision_mode: super::collision_mode::WorldCollisionMode::Simple,
             pipeline: PhysicsPipeline::new(),
             gravity: vec3_to_rapier(gravity),
@@ -342,9 +505,20 @@ pub extern "C" fn world_destroy(world: *mut WorldHandle) {
 #[unsafe(no_mangle)]
 pub extern "C" fn world_step(world: *mut WorldHandle, delta_seconds: f64) {
     ffi_guard((), || {
+        #[cfg(feature = "profiler")]
+        let profile = std::env::var_os("MPS_STEP_PROFILE").is_some();
+        #[cfg(feature = "profiler")]
+        let profile_start = std::time::Instant::now();
         let Some(world) = (unsafe { world.as_mut() }) else {
             return;
         };
+        world.inner.region_tick = world.inner.region_tick.wrapping_add(1);
+        let tick = world.inner.region_tick;
+        for region in world.inner.regions.clone() {
+            if tick % region.step_interval as u64 == 0 {
+                apply_region_state(&mut world.inner.bodies, region);
+            }
+        }
         if !delta_seconds.is_finite() || delta_seconds <= 0.0 || delta_seconds > MAX_STEP_SECONDS {
             return;
         }
@@ -498,6 +672,8 @@ pub extern "C" fn world_step(world: *mut WorldHandle, delta_seconds: f64) {
             world.inner.buffers.coulomb_hook_dirty = false;
         }
 
+        #[cfg(feature = "profiler")]
+        let before_forces = profile_start.elapsed();
         // --- Force facade: the single entry-point for all force application ---
         // O1 fix: reuse persistent body_log (Vec-indexed by handle) instead of HashMap.
         // Take ownership of the buffers, use them, then put them back.
@@ -557,6 +733,8 @@ pub extern "C" fn world_step(world: *mut WorldHandle, delta_seconds: f64) {
                 .events
                 .set_last_custom_physics_report(force_report.to_legacy_report());
         }
+        #[cfg(feature = "profiler")]
+        let after_forces = profile_start.elapsed();
 
         // Phase 0b/2 wiring: route bound-particle spring forces into the rigid-body
         // `force_containers`, then advance the soft-body point masses (gravity +
@@ -697,6 +875,8 @@ pub extern "C" fn world_step(world: *mut WorldHandle, delta_seconds: f64) {
             &world.inner.hooks,
             &*world.inner.events,
         );
+        #[cfg(feature = "profiler")]
+        let after_pipeline = profile_start.elapsed();
 
         // Phase 5f: read the contacted proxy poses back into the soft-body particles
         // so collision response propagates into the soft body (free particles only;
@@ -722,6 +902,17 @@ pub extern "C" fn world_step(world: *mut WorldHandle, delta_seconds: f64) {
                     p.vel = rb.linvel().clone();
                 }
             }
+        }
+
+        #[cfg(feature = "profiler")]
+        if profile {
+            eprintln!(
+                "world_step profile: pre_force={before_forces:?}, forces={:?}, pipeline={:?}, post_pipeline={:?}, total={:?}",
+                after_forces.saturating_sub(before_forces),
+                after_pipeline.saturating_sub(after_forces),
+                profile_start.elapsed().saturating_sub(after_pipeline),
+                profile_start.elapsed(),
+            );
         }
 
         // Phase 8: after the rigid pipeline has integrated, snap bound soft-body
@@ -823,6 +1014,180 @@ pub extern "C" fn world_step(world: *mut WorldHandle, delta_seconds: f64) {
     })
 }
 
+/// Writes the latest Rapier stage timings in milliseconds:
+/// update, broad phase, narrow phase, island construction, solver, CCD, total.
+/// Returns the number of values written (7), or 0 on invalid arguments.
+/// Timings are zero without the `profiler` feature. Event and hook callback
+/// costs are included in their calling stages, not reported independently.
+/// # Safety
+/// `world` must be live and not concurrently stepped; `out_values` must point
+/// to at least `capacity` writable `f64` values.
+#[unsafe(no_mangle)]
+pub extern "C" fn world_get_pipeline_timings(
+    world: *const WorldHandle,
+    out_values: *mut f64,
+    capacity: u32,
+) -> u32 {
+    ffi_guard(0, || {
+        let Some(world) = (unsafe { world.as_ref() }) else {
+            set_error(ERR_NULL_POINTER, "world is null");
+            return 0;
+        };
+        if capacity < 7 || out_values.is_null() {
+            set_error(
+                ERR_CAPACITY,
+                "pipeline timing output capacity must be at least 7",
+            );
+            return 0;
+        }
+        let Some(out) = (unsafe {
+            crate::rapier::ffi::convert::checked_output_slice(out_values, capacity as usize)
+        }) else {
+            set_error(ERR_INVALID_ARGUMENT, "invalid pipeline timing output");
+            return 0;
+        };
+        let c = &world.inner.pipeline.counters;
+        out[..7].copy_from_slice(&[
+            c.update_time_ms(),
+            c.broad_phase_time_ms(),
+            c.narrow_phase_time_ms(),
+            c.island_construction_time_ms(),
+            c.solver_time_ms(),
+            c.ccd_time_ms(),
+            c.step_time_ms(),
+        ]);
+        clear_error();
+        7
+    })
+}
+
+/// Enables or suspends dynamic bodies inside a spherical spatial region.
+/// Suspended bodies are put to sleep and excluded from active islands until
+/// they are re-enabled. Returns the number of affected bodies.
+#[unsafe(no_mangle)]
+pub extern "C" fn world_set_region_active(
+    world: *mut WorldHandle,
+    center: Vec3,
+    radius: f64,
+    active: Bool,
+) -> u32 {
+    ffi_guard(0, || {
+        let Some(world) = (unsafe { world.as_mut() }) else {
+            set_error(ERR_NULL_POINTER, "world is null");
+            return 0;
+        };
+        if !vec3_finite(center) || !radius.is_finite() || radius < 0.0 {
+            set_error(ERR_INVALID_ARGUMENT, "invalid region");
+            return 0;
+        }
+        let r2 = radius * radius;
+        let center = vec3_to_rapier(center);
+        if let Some(region) = world
+            .inner
+            .regions
+            .iter_mut()
+            .find(|r| r.center == center && r.radius2 == r2)
+        {
+            region.active = active == Bool::TRUE;
+        } else {
+            world.inner.regions.push(WorldRegion {
+                center,
+                radius2: r2,
+                active: active == Bool::TRUE,
+                step_interval: 1,
+            });
+        }
+        let mut changed = 0;
+        for (_, body) in world.inner.bodies.iter_mut() {
+            if !body.is_dynamic() || (body.translation() - center).length_squared() > r2 {
+                continue;
+            }
+            if active == Bool::TRUE {
+                body.wake_up(true);
+            } else {
+                body.sleep();
+            }
+            changed += 1;
+        }
+        clear_error();
+        changed
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn world_set_region_step_interval(
+    world: *mut WorldHandle,
+    center: Vec3,
+    radius: f64,
+    interval: u32,
+) -> Bool {
+    ffi_guard(Bool::FALSE, || {
+        let Some(world) = (unsafe { world.as_mut() }) else {
+            set_error(ERR_NULL_POINTER, "world is null");
+            return Bool::FALSE;
+        };
+        if !vec3_finite(center)
+            || !radius.is_finite()
+            || radius < 0.0
+            || interval == 0
+            || interval > 1024
+        {
+            set_error(ERR_INVALID_ARGUMENT, "invalid region interval");
+            return Bool::FALSE;
+        }
+        let c = vec3_to_rapier(center);
+        let r2 = radius * radius;
+        if let Some(region) = world
+            .inner
+            .regions
+            .iter_mut()
+            .find(|r| r.center == c && r.radius2 == r2)
+        {
+            region.step_interval = interval;
+        } else {
+            world.inner.regions.push(WorldRegion {
+                center: c,
+                radius2: r2,
+                active: true,
+                step_interval: interval,
+            });
+        }
+        clear_error();
+        Bool::TRUE
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn world_wake_region(world: *mut WorldHandle, center: Vec3, radius: f64) -> u32 {
+    world_set_region_active(world, center, radius, Bool::TRUE)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn world_get_region_body_count(
+    world: *const WorldHandle,
+    center: Vec3,
+    radius: f64,
+) -> u32 {
+    ffi_guard(0, || {
+        let Some(world) = (unsafe { world.as_ref() }) else {
+            set_error(ERR_NULL_POINTER, "world is null");
+            return 0;
+        };
+        if !vec3_finite(center) || !radius.is_finite() || radius < 0.0 {
+            set_error(ERR_INVALID_ARGUMENT, "invalid region");
+            return 0;
+        }
+        let c = vec3_to_rapier(center);
+        let r2 = radius * radius;
+        world
+            .inner
+            .bodies
+            .iter()
+            .filter(|(_, b)| b.is_dynamic() && (b.translation() - c).length_squared() <= r2)
+            .count() as u32
+    })
+}
+
 /// Set integration parameters (dt, solver iterations, CCD substeps).
 ///
 /// # Safety
@@ -859,6 +1224,8 @@ pub extern "C" fn world_set_integration_parameters(
 }
 
 /// Read integration parameters into `out_values` (dt, iterations, CCD substeps).
+///
+/// See also `world_apply_runtime_settings` for body/collider feature switches.
 ///
 /// # Safety
 /// `world` must be a valid world pointer (or null); `out_values` must point to

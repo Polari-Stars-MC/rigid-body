@@ -15,3 +15,4 @@ hashbrown = { workspace = true }
 [features]
 anvilkit-bridge = ["mps-core/anvilkit-bridge"]
 relative-force = ["mps-core/relative-force"]
+profiler = ["mps-core/profiler"]

@@ -435,7 +435,8 @@ pub extern "C" fn world_insert_rigid_body(
             return 0;
         }
 
-        let built = unsafe { *Box::from_raw(memory_handle) };
+        let mut built = unsafe { *Box::from_raw(memory_handle) };
+        world.inner.runtime_settings.apply_body(&mut built);
         clear_error();
         pack_rigid_body_handle(world.inner.bodies.insert(built))
     })
