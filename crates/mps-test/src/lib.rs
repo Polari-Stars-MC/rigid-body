@@ -25,6 +25,7 @@ pub mod rapier {
     pub mod balloon;
     pub mod batch;
     pub mod biomechanics;
+    pub mod body_spatial_index;
     pub mod bounds;
     pub mod bridge;
     pub mod celestial_data;

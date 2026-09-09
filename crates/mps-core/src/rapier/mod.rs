@@ -85,4 +85,5 @@ pub mod trajectory;
 pub use mps_formula::transmission;
 pub mod voxel;
 pub use mps_formula::wave_optics;
+mod body_spatial_index;
 pub mod world;

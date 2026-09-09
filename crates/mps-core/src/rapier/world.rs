@@ -1,3 +1,4 @@
+use super::body_spatial_index::BodySpatialIndex;
 use rapier3d::math::Rotation;
 use rapier3d::prelude::fluid::FluidWorld;
 use rapier3d::prelude::granular::GranularWorld;
@@ -35,22 +36,26 @@ pub(crate) struct WorldRegion {
     pub step_interval: u32,
 }
 
-fn apply_region_state(bodies: &mut RigidBodySet, region: WorldRegion) {
-    for (_, body) in bodies.iter_mut() {
-        if body.is_dynamic()
-            && (body.translation() - region.center).length_squared() <= region.radius2
-        {
-            if region.active {
+fn apply_region_state(world: &mut PhysicsWorld, region: WorldRegion) -> u32 {
+    let handles = world.region_handles(region.center, region.radius2.sqrt());
+    let mut changed = 0;
+    for handle in handles {
+        if let Some(body) = world.bodies.get_mut(handle) {
+            if region.active && body.is_sleeping() {
                 body.wake_up(true);
-            } else {
+                changed += 1;
+            } else if !region.active && !body.is_sleeping() {
                 body.sleep();
+                changed += 1;
             }
         }
     }
+    changed
 }
 
 #[derive(Clone, Copy)]
 pub(crate) struct WorldRuntimeSettings {
+    configured: bool,
     pub solver_iterations: usize,
     pub ccd_substeps: usize,
     pub collision_events: bool,
@@ -62,6 +67,7 @@ pub(crate) struct WorldRuntimeSettings {
 impl Default for WorldRuntimeSettings {
     fn default() -> Self {
         Self {
+            configured: false,
             solver_iterations: 4,
             ccd_substeps: 4,
             collision_events: false,
@@ -74,6 +80,9 @@ impl Default for WorldRuntimeSettings {
 
 impl WorldRuntimeSettings {
     pub(crate) fn apply_body(&self, body: &mut rapier3d::dynamics::RigidBody) {
+        if !self.configured {
+            return;
+        }
         body.enable_ccd(self.enable_ccd);
         if !self.enable_sleeping {
             body.activation_mut().normalized_linear_threshold = -1.0;
@@ -81,6 +90,9 @@ impl WorldRuntimeSettings {
         }
     }
     pub(crate) fn apply_collider(&self, collider: &mut rapier3d::geometry::Collider) {
+        if !self.configured {
+            return;
+        }
         let mut flags = collider.active_events();
         flags.set(
             rapier3d::prelude::ActiveEvents::COLLISION_EVENTS,
@@ -134,6 +146,7 @@ pub extern "C" fn world_apply_runtime_settings(
             return Bool::FALSE;
         };
         w.inner.runtime_settings = WorldRuntimeSettings {
+            configured: true,
             solver_iterations: solver_iterations as usize,
             ccd_substeps: ccd_substeps as usize,
             collision_events: collision_events != 0,
@@ -241,6 +254,7 @@ impl Default for FrameWorkBuffers {
 }
 
 pub struct PhysicsWorld {
+    body_spatial_index: parking_lot::Mutex<Option<BodySpatialIndex>>,
     pub(crate) regions: Vec<WorldRegion>,
     pub(crate) region_tick: u64,
     pub(crate) runtime_settings: WorldRuntimeSettings,
@@ -378,6 +392,13 @@ pub struct PhysicsWorld {
 }
 
 impl PhysicsWorld {
+    fn region_handles(&self, center: Vector, radius: f64) -> Vec<RigidBodyHandle> {
+        let mut cache = self.body_spatial_index.lock();
+        let index = cache.get_or_insert_with(|| BodySpatialIndex::new(&self.bodies));
+        index.sync(&self.bodies);
+        index.query(center, radius)
+    }
+
     pub(crate) fn new(gravity: Vec3) -> Self {
         let integration_parameters = IntegrationParameters {
             dt: 1.0 / 60.0,
@@ -392,6 +413,7 @@ impl PhysicsWorld {
 
         let events = Arc::new(crate::rapier::events::CollectingEventHandler::default());
         Self {
+            body_spatial_index: parking_lot::Mutex::new(None),
             regions: Vec::new(),
             region_tick: 0,
             runtime_settings: WorldRuntimeSettings::default(),
@@ -402,7 +424,11 @@ impl PhysicsWorld {
             islands: IslandManager::new(),
             broad_phase: BroadPhaseBvh::new(),
             narrow_phase: NarrowPhase::new(),
-            bodies: RigidBodySet::new(),
+            bodies: {
+                let mut bodies = RigidBodySet::new();
+                bodies.enable_spatial_change_tracking();
+                bodies
+            },
             colliders: ColliderSet::new(),
             impulse_joints: ImpulseJointSet::new(),
             multibody_joints: MultibodyJointSet::new(),
@@ -512,13 +538,6 @@ pub extern "C" fn world_step(world: *mut WorldHandle, delta_seconds: f64) {
         let Some(world) = (unsafe { world.as_mut() }) else {
             return;
         };
-        world.inner.region_tick = world.inner.region_tick.wrapping_add(1);
-        let tick = world.inner.region_tick;
-        for region in world.inner.regions.clone() {
-            if tick % region.step_interval as u64 == 0 {
-                apply_region_state(&mut world.inner.bodies, region);
-            }
-        }
         if !delta_seconds.is_finite() || delta_seconds <= 0.0 || delta_seconds > MAX_STEP_SECONDS {
             return;
         }
@@ -538,6 +557,14 @@ pub extern "C" fn world_step(world: *mut WorldHandle, delta_seconds: f64) {
         };
 
         world.inner.integration_parameters.dt = delta_seconds;
+        world.inner.region_tick = world.inner.region_tick.wrapping_add(1);
+        let tick = world.inner.region_tick;
+        for i in 0..world.inner.regions.len() {
+            let region = world.inner.regions[i];
+            if tick % region.step_interval as u64 == 0 {
+                apply_region_state(&mut world.inner, region);
+            }
+        }
 
         // --- Arena: drain Java commands before applying forces ---
         // Java writes forces/set-poses/impulses via shared memory, Rust reads them here.
@@ -983,10 +1010,21 @@ pub extern "C" fn world_step(world: *mut WorldHandle, delta_seconds: f64) {
         // harmless for the frame just simulated, but stops an unregistered law (or
         // a spent one-shot force) from acting forever.  Registered laws re-apply
         // their force each frame inside `apply_all` above, so they stay correct.
-        for (_, body) in world.inner.bodies.iter_mut() {
+        let spatial = world.inner.body_spatial_index.get_mut();
+        if let Some(index) = spatial {
+            index.sync(&world.inner.bodies);
+        }
+        for (handle, body) in world.inner.bodies.iter_mut() {
             if body.is_dynamic() {
                 body.reset_forces(false);
             }
+            if let Some(index) = spatial {
+                index.update(handle, body);
+            }
+        }
+        world.inner.bodies.clear_spatial_changes();
+        if let Some(index) = spatial {
+            index.journal_cleared();
         }
 
         // 5. Flush shared arena body/collider state → Java zero-JNI read
@@ -1097,18 +1135,15 @@ pub extern "C" fn world_set_region_active(
                 step_interval: 1,
             });
         }
-        let mut changed = 0;
-        for (_, body) in world.inner.bodies.iter_mut() {
-            if !body.is_dynamic() || (body.translation() - center).length_squared() > r2 {
-                continue;
-            }
-            if active == Bool::TRUE {
-                body.wake_up(true);
-            } else {
-                body.sleep();
-            }
-            changed += 1;
-        }
+        let changed = apply_region_state(
+            &mut world.inner,
+            WorldRegion {
+                center,
+                radius2: r2,
+                active: active == Bool::TRUE,
+                step_interval: 1,
+            },
+        );
         clear_error();
         changed
     })
@@ -1177,14 +1212,12 @@ pub extern "C" fn world_get_region_body_count(
             set_error(ERR_INVALID_ARGUMENT, "invalid region");
             return 0;
         }
-        let c = vec3_to_rapier(center);
-        let r2 = radius * radius;
-        world
+        let count = world
             .inner
-            .bodies
-            .iter()
-            .filter(|(_, b)| b.is_dynamic() && (b.translation() - c).length_squared() <= r2)
-            .count() as u32
+            .region_handles(vec3_to_rapier(center), radius)
+            .len();
+        clear_error();
+        count as u32
     })
 }
 
