@@ -9629,6 +9629,12 @@ uint32_t world_get_pipeline_timings(const struct WorldHandle *world,
                                     uint32_t capacity);
 
 /**
+ * Invalidates the cached body spatial bounds after an in-place collider shape
+ * or local-pose change. The next region query rebuilds bounds lazily.
+ */
+Bool world_invalidate_region_index(struct WorldHandle *world);
+
+/**
  * Enables or suspends dynamic bodies inside a spherical spatial region.
  * Suspended bodies are put to sleep and excluded from active islands until
  * they are re-enabled. Returns the number of affected bodies.
@@ -9644,6 +9650,11 @@ Bool world_set_region_step_interval(struct WorldHandle *world,
                                     uint32_t interval);
 
 uint32_t world_wake_region(struct WorldHandle *world, Vec3 center, double radius);
+
+Bool world_set_region_priority(struct WorldHandle *world,
+                               Vec3 center,
+                               double radius,
+                               int32_t priority);
 
 uint32_t world_get_region_body_count(const struct WorldHandle *world, Vec3 center, double radius);
 

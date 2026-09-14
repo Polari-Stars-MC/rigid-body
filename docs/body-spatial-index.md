@@ -40,7 +40,9 @@ cargo +stable-x86_64-pc-windows-gnu test -p mps-test --release body_index_query_
 
 The benchmark compares ten indexed queries and ten scans at 100000 and 1000000
 bodies, reporting initial build cost separately. It measures sparse region
-queries, not a claim about whole-world step acceleration.
+queries, not a claim about whole-world step acceleration. Swept predictions use
+the current world integration dt; immediate region calls use the world's last
+configured dt.
 
 Recorded on 2026-09-09, Windows GNU Release, ten repeated queries per method,
 90 matched bodies in a sparse region:

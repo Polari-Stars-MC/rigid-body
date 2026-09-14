@@ -1,5 +1,8 @@
 package org.polaris2023.mps.rapier;
 
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
 /** Standalone JNI smoke fixture; compile separately from the application class. */
 public final class RapierNative {
     private RapierNative() {}
@@ -61,6 +64,20 @@ public final class RapierNative {
             check(worldSetRegionActive(world, 0, 0, 0, 0, false) == 1, "region sleep failed");
             check(worldWakeRegion(world, 0, 0, 0, 0) == 1, "region wake failed");
             check(worldSetRegionActive(world, 0, 0, 0, 0, false) == 1, "region repeat failed");
+            ExecutorService pool = Executors.newFixedThreadPool(4);
+            try {
+                for (int i = 0; i < 4; i++) {
+                    final int worker = i;
+                    pool.submit(() -> {
+                        for (int n = 0; n < 100; n++) {
+                            check(worldGetRegionBodyCount(world, worker, 0, 0, 2) >= 0, "region query failed");
+                            worldSetRegionActive(world, worker, 0, 0, 2, (n & 1) == 0);
+                        }
+                    });
+                }
+                pool.shutdown();
+                while (!pool.isTerminated()) { worldStep(world, 0.001); }
+            } finally { pool.shutdownNow(); }
             worldStep(world, 0.01);
             System.out.println("JNI collision mode smoke test passed");
         } finally {

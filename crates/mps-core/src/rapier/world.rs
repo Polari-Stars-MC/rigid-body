@@ -28,18 +28,34 @@ use crate::rapier::terrain_gravity::TerrainGravitySource;
 
 const MAX_STEP_SECONDS: f64 = 1.0;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub(crate) struct WorldRegion {
     pub center: Vector,
     pub radius2: f64,
     pub active: bool,
     pub step_interval: u32,
+    pub priority: i32,
 }
 
-fn apply_region_state(world: &mut PhysicsWorld, region: WorldRegion) -> u32 {
-    let handles = world.region_handles(region.center, region.radius2.sqrt());
+fn apply_region_state(world: &mut PhysicsWorld, region: WorldRegion, dt: f64) -> u32 {
+    let handles = world.region_handles(region.center, region.radius2.sqrt(), dt);
     let mut changed = 0;
-    for handle in handles {
+    let mut selected: std::collections::HashSet<_> = handles.iter().copied().collect();
+    if region.active {
+        for pair in world.narrow_phase.contact_pairs() {
+            let a = world.colliders.get(pair.collider1).and_then(|c| c.parent());
+            let b = world.colliders.get(pair.collider2).and_then(|c| c.parent());
+            if let (Some(a), Some(b)) = (a, b) {
+                if selected.contains(&a) {
+                    selected.insert(b);
+                }
+                if selected.contains(&b) {
+                    selected.insert(a);
+                }
+            }
+        }
+    }
+    for handle in selected {
         if let Some(body) = world.bodies.get_mut(handle) {
             if region.active && body.is_sleeping() {
                 body.wake_up(true);
@@ -51,6 +67,27 @@ fn apply_region_state(world: &mut PhysicsWorld, region: WorldRegion) -> u32 {
         }
     }
     changed
+}
+
+fn apply_region_states(world: &mut PhysicsWorld, regions: &[WorldRegion], dt: f64) {
+    let mut desired = std::collections::HashMap::new();
+    for region in regions {
+        for handle in world.region_handles(region.center, region.radius2.sqrt(), dt) {
+            let entry = desired.entry(handle).or_insert((i32::MIN, region.active));
+            if region.priority >= entry.0 {
+                *entry = (region.priority, region.active);
+            }
+        }
+    }
+    for (handle, (_, active)) in desired {
+        if let Some(body) = world.bodies.get_mut(handle) {
+            if active && body.is_sleeping() {
+                body.wake_up(true);
+            } else if !active && !body.is_sleeping() {
+                body.sleep();
+            }
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -257,6 +294,9 @@ pub struct PhysicsWorld {
     body_spatial_index: parking_lot::Mutex<Option<BodySpatialIndex>>,
     pub(crate) regions: Vec<WorldRegion>,
     pub(crate) region_tick: u64,
+    pub(crate) region_version: u64,
+    pub(crate) region_order_version: u64,
+    pub(crate) region_order: Vec<usize>,
     pub(crate) runtime_settings: WorldRuntimeSettings,
     pub(crate) default_collision_mode: super::collision_mode::WorldCollisionMode,
     pub(crate) pipeline: PhysicsPipeline,
@@ -392,11 +432,12 @@ pub struct PhysicsWorld {
 }
 
 impl PhysicsWorld {
-    fn region_handles(&self, center: Vector, radius: f64) -> Vec<RigidBodyHandle> {
+    fn region_handles(&self, center: Vector, radius: f64, dt: f64) -> Vec<RigidBodyHandle> {
         let mut cache = self.body_spatial_index.lock();
-        let index = cache.get_or_insert_with(|| BodySpatialIndex::new(&self.bodies));
-        index.sync(&self.bodies);
-        index.query(center, radius)
+        let index =
+            cache.get_or_insert_with(|| BodySpatialIndex::new(&self.bodies, &self.colliders));
+        index.sync(&self.bodies, dt);
+        index.query(center, radius, dt)
     }
 
     pub(crate) fn new(gravity: Vec3) -> Self {
@@ -416,6 +457,9 @@ impl PhysicsWorld {
             body_spatial_index: parking_lot::Mutex::new(None),
             regions: Vec::new(),
             region_tick: 0,
+            region_version: 0,
+            region_order_version: u64::MAX,
+            region_order: Vec::new(),
             runtime_settings: WorldRuntimeSettings::default(),
             default_collision_mode: super::collision_mode::WorldCollisionMode::Simple,
             pipeline: PhysicsPipeline::new(),
@@ -538,6 +582,10 @@ pub extern "C" fn world_step(world: *mut WorldHandle, delta_seconds: f64) {
         let Some(world) = (unsafe { world.as_mut() }) else {
             return;
         };
+        // Acquire the world write lock through a raw pointer so the guard does
+        // not hold a borrow of `world.inner`; the step mutates every subsystem.
+        let query_lock = &world.inner.query_lock as *const parking_lot::RwLock<()>;
+        let _step_world_lock = unsafe { (&*query_lock).write() };
         if !delta_seconds.is_finite() || delta_seconds <= 0.0 || delta_seconds > MAX_STEP_SECONDS {
             return;
         }
@@ -559,12 +607,22 @@ pub extern "C" fn world_step(world: *mut WorldHandle, delta_seconds: f64) {
         world.inner.integration_parameters.dt = delta_seconds;
         world.inner.region_tick = world.inner.region_tick.wrapping_add(1);
         let tick = world.inner.region_tick;
-        for i in 0..world.inner.regions.len() {
-            let region = world.inner.regions[i];
-            if tick % region.step_interval as u64 == 0 {
-                apply_region_state(&mut world.inner, region);
-            }
+        if world.inner.region_order_version != world.inner.region_version {
+            world.inner.region_order = (0..world.inner.regions.len()).collect();
+            world
+                .inner
+                .region_order
+                .sort_by_key(|&i| world.inner.regions[i].priority);
+            world.inner.region_order_version = world.inner.region_version;
         }
+        let due: Vec<_> = world
+            .inner
+            .region_order
+            .iter()
+            .filter_map(|&i| world.inner.regions.get(i).copied())
+            .filter(|r| tick % r.step_interval as u64 == 0)
+            .collect();
+        apply_region_states(&mut world.inner, &due, delta_seconds);
 
         // --- Arena: drain Java commands before applying forces ---
         // Java writes forces/set-poses/impulses via shared memory, Rust reads them here.
@@ -1012,14 +1070,14 @@ pub extern "C" fn world_step(world: *mut WorldHandle, delta_seconds: f64) {
         // their force each frame inside `apply_all` above, so they stay correct.
         let spatial = world.inner.body_spatial_index.get_mut();
         if let Some(index) = spatial {
-            index.sync(&world.inner.bodies);
+            index.sync(&world.inner.bodies, world.inner.integration_parameters.dt);
         }
         for (handle, body) in world.inner.bodies.iter_mut() {
             if body.is_dynamic() {
                 body.reset_forces(false);
             }
             if let Some(index) = spatial {
-                index.update(handle, body);
+                index.update(handle, body, world.inner.integration_parameters.dt);
             }
         }
         world.inner.bodies.clear_spatial_changes();
@@ -1099,6 +1157,44 @@ pub extern "C" fn world_get_pipeline_timings(
     })
 }
 
+/// Invalidates the cached body spatial bounds after an in-place collider shape
+/// or local-pose change. The next region query rebuilds bounds lazily.
+#[unsafe(no_mangle)]
+pub extern "C" fn world_invalidate_region_index(world: *mut WorldHandle) -> Bool {
+    ffi_guard(Bool::FALSE, || {
+        let Some(world) = (unsafe { world.as_mut() }) else {
+            set_error(ERR_NULL_POINTER, "world is null");
+            return Bool::FALSE;
+        };
+        *world.inner.body_spatial_index.lock() = None;
+        clear_error();
+        Bool::TRUE
+    })
+}
+
+pub(crate) fn invalidate_region_index(world: &mut PhysicsWorld) {
+    *world.body_spatial_index.lock() = None;
+}
+
+#[allow(dead_code)]
+pub(crate) fn refresh_region_body(world: &mut PhysicsWorld, handle: ColliderHandle) {
+    let Some(parent) = world.colliders.get(handle).and_then(|c| c.parent()) else {
+        return;
+    };
+    let Some(body) = world.bodies.get(parent) else {
+        return;
+    };
+    let mut cache = world.body_spatial_index.lock();
+    if let Some(index) = cache.as_mut() {
+        index.update_snapshot(
+            parent,
+            body,
+            &world.colliders,
+            world.integration_parameters.dt,
+        );
+    }
+}
+
 /// Enables or suspends dynamic bodies inside a spherical spatial region.
 /// Suspended bodies are put to sleep and excluded from active islands until
 /// they are re-enabled. Returns the number of affected bodies.
@@ -1120,6 +1216,7 @@ pub extern "C" fn world_set_region_active(
         }
         let r2 = radius * radius;
         let center = vec3_to_rapier(center);
+        let before = world.inner.regions.clone();
         if let Some(region) = world
             .inner
             .regions
@@ -1133,7 +1230,12 @@ pub extern "C" fn world_set_region_active(
                 radius2: r2,
                 active: active == Bool::TRUE,
                 step_interval: 1,
+                priority: 0,
             });
+        }
+        let query_dt = world.inner.integration_parameters.dt;
+        if world.inner.regions != before {
+            world.inner.region_version = world.inner.region_version.wrapping_add(1);
         }
         let changed = apply_region_state(
             &mut world.inner,
@@ -1142,7 +1244,9 @@ pub extern "C" fn world_set_region_active(
                 radius2: r2,
                 active: active == Bool::TRUE,
                 step_interval: 1,
+                priority: 0,
             },
+            query_dt,
         );
         clear_error();
         changed
@@ -1161,6 +1265,7 @@ pub extern "C" fn world_set_region_step_interval(
             set_error(ERR_NULL_POINTER, "world is null");
             return Bool::FALSE;
         };
+        let _query_lock = world.inner.query_lock.write();
         if !vec3_finite(center)
             || !radius.is_finite()
             || radius < 0.0
@@ -1172,6 +1277,7 @@ pub extern "C" fn world_set_region_step_interval(
         }
         let c = vec3_to_rapier(center);
         let r2 = radius * radius;
+        let before = world.inner.regions.clone();
         if let Some(region) = world
             .inner
             .regions
@@ -1185,7 +1291,11 @@ pub extern "C" fn world_set_region_step_interval(
                 radius2: r2,
                 active: true,
                 step_interval: interval,
+                priority: 0,
             });
+        }
+        if world.inner.regions != before {
+            world.inner.region_version = world.inner.region_version.wrapping_add(1);
         }
         clear_error();
         Bool::TRUE
@@ -1195,6 +1305,50 @@ pub extern "C" fn world_set_region_step_interval(
 #[unsafe(no_mangle)]
 pub extern "C" fn world_wake_region(world: *mut WorldHandle, center: Vec3, radius: f64) -> u32 {
     world_set_region_active(world, center, radius, Bool::TRUE)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn world_set_region_priority(
+    world: *mut WorldHandle,
+    center: Vec3,
+    radius: f64,
+    priority: i32,
+) -> Bool {
+    ffi_guard(Bool::FALSE, || {
+        let Some(world) = (unsafe { world.as_mut() }) else {
+            set_error(ERR_NULL_POINTER, "world is null");
+            return Bool::FALSE;
+        };
+        let _lock = world.inner.query_lock.write();
+        if !vec3_finite(center) || !radius.is_finite() || radius < 0.0 {
+            set_error(ERR_INVALID_ARGUMENT, "invalid region");
+            return Bool::FALSE;
+        }
+        let c = vec3_to_rapier(center);
+        let r2 = radius * radius;
+        let before = world.inner.regions.clone();
+        if let Some(region) = world
+            .inner
+            .regions
+            .iter_mut()
+            .find(|r| r.center == c && r.radius2 == r2)
+        {
+            region.priority = priority;
+        } else {
+            world.inner.regions.push(WorldRegion {
+                center: c,
+                radius2: r2,
+                active: true,
+                step_interval: 1,
+                priority,
+            });
+        }
+        if world.inner.regions != before {
+            world.inner.region_version = world.inner.region_version.wrapping_add(1);
+        }
+        clear_error();
+        Bool::TRUE
+    })
 }
 
 #[unsafe(no_mangle)]
@@ -1208,13 +1362,18 @@ pub extern "C" fn world_get_region_body_count(
             set_error(ERR_NULL_POINTER, "world is null");
             return 0;
         };
+        let _query_lock = world.inner.query_lock.read();
         if !vec3_finite(center) || !radius.is_finite() || radius < 0.0 {
             set_error(ERR_INVALID_ARGUMENT, "invalid region");
             return 0;
         }
         let count = world
             .inner
-            .region_handles(vec3_to_rapier(center), radius)
+            .region_handles(
+                vec3_to_rapier(center),
+                radius,
+                world.inner.integration_parameters.dt,
+            )
             .len();
         clear_error();
         count as u32

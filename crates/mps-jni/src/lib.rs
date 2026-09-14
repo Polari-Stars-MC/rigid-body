@@ -339,6 +339,8 @@ jni!(int worldGetPipelineTimings(long world, long out_values, int capacity) { wo
 jni!(int worldSetRegionActive(long world, double x, double y, double z, double radius, boolean active) { wo::world_set_region_active(m::<WH>(world), v3(x,y,z), radius, if active != 0 { mps_core::rapier::ffi::Bool::TRUE } else { mps_core::rapier::ffi::Bool::FALSE }) as jint });
 jni!(boolean worldSetRegionStepInterval(long world, double x, double y, double z, double radius, int interval) { wo::world_set_region_step_interval(m::<WH>(world), v3(x,y,z), radius, interval as u32).0 as jbyte });
 jni!(int worldWakeRegion(long world, double x, double y, double z, double radius) { wo::world_wake_region(m::<WH>(world), v3(x,y,z), radius) as jint });
+jni!(boolean worldSetRegionPriority(long world, double x, double y, double z, double radius, int priority) { wo::world_set_region_priority(m::<WH>(world), v3(x, y, z), radius, priority).0 as jbyte });
+jni!(boolean worldInvalidateRegionIndex(long world) { wo::world_invalidate_region_index(m::<WH>(world)).0 as jbyte });
 jni!(int worldGetRegionBodyCount(long world, double x, double y, double z, double radius) { wo::world_get_region_body_count(cp::<WH>(world), v3(x,y,z), radius) as jint });
 
 jni!(void worldSetGravity(long world, double x, double y, double z) { wo::world_set_gravity(m::<WH>(world), v3(x, y, z)); });

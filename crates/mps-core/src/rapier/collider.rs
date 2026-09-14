@@ -1122,6 +1122,7 @@ pub extern "C" fn world_insert_collider(
         let mut built = unsafe { *Box::from_raw(memory_handle) };
         world.inner.runtime_settings.apply_collider(&mut built);
         let handle = world.inner.colliders.insert(built);
+        crate::rapier::world::invalidate_region_index(&mut world.inner);
         if let Some(cache) = PENDING_VOXEL_CACHE.with(|slot| slot.borrow_mut().take()) {
             world
                 .inner
@@ -1160,6 +1161,7 @@ pub extern "C" fn world_insert_collider_with_parent(
             unpack_rigid_body_handle(parent),
             &mut world.inner.bodies,
         );
+        crate::rapier::world::invalidate_region_index(&mut world.inner);
         if let Some(cache) = PENDING_VOXEL_CACHE.with(|slot| slot.borrow_mut().take()) {
             world
                 .inner
@@ -1198,6 +1200,10 @@ pub extern "C" fn world_remove_collider(
         if !removed {
             set_error(ERR_NOT_FOUND, "collider not found");
         } else {
+            crate::rapier::world::refresh_region_body(
+                &mut world.inner,
+                unpack_collider_handle(handle),
+            );
             // Drop any stored voxel source grid for the removed collider.
             world.inner.voxel_grids.remove(&handle);
         }
@@ -1384,6 +1390,7 @@ pub extern "C" fn collider_set_pose(
         }
 
         collider.set_position(isometry_from_parts(translation, rotation));
+        crate::rapier::world::refresh_region_body(&mut world.inner, unpack_collider_handle(handle));
         Bool::TRUE
     })
 }
@@ -1416,6 +1423,7 @@ pub extern "C" fn collider_set_translation(
         }
 
         collider.set_translation(vec3_to_rapier(translation));
+        crate::rapier::world::refresh_region_body(&mut world.inner, unpack_collider_handle(handle));
         Bool::TRUE
     })
 }
@@ -1448,6 +1456,7 @@ pub extern "C" fn collider_set_rotation(
         }
 
         collider.set_rotation(quat_to_rapier(rotation));
+        crate::rapier::world::refresh_region_body(&mut world.inner, unpack_collider_handle(handle));
         Bool::TRUE
     })
 }
@@ -1491,6 +1500,7 @@ pub extern "C" fn collider_set_sensor(
         };
 
         collider.set_sensor(sensor.0 != 0);
+        crate::rapier::world::refresh_region_body(&mut world.inner, unpack_collider_handle(handle));
         Bool::TRUE
     })
 }
@@ -1538,6 +1548,7 @@ pub extern "C" fn collider_set_friction(
         }
 
         collider.set_friction(friction);
+        crate::rapier::world::refresh_region_body(&mut world.inner, unpack_collider_handle(handle));
         Bool::TRUE
     })
 }
@@ -1585,6 +1596,7 @@ pub extern "C" fn collider_set_restitution(
         }
 
         collider.set_restitution(restitution);
+        crate::rapier::world::refresh_region_body(&mut world.inner, unpack_collider_handle(handle));
         Bool::TRUE
     })
 }
@@ -1620,6 +1632,7 @@ pub extern "C" fn collider_set_friction_combine_rule(
             _ => CoefficientCombineRule::Average,
         };
         collider.set_friction_combine_rule(rule);
+        crate::rapier::world::refresh_region_body(&mut world.inner, unpack_collider_handle(handle));
         Bool::TRUE
     })
 }
@@ -1655,6 +1668,7 @@ pub extern "C" fn collider_set_restitution_combine_rule(
             _ => CoefficientCombineRule::Average,
         };
         collider.set_restitution_combine_rule(rule);
+        crate::rapier::world::refresh_region_body(&mut world.inner, unpack_collider_handle(handle));
         Bool::TRUE
     })
 }
@@ -1695,6 +1709,7 @@ pub extern "C" fn collider_set_collision_groups(
         };
 
         collider.set_collision_groups(interaction_groups_to_rapier(groups));
+        crate::rapier::world::refresh_region_body(&mut world.inner, unpack_collider_handle(handle));
         Bool::TRUE
     })
 }
@@ -1735,6 +1750,7 @@ pub extern "C" fn collider_set_solver_groups(
         };
 
         collider.set_solver_groups(interaction_groups_to_rapier(groups));
+        crate::rapier::world::refresh_region_body(&mut world.inner, unpack_collider_handle(handle));
         Bool::TRUE
     })
 }
@@ -1775,6 +1791,7 @@ pub extern "C" fn collider_set_active_events(
         };
 
         collider.set_active_events(active_events_from_bits(active_events_bits));
+        crate::rapier::world::refresh_region_body(&mut world.inner, unpack_collider_handle(handle));
         Bool::TRUE
     })
 }
@@ -1817,6 +1834,7 @@ pub extern "C" fn collider_set_active_hooks(
         };
 
         collider.set_active_hooks(active_hooks_from_bits(active_hooks_bits));
+        crate::rapier::world::refresh_region_body(&mut world.inner, unpack_collider_handle(handle));
         Bool::TRUE
     })
 }
@@ -1866,6 +1884,7 @@ pub extern "C" fn collider_set_contact_force_event_threshold(
         }
 
         collider.set_contact_force_event_threshold(threshold);
+        crate::rapier::world::refresh_region_body(&mut world.inner, unpack_collider_handle(handle));
         Bool::TRUE
     })
 }

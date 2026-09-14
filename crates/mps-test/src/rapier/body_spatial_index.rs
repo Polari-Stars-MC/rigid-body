@@ -191,3 +191,85 @@ fn body_index_matches_scan_after_repeated_edits() {
         }
     }
 }
+
+#[test]
+fn overlapping_region_priority_selects_highest_policy() {
+    let world = World::new();
+    let h = unsafe { &mut (*world.0).inner }
+        .bodies
+        .insert(RigidBodyBuilder::dynamic().additional_mass(1.0));
+    assert_eq!(
+        world_set_region_active(world.0, Vec3::default(), 2.0, Bool::FALSE),
+        1
+    );
+    assert_eq!(
+        world_set_region_priority(world.0, Vec3::default(), 2.0, 1),
+        Bool::TRUE
+    );
+    assert_eq!(
+        world_set_region_active(world.0, Vec3::default(), 1.0, Bool::TRUE),
+        1
+    );
+    assert_eq!(
+        world_set_region_priority(world.0, Vec3::default(), 1.0, 2),
+        Bool::TRUE
+    );
+    world_step(world.0, 1.0 / 60.0);
+    assert!(!unsafe { &(*world.0).inner }.bodies[h].is_sleeping());
+    assert_eq!(
+        world_set_region_active(world.0, Vec3::default(), 1.0, Bool::FALSE),
+        1
+    );
+    world_step(world.0, 1.0 / 60.0);
+    assert!(unsafe { &(*world.0).inner }.bodies[h].is_sleeping());
+}
+
+#[test]
+fn equal_priority_overlap_is_deterministic_last_policy() {
+    let world = World::new();
+    let h = unsafe { &mut (*world.0).inner }
+        .bodies
+        .insert(RigidBodyBuilder::dynamic().additional_mass(1.0));
+    assert_eq!(
+        world_set_region_active(world.0, Vec3::default(), 2.0, Bool::FALSE),
+        1
+    );
+    assert_eq!(
+        world_set_region_active(world.0, Vec3::default(), 1.0, Bool::TRUE),
+        1
+    );
+    world_step(world.0, 1.0 / 60.0);
+    assert!(!unsafe { &(*world.0).inner }.bodies[h].is_sleeping());
+}
+
+#[test]
+fn priority_update_reorders_existing_overlap_policy() {
+    let world = World::new();
+    let h = unsafe { &mut (*world.0).inner }
+        .bodies
+        .insert(RigidBodyBuilder::dynamic().additional_mass(1.0));
+    assert_eq!(
+        world_set_region_active(world.0, Vec3::default(), 2.0, Bool::FALSE),
+        1
+    );
+    assert_eq!(
+        world_set_region_active(world.0, Vec3::default(), 1.0, Bool::TRUE),
+        1
+    );
+    assert_eq!(
+        world_set_region_priority(world.0, Vec3::default(), 2.0, 10),
+        Bool::TRUE
+    );
+    assert_eq!(
+        world_set_region_priority(world.0, Vec3::default(), 1.0, 20),
+        Bool::TRUE
+    );
+    world_step(world.0, 1.0 / 60.0);
+    assert!(!unsafe { &(*world.0).inner }.bodies[h].is_sleeping());
+    assert_eq!(
+        world_set_region_priority(world.0, Vec3::default(), 2.0, 30),
+        Bool::TRUE
+    );
+    world_step(world.0, 1.0 / 60.0);
+    assert!(unsafe { &(*world.0).inner }.bodies[h].is_sleeping());
+}
