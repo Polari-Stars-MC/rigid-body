@@ -1649,6 +1649,68 @@ pub extern "C" fn world_get_collider_set_size(world: *const WorldHandle) -> i32 
     })
 }
 
+/// Set contact solver parameters used by Rapier's contact pipeline.
+#[unsafe(no_mangle)]
+pub extern "C" fn world_set_contact_parameters(world: *mut WorldHandle, internal_pgs: u32) -> Bool {
+    ffi_guard(Bool::FALSE, || {
+        let Some(world) = (unsafe { world.as_mut() }) else {
+            set_error(ERR_NULL_POINTER, "world is null");
+            return crate::rapier::ffi::Bool::FALSE;
+        };
+        if internal_pgs == 0 || internal_pgs > 255 {
+            set_error(ERR_INVALID_ARGUMENT, "internal_pgs must be in 1..=255");
+            return crate::rapier::ffi::Bool::FALSE;
+        }
+        world
+            .inner
+            .integration_parameters
+            .num_internal_pgs_iterations = internal_pgs as usize;
+        clear_error();
+        crate::rapier::ffi::Bool::TRUE
+    })
+}
+
+/// Apply the original rapier 0.22 contact style onto the fork: both dynamic and
+/// static contacts share one natural frequency/damping ratio, warm-starts joints,
+/// and uses the legacy normalized error/prediction distances.
+#[unsafe(no_mangle)]
+pub extern "C" fn world_set_legacy_contact_style(
+    world: *mut WorldHandle,
+    natural_frequency: f64,
+    damping_ratio: f64,
+    warmstart_joints: Bool,
+    allowed_linear_error: f64,
+    prediction_distance: f64,
+) -> Bool {
+    ffi_guard(Bool::FALSE, || {
+        let Some(world) = (unsafe { world.as_mut() }) else {
+            set_error(ERR_NULL_POINTER, "world is null");
+            return crate::rapier::ffi::Bool::FALSE;
+        };
+        if !natural_frequency.is_finite()
+            || natural_frequency <= 0.0
+            || !damping_ratio.is_finite()
+            || damping_ratio < 0.0
+            || !allowed_linear_error.is_finite()
+            || allowed_linear_error <= 0.0
+            || !prediction_distance.is_finite()
+            || prediction_distance <= 0.0
+        {
+            set_error(ERR_INVALID_ARGUMENT, "invalid legacy contact style");
+            return crate::rapier::ffi::Bool::FALSE;
+        }
+        use rapier3d::dynamics::SpringCoefficients;
+        let p = &mut world.inner.integration_parameters;
+        p.contact_softness = SpringCoefficients::new(natural_frequency, damping_ratio);
+        p.static_contact_softness = SpringCoefficients::new(natural_frequency, damping_ratio);
+        p.warmstart_joints = warmstart_joints.0 != 0;
+        p.normalized_allowed_linear_error = allowed_linear_error;
+        p.normalized_prediction_distance = prediction_distance;
+        clear_error();
+        crate::rapier::ffi::Bool::TRUE
+    })
+}
+
 /// Write the world gravity into `out_gravity`.
 ///
 /// # Safety

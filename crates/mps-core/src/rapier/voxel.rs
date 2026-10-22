@@ -1,5 +1,4 @@
 use std::slice;
-use std::sync::Arc;
 
 use rayon::prelude::*;
 
@@ -17,8 +16,12 @@ use crate::rapier::ffi::{
     voxel_collider_mode_from_raw,
 };
 
-const MAX_VOXEL_CELLS: usize = 262_144;
-const MAX_COMPOUND_PARTS: usize = 100_000;
+/// Minecraft 维度允许的最大高度（4064 格 = 254 个 section）。
+/// 地形体素网格是 16 × 世界高度 × 16，格子上限按世界最高取，不再按老版本的 256 格卡。
+pub const MC_MAX_WORLD_HEIGHT: usize = 4064;
+pub const MAX_VOXEL_CELLS: usize = 16 * MC_MAX_WORLD_HEIGHT * 16; // 1_040_384
+/// 复合碰撞体的盒数上限：跟着世界高度一起放大（原 10 万是按 384 格世界定的）。
+pub const MAX_COMPOUND_PARTS: usize = 1_000_000;
 const MAX_SURFACE_VERTICES: usize = 1_000_000;
 const MAX_SURFACE_TRIANGLES: usize = 500_000;
 
@@ -1835,7 +1838,11 @@ pub extern "C" fn collider_voxel_edit(
             Some(builder) => {
                 let collider_handle = unpack_collider_handle(handle);
                 if let Some(collider) = world.inner.colliders.get_mut(collider_handle) {
-                    collider.set_shape(SharedShape(Arc::from(builder.build().shape().clone_dyn())));
+                    // rapier 0.36 移除了 SharedShape::wrap(Arc<dyn Shape>)；
+                    // SharedShape::new 接受任意 impl Shape，Box<dyn Shape> 满足它。
+                    // rapier 0.36 移除了 SharedShape::wrap(Arc<dyn Shape>)：
+                    // 直接 clone 建好的 collider 自己的 SharedShape（Arc 共享，无拷贝）。
+                    collider.set_shape(builder.shape.clone());
                     Bool::TRUE
                 } else {
                     set_error(ERR_NOT_FOUND, "collider not found");
@@ -1949,7 +1956,11 @@ pub extern "C" fn collider_set_voxels(
             Some(builder) => {
                 let collider_handle = unpack_collider_handle(handle);
                 if let Some(collider) = world.inner.colliders.get_mut(collider_handle) {
-                    collider.set_shape(SharedShape(Arc::from(builder.build().shape().clone_dyn())));
+                    // rapier 0.36 移除了 SharedShape::wrap(Arc<dyn Shape>)；
+                    // SharedShape::new 接受任意 impl Shape，Box<dyn Shape> 满足它。
+                    // rapier 0.36 移除了 SharedShape::wrap(Arc<dyn Shape>)：
+                    // 直接 clone 建好的 collider 自己的 SharedShape（Arc 共享，无拷贝）。
+                    collider.set_shape(builder.shape.clone());
                     // Keep the cache in sync so later single-cell edits work.
                     world
                         .inner

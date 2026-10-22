@@ -47,6 +47,7 @@ pub use mps_formula::high_energy_astro;
 pub mod interaction;
 pub use mps_formula::integrators;
 pub mod joints;
+pub mod minecraft;
 pub use mps_formula::math;
 pub mod molecular;
 pub mod neural;

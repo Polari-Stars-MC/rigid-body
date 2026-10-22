@@ -32,7 +32,8 @@ const MAX_RAW_POINTS: u32 = 1_000_000;
 const MAX_HEIGHTMAP_CELLS: usize = 4_000_000;
 const MAX_EDGE_COUNT: u32 = 1_000_000;
 const MAX_SPHERE_COUNT: u32 = 1_000_000;
-const MAX_COMPOUND_PARTS: u32 = 100_000;
+/// 复合碰撞体的盒数上限：跟 voxel 那边保持一致，按 MC 最大世界高度放大。
+const MAX_COMPOUND_PARTS: u32 = 1_000_000;
 
 fn default_builder(shape_desc: ShapeDesc) -> ColliderBuilder {
     ColliderBuilder::new(shape_from_desc(shape_desc))

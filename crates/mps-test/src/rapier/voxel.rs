@@ -506,4 +506,51 @@ mod tests {
              output is still deterministic on all platforms"
         );
     }
+
+    /// MC 维度的极限高度是 4064 格（254 个 section），地形整列 = 16 × 4064 × 16 格。
+    /// 这条必须能建出碰撞体，再高一截则必须是明确失败（ERR_CAPACITY）而不是静默返回。
+    #[test]
+    fn mc_max_world_height_column_builds() {
+        assert_eq!(MAX_VOXEL_CELLS, 16 * MC_MAX_WORLD_HEIGHT * 16);
+
+        let size_y = MC_MAX_WORLD_HEIGHT;
+        let mut voxels = vec![0u8; 16 * size_y * 16];
+        // 只铺最顶上那层，逼贪心合并在整列尺度上真的跑一遍
+        for z in 0..16 {
+            for x in 0..16 {
+                voxels[(size_y - 1) * 16 * 16 + z * 16 + x] = 1;
+            }
+        }
+
+        let builder = collider_builder_create_voxels(
+            voxels.as_ptr(),
+            16,
+            size_y as u32,
+            16,
+            1.0,
+            1.0,
+            1.0,
+            Vec3::default(),
+            options(VoxelColliderMode::GreedyCuboids),
+        );
+        assert!(!builder.is_null(), "4064 格高的整列必须能建体");
+        assert!(!collider_builder_build(builder).is_null());
+
+        // 超过 MC 上限：必须被拒，且错误码是容量类
+        let over_y = size_y + 16;
+        let over = vec![0u8; 16 * over_y * 16];
+        let too_big = collider_builder_create_voxels(
+            over.as_ptr(),
+            16,
+            over_y as u32,
+            16,
+            1.0,
+            1.0,
+            1.0,
+            Vec3::default(),
+            options(VoxelColliderMode::GreedyCuboids),
+        );
+        assert!(too_big.is_null(), "超过 MC 高度上限必须失败");
+        assert_eq!(last_error_code(), ERR_CAPACITY);
+    }
 }

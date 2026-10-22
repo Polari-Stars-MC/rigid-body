@@ -10,12 +10,12 @@
 
 | 项 | 数量 |
 | --- | --- |
-| `mps-core` 里有 `extern "C"` 入口的源模块 | 62 |
-| `mps-core` C ABI 入口总数 | 920 |
-| 其中出现在生成头文件 `rigid_body.h` 里 | 920 |
-| 其中被 `mps-jni` 的 `jni!` 体引用 | 603 |
+| `mps-core` 里有 `extern "C"` 入口的源模块 | 63 |
+| `mps-core` C ABI 入口总数 | 939 |
+| 其中出现在生成头文件 `rigid_body.h` 里 | 939 |
+| 其中被 `mps-jni` 的 `jni!` 体引用 | 607 |
 | 其中被 `mps-test` 引用 | 700 |
-| 既无 JNI 绑定也无测试引用 | 114 |
+| 既无 JNI 绑定也无测试引用 | 129 |
 
 ## 模块表
 
@@ -52,8 +52,9 @@
 | `fracture_mesh` | — | 13 | — | [fracture_mesh.md](mps-core/fracture_mesh.md) | [fracture_mesh.rs](../crates/mps-test/src/rapier/fracture_mesh.rs) | 13 | 13 |
 | `granular` | `granular_*` | 8 | — | [granular.md](mps-core/granular.md) | [granular.rs](../crates/mps-test/src/rapier/granular.rs) | 8 | 8 |
 | `hair` | `hair_system_*` | 6 | — | [hair.md](mps-core/hair.md) | [hair.rs](../crates/mps-test/src/rapier/hair.rs) | 6 | 6 |
-| `joints` | — | 10 | — | [joints.md](mps-core/joints.md) | [joints.rs](../crates/mps-test/src/rapier/joints.rs) | 10 | 10 |
+| `joints` | — | 26 | — | [joints.md](mps-core/joints.md) | [joints.rs](../crates/mps-test/src/rapier/joints.rs) | 13 | 10 |
 | `matmech` | `material_mechanics_*` | 24 | — | [matmech.md](mps-core/matmech.md) | [matmech.rs](../crates/mps-test/src/rapier/matmech.rs) | 24 | 9 |
+| `minecraft` | — | 1 | — | — | [minecraft.rs](../crates/mps-test/src/rapier/minecraft.rs) | 1 | 0 |
 | `molecular` | `molecular_*` | 8 | — | [molecular.md](mps-core/molecular.md) | [molecular.rs](../crates/mps-test/src/rapier/molecular.rs) | 5 | 5 |
 | `neural` | — | 6 | — | [neural.md](mps-core/neural.md) | [neural.rs](../crates/mps-test/src/rapier/neural.rs) | 6 | 3 |
 | `nucphys` | `nuclear_*` | 18 | — | [nucphys.md](mps-core/nucphys.md) | [nucphys.rs](../crates/mps-test/src/rapier/nucphys.rs) | 0 | 8 |
@@ -84,7 +85,7 @@
 | `vehicle` | `vehicle_controller_*` | 12 | — | [vehicle.md](mps-core/vehicle.md) | [vehicle.rs](../crates/mps-test/src/rapier/vehicle.rs) | 12 | 10 |
 | `volcano` | `volcano_*` | 9 | — | [volcano.md](mps-core/volcano.md) | [volcano.rs](../crates/mps-test/src/rapier/volcano.rs) | 9 | 9 |
 | `voxel` | — | 23 | — | [voxel.md](mps-core/voxel.md) | [voxel.rs](../crates/mps-test/src/rapier/voxel.rs) | 21 | 8 |
-| `world` | — | 40 | 5 | [world.md](mps-core/world.md) | [world.rs](../crates/mps-test/src/rapier/world.rs) | 36 | 24 |
+| `world` | — | 42 | 5 | [world.md](mps-core/world.md) | [world.rs](../crates/mps-test/src/rapier/world.rs) | 36 | 24 |
 
 ## 头文件声明了、默认构建里没有
 
@@ -113,6 +114,7 @@ cbindgen 不按 feature 过滤，所以这些符号出现在 `rigid_body.h` 里�
 | `anvilkit` | 4 |
 | `astrocalc` | 18 |
 | `emag` | 14 |
+| `joints` | 13 |
 | `nucphys` | 10 |
 | `qphys` | 21 |
 | `rel` | 22 |
@@ -120,7 +122,7 @@ cbindgen 不按 feature 过滤，所以这些符号出现在 `rigid_body.h` 里�
 | `terrain_gravity` | 6 |
 | `trajectory` | 1 |
 | `voxel` | 2 |
-| `world` | 4 |
+| `world` | 6 |
 
 ## 改动配方
 
