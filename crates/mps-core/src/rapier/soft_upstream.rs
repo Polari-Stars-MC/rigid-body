@@ -23,6 +23,8 @@ use std::collections::HashMap;
 use crate::rapier::soft_data::{
     SoftBody as ForkSoftBody, SoftBodyId, SoftBodySet as ForkSoftBodySet, TearCriterion,
 };
+use rapier3d::prelude::SpringCoefficients;
+use rapier3d::math::Real;
 use rapier3d::prelude::{
     CohesionParams, ColliderSet, ForkTearCriterion, ImpulseJointSet, IslandManager,
     MultibodyJointSet, RigidBodySet, SoftBodyBuilder, SoftBodyHandle, SoftBodySet, ThermalParams,
@@ -289,6 +291,24 @@ pub(crate) fn prepare(
             sim.set_edge_rest_length(base + k, c.rest * (1.0 - c.activation.clamp(0.0, 1.0)));
         }
 
+        // 逐边刚度：fork 用的是 `Spring.stiffness`（N/m）与 `DistanceConstraint.compliance`
+        // （XPBD α），官方边用的是 `SpringCoefficients`（固有频率 Hz + 阻尼比）。这里做单调
+        // 换算：`f = √(k/m)/2π`；α 则取 `f = 1/(2π√(α·m))`，α→0 视为刚性（高频）。
+        for (k, s) in body.springs.iter().enumerate() {
+            let m = edge_mass(body, s.a, s.b);
+            let f = (s.stiffness / m).sqrt() / (2.0 * std::f64::consts::PI);
+            sim.set_edge_softness(k, Some(softness(f)));
+        }
+        for (k, c) in body.distance_constraints.iter().enumerate() {
+            let m = edge_mass(body, c.a, c.b);
+            let f = if c.compliance <= 1.0e-9 {
+                RIGID_FREQUENCY
+            } else {
+                1.0 / (2.0 * std::f64::consts::PI * (c.compliance * m).sqrt())
+            };
+            sim.set_edge_softness(base + k, Some(softness(f)));
+        }
+
         // 授权数据的 `sleeping` 直接映射到官方的 enabled 开关：官方有自己的睡眠
         // 体系（island + 根刚体），这里只保证“标记为睡着的软体不被推进”。
         sim.set_enabled(!body.sleeping);
@@ -318,5 +338,25 @@ pub(crate) fn collect(
             body.particles[i].vel = sim.particle_velocity(i);
         }
         body.sleeping = sim.is_sleeping();
+    }
+}
+
+/// 逐边换算用的阻尼比：接近临界阻尼，避免引入额外振荡。
+const EDGE_DAMPING_RATIO: Real = 0.7;
+/// 视为“刚性”的固有频率（Hz）。
+const RIGID_FREQUENCY: Real = 120.0;
+
+/// 一条边的等效质量：两端粒子质量的平均值。
+fn edge_mass(body: &ForkSoftBody, a: usize, b: usize) -> Real {
+    let ma = body.particles.get(a).map(|p| p.mass()).unwrap_or(1.0);
+    let mb = body.particles.get(b).map(|p| p.mass()).unwrap_or(1.0);
+    ((ma + mb) * 0.5).max(1.0e-9)
+}
+
+/// 把固有频率折成官方边的软度系数（频率夹在合理区间内）。
+fn softness(frequency: Real) -> SpringCoefficients<Real> {
+    SpringCoefficients {
+        natural_frequency: frequency.clamp(0.1, RIGID_FREQUENCY),
+        damping_ratio: EDGE_DAMPING_RATIO,
     }
 }
