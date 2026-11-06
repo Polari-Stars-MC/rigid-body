@@ -442,7 +442,9 @@ fn dump_metrics(workspace_root: &Path) -> Result<String, String> {
          pub const FORMULA_MODULE_COUNT: &str = \"{formula_modules}\";\n\
          /// Number of `CelestialBodyId` variants (built-in celestial bodies).\n\
          pub const CELESTIAL_COUNT: &str = \"{celestial}\";\n\
-         /// Number of `pub mod` gravity model submodules under mps-core/src/gravity.\n\
+         /// Number of `world_set_*gravity*` C-ABI setters in mps-core (one per
+         /// selectable gravity model). Counted from `crates/mps-core/src/rapier`;
+         /// there is no `mps-core/src/gravity` directory.\n\
          pub const GRAVITY_MODEL_COUNT: &str = \"{gravity_models}\";\n\
          /// Number of `OrbitIntegration` variants (integrator selection).\n\
          pub const INTEGRATOR_COUNT: &str = \"{integrators}\";\n\

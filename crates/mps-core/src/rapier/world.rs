@@ -568,7 +568,14 @@ pub extern "C" fn world_destroy(world: *mut WorldHandle) {
     })
 }
 
-/// Advance the simulation by `delta_seconds` (clamped to (0, 1]).
+/// Advance the simulation by `delta_seconds`. Valid range is `(0, 1]`
+/// (`MAX_STEP_SECONDS`); anything else is rejected with `ERR_INVALID_ARGUMENT`
+/// and the world is left untouched.
+///
+/// `world_step` returns `()` so a rejected call cannot be reported through a
+/// sentinel. The error slot is the only channel — it is written here so a host
+/// that steps with a NaN / non-positive / too-large `dt` can tell that nothing
+/// happened instead of silently losing a frame.
 ///
 /// # Safety
 /// `world` must be a valid pointer returned by `world_create` and not yet destroyed.
@@ -580,6 +587,7 @@ pub extern "C" fn world_step(world: *mut WorldHandle, delta_seconds: f64) {
         #[cfg(feature = "profiler")]
         let profile_start = std::time::Instant::now();
         let Some(world) = (unsafe { world.as_mut() }) else {
+            set_error(ERR_NULL_POINTER, "world is null");
             return;
         };
         // Acquire the world write lock through a raw pointer so the guard does
@@ -587,6 +595,10 @@ pub extern "C" fn world_step(world: *mut WorldHandle, delta_seconds: f64) {
         let query_lock = &world.inner.query_lock as *const parking_lot::RwLock<()>;
         let _step_world_lock = unsafe { (&*query_lock).write() };
         if !delta_seconds.is_finite() || delta_seconds <= 0.0 || delta_seconds > MAX_STEP_SECONDS {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "world_step: delta_seconds must be finite and in (0, 1]",
+            );
             return;
         }
 
@@ -629,18 +641,33 @@ pub extern "C" fn world_step(world: *mut WorldHandle, delta_seconds: f64) {
         if let Some(ref arena) = world.inner.shared_arena {
             let commands = arena.drain_commands();
             if !commands.is_empty() {
-                // P1.9: arena_idx_map 增量更新——只在 `bodies.len()` 与上次不一致时
-                // clear+rebuild；相等时 arena handle 顺序未变（rapier 维持插入次序），
-                // 直接复用既有内容，消除每帧 O(n) rebuild。
+                // Rebuild the arena-index → handle map on every drain.
+                //
+                // This used to be incremental, keyed off `bodies.len()`: the
+                // map was reused whenever the count was unchanged, on the
+                // theory that "same count ⇒ same iteration order". That does
+                // not hold. Rapier's body set is a slot arena, so a
+                // remove-then-insert pair between two steps leaves the length
+                // identical while shifting which handle sits at which arena
+                // index. The stale map then pointed every command at a dead
+                // handle, `bodies.get_mut` returned `None`, and the command
+                // was dropped in silence — no error code, no log, just a
+                // force that never arrived.
+                //
+                // Rebuilding is O(n) and only runs when the arena actually
+                // delivered commands, so the steady-state cost is one push per
+                // body per draining frame — negligible next to a physics step,
+                // and correctness beats the micro-optimisation.
                 let n_bodies = world.inner.bodies.len();
-                if n_bodies != world.inner.buffers.arena_idx_map_body_count {
+                {
                     let idx = &mut world.inner.buffers.arena_idx_map;
                     idx.clear();
+                    idx.reserve(n_bodies);
                     for (h, _) in world.inner.bodies.iter() {
                         idx.push(Some(h));
                     }
-                    world.inner.buffers.arena_idx_map_body_count = n_bodies;
                 }
+                world.inner.buffers.arena_idx_map_body_count = n_bodies;
                 let idx = &world.inner.buffers.arena_idx_map;
                 for (cmd_type, body_idx, a0, a1, a2) in commands {
                     if let Some(Some(h)) = idx.get(body_idx as usize)

@@ -24,7 +24,13 @@ mod tests {
         let p2 = rotor_profile_power(&r, 1.225, 80.0).unwrap();
         // σ C_d0 ρ A (ΩR)³ / 8 — doubling Ω should give 8× the power.
         assert!(p1 > 0.0 && p2 > 0.0);
-        assert!((p2 / p1 - 8.0).abs() < 1.0e-9, "p1={}, p2={}, ratio={}", p1, p2, p2 / p1);
+        assert!(
+            (p2 / p1 - 8.0).abs() < 1.0e-9,
+            "p1={}, p2={}, ratio={}",
+            p1,
+            p2,
+            p2 / p1
+        );
         // bad inputs
         assert!(rotor_profile_power(&r, -1.0, 40.0).is_none());
         assert!(rotor_profile_power(&r, 1.225, 0.0).is_none());

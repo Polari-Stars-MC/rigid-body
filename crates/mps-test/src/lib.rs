@@ -5,6 +5,7 @@ pub mod cosmos {
     pub mod arena;
     pub mod bodies;
     pub mod ffi;
+    pub mod flight;
     pub mod gravity;
     pub mod integrator;
     pub mod orbit;
@@ -34,6 +35,7 @@ pub mod rapier {
     pub mod cloth;
     pub mod collider;
     pub mod collision_mode;
+    pub mod compat;
     pub mod continuum;
     pub mod control_theory;
     pub mod controller;
@@ -41,6 +43,7 @@ pub mod rapier {
     pub mod crbtree;
     pub mod cross_validate;
     pub mod disasters;
+    pub mod disciplines;
     pub mod domain;
     pub mod dop;
     pub mod electromagnetism;
@@ -86,7 +89,9 @@ pub mod rapier {
     pub mod rigid_body;
     pub mod rope;
     pub mod rope_knot;
+    pub mod rotor;
     pub mod rtree;
+    pub mod scientists;
     pub mod sensor;
     pub mod servo_body;
     pub mod shared_arena;

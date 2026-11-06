@@ -33,6 +33,60 @@ const WHEEL_MASS_FRACTION: f64 = 0.06;
 /// the model stays finite at standstill and low speed.
 const MIN_REF_SPEED: f64 = 1.0;
 
+/// Reference wheel load (N) used to non-dimensionalise load sensitivity.
+///
+/// Roughly one quarter of a 1600 kg car's weight, i.e. a typical passenger-car
+/// wheel at rest. Load sensitivity is defined relative to it, so the friction
+/// coefficient equals `peak_mu_*` at this load and the produced force keeps
+/// units of newtons.
+const REFERENCE_LOAD: f64 = 4_000.0;
+
+/// Friction-curve fraction of the peak that survives at very large slip.
+///
+/// Real tyres saturate at their sliding-friction level (≈70–90 % of peak), they
+/// do not decay towards zero. See [`slip_curve`].
+const SLIDE_FRICTION_FRACTION: f64 = 0.8;
+
+/// Normalised longitudinal-force fraction for a given slip value.
+///
+/// Linear up to `peak`, then a smooth saturation towards
+/// [`SLIDE_FRICTION_FRACTION`]:
+///
+/// ```text
+/// |s| <= peak :  s / peak
+/// |s| >  peak :  sign(s) · (F + (1 − F) · peak / |s|)
+/// ```
+///
+/// The previous form was `sign(s) · peak / |s|`, which decays as 1/|s|: a fully
+/// locked wheel (maximum slip) produced zero braking force and a large slip
+/// angle produced zero cornering force, i.e. exactly the opposite of what a tyre
+/// does. `f(peak) = 1` in both branches, so the curve is continuous.
+fn slip_curve(slip: f64, peak: f64) -> f64 {
+    if peak <= 0.0 || !peak.is_finite() {
+        return 0.0;
+    }
+    let magnitude = slip.abs();
+    if magnitude <= peak {
+        return slip / peak;
+    }
+    let tail = SLIDE_FRICTION_FRACTION + (1.0 - SLIDE_FRICTION_FRACTION) * (peak / magnitude);
+    slip.signum() * tail
+}
+
+/// Load-sensitivity multiplier for the peak friction coefficient.
+///
+/// `(Fz / Fz0)^(n − 1)`: 1.0 at the reference load, and `peak_mu · Fz · factor`
+/// stays a force. The old code returned `Fz^n`, which has units of N^0.8 — a
+/// 1200 kg car got ≈715 N of peak longitudinal force per wheel where μ·N is
+/// ≈3531 N, and grip barely grew with load.
+fn load_sensitivity_factor(normal_load: f64, sensitivity: f64) -> f64 {
+    let load = normal_load.max(0.0);
+    if load <= 0.0 {
+        return 0.0;
+    }
+    (load / REFERENCE_LOAD).powf(sensitivity - 1.0)
+}
+
 /// Tire model parameters (simplified Pacejka).
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct TireParams {
@@ -291,18 +345,29 @@ pub extern "C" fn tire_model_update(world: *mut WorldHandle, id: u32, dt: f64) -
 
             let r = wheel.radius.max(1e-6);
             let p = &tire.params;
-            let load_factor = tire.normal_load.max(0.0).powf(p.load_sensitivity);
+            // Peak friction scaled to the current load, expressed as a *force*
+            // (see `load_sensitivity_factor`).
+            let peak_long = p.peak_mu_long
+                * tire.normal_load.max(0.0)
+                * load_sensitivity_factor(tire.normal_load, p.load_sensitivity);
+            let peak_lat = p.peak_mu_lat
+                * tire.normal_load.max(0.0)
+                * load_sensitivity_factor(tire.normal_load, p.load_sensitivity);
 
             // ── Longitudinal slip: wheel spin state ──
             // Engine force acts at the contact patch (torque F·r); the ground
-            // reaction (last fx) spins the wheel back. The brake is a max
-            // braking impulse → Δω = J·r / I, clamped so the wheel locks
+            // reaction (last fx) spins the wheel back. The brake is a torque
+            // applied over `dt` → Δω = (J·r / I)·dt, clamped so the wheel locks
             // (ω = 0) instead of reversing.
             let wheel_mass = chassis_mass * WHEEL_MASS_FRACTION;
             let inertia = (0.5 * wheel_mass * r * r).max(1e-9);
             let drive_torque = wheel.engine_force * r;
             tire.wheel_omega += (drive_torque - tire.fx * r) / inertia * dt;
-            let brake_domega = wheel.brake * r / inertia;
+            // The `dt` factor used to be missing here while the drive term above
+            // had it, so the same `brake` value decelerated the wheel 4× harder
+            // at 120 Hz than at 30 Hz — braking strength depended on the host's
+            // call rate rather than on time.
+            let brake_domega = wheel.brake * r / inertia * dt;
             tire.wheel_omega -=
                 tire.wheel_omega.signum() * brake_domega.min(tire.wheel_omega.abs());
 
@@ -317,24 +382,23 @@ pub extern "C" fn tire_model_update(world: *mut WorldHandle, id: u32, dt: f64) -
             // spinning faster than the road pushes the car forward). Lateral:
             // slip angle drives a force along the axle that *opposes* the
             // lateral slide (cornering grip).
-            let fx_norm = if tire.slip_ratio.abs() < p.peak_slip_ratio {
-                tire.slip_ratio / p.peak_slip_ratio
-            } else {
-                (tire.slip_ratio.signum() * p.peak_slip_ratio) / tire.slip_ratio.abs()
-            };
-            tire.fx = p.peak_mu_long * load_factor * fx_norm;
+            //
+            // Past the peak the curve saturates towards the sliding-friction
+            // level (`SLIDE_FRICTION_FRACTION` of peak) instead of falling off
+            // as 1/|slip|. The 1/x form meant a fully locked wheel (maximum
+            // slip) produced *zero* braking force and a big slip angle produced
+            // zero cornering force — the exact opposite of the physics, and it
+            // made a locked brake and a spin unrecoverable.
+            let fx_norm = slip_curve(tire.slip_ratio, p.peak_slip_ratio);
+            tire.fx = peak_long * fx_norm;
 
-            let fy_norm = if tire.slip_angle.abs() < p.peak_slip_angle {
-                -tire.slip_angle / p.peak_slip_angle
-            } else {
-                -(tire.slip_angle.signum() * p.peak_slip_angle) / tire.slip_angle.abs()
-            };
-            tire.fy = p.peak_mu_lat * load_factor * fy_norm;
+            let fy_norm = -slip_curve(tire.slip_angle, p.peak_slip_angle);
+            tire.fy = peak_lat * fy_norm;
 
             // Friction ellipse: cap the combined force slightly above the
             // peak (ellipse_factor) for realistic drifting saturation.
             let combined = (tire.fx * tire.fx + tire.fy * tire.fy).sqrt();
-            let max_force = p.peak_mu_long * load_factor * p.ellipse_factor;
+            let max_force = peak_long * p.ellipse_factor;
             if combined > max_force {
                 let scale = max_force / combined;
                 tire.fx *= scale;

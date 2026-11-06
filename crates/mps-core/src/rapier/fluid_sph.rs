@@ -266,7 +266,11 @@ pub extern "C" fn fluid_enable_collision(
             );
             return Bool::FALSE;
         }
-        if enabled == Bool::FALSE {
+        // Both branches tear the previous proxy set down first. Overwriting the
+        // table entry (what the rebuild path used to do) orphaned every proxy
+        // body + collider from the previous call, and those orphans kept
+        // colliding with the scene forever.
+        let remove_proxies = |world: &mut WorldHandle| {
             if let Some(proxies) = world.inner.fluid_proxies.remove(&id) {
                 for ph in proxies.into_iter().flatten() {
                     world.inner.bodies.remove(
@@ -279,6 +283,9 @@ pub extern "C" fn fluid_enable_collision(
                     );
                 }
             }
+        };
+        remove_proxies(world);
+        if enabled == Bool::FALSE {
             clear_error();
             return Bool::TRUE;
         }

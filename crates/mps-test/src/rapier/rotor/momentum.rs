@@ -31,9 +31,7 @@ mod tests {
 
     #[test]
     fn rotor_hover_induced_velocity_zero_thrust_is_zero() {
-        assert!(
-            rotor_hover_induced_velocity(0.0, RHO, R).unwrap().abs() < 1.0e-12
-        );
+        assert!(rotor_hover_induced_velocity(0.0, RHO, R).unwrap().abs() < 1.0e-12);
     }
 
     #[test]
@@ -51,7 +49,10 @@ mod tests {
         let p = rotor_hover_power(T, v_h).unwrap();
         assert!((p - T * v_h).abs() < 1.0e-6);
         // ~ideal hover power for 10 kN at v_h ~ 7 m/s = 70 kW.  Physical.
-        assert!(p > 50_000.0 && p < 100_000.0, "P_i={p} W out of expected band");
+        assert!(
+            p > 50_000.0 && p < 100_000.0,
+            "P_i={p} W out of expected band"
+        );
     }
 
     #[test]

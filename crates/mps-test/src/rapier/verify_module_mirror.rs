@@ -116,17 +116,28 @@ mod tests {
         // Union of all module names that live on the production side (either
         // core::rapier or formula). list_entries already strips `.rs` so all
         // keys are bare module names; the bool flags the directory shape.
+        //
+        // The test side is deliberately NOT folded in here: `expected` is the
+        // production-side set, so `orphans` (below) can actually fire when a
+        // test file has no production counterpart. Seeding it with
+        // `test_rapier.keys()` made `orphans` unconditionally empty — the
+        // assertion was dead and three test-only files drifted past it.
         let mut expected: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-        expected.extend(test_rapier.keys().cloned());
         expected.extend(core_rapier.keys().cloned());
         expected.extend(formula_src.keys().cloned());
 
         // Test-side-only files that are NOT mirrored back into core/formula:
-        //   ffi                   — mps-test has its own minimal FFI helper
-        //   arena_compat          — ABI lock-in test for shared_arena (OPT §10)
-        //   error_consistency     — cross-crate ERR_* consistency test (OPT §1)
-        //   verify_module_mirror  — THIS FILE (meta CI guard, OPT §8)
-        //   version_consistency   — cross-crate ARENA_VERSION↔ABI_VERSION (§N6)
+        //   ffi                    — mps-test has its own minimal FFI helper
+        //   arena_compat           — ABI lock-in test for shared_arena (OPT §10)
+        //   error_consistency      — cross-crate ERR_* consistency test (OPT §1)
+        //   verify_module_mirror   — THIS FILE (meta CI guard, OPT §8)
+        //   version_consistency    — cross-crate ARENA_VERSION↔ABI_VERSION (§N6)
+        //   verify_metrics_sync    — metrics drift guard (OPT §N3)
+        //   force_queue            — mirrors the nested `rapier::ffi::force_queue`
+        //                            module, which is not a top-level name on the
+        //                            production side
+        //   force_queue_integration— end-to-end arena/force-queue wiring test
+        //   performance_matrix     — `#[ignore]`d step benchmark (docs/world-step-benchmarks.md)
         let test_only_extras: std::collections::BTreeSet<String> = [
             "ffi",
             "arena_compat",
@@ -134,6 +145,9 @@ mod tests {
             "verify_module_mirror",
             "version_consistency",
             "verify_metrics_sync",
+            "force_queue",
+            "force_queue_integration",
+            "performance_matrix",
         ]
         .into_iter()
         .map(String::from)
@@ -264,6 +278,83 @@ mod tests {
                  形态错位 (test has <name>/ but cosmos src only has <name>.rs): \
                  {shape_mismatch_hard:?}\n"
             );
+        }
+    }
+
+    /// Every `*.rs` under `crates/mps-test/src` must be reachable from the
+    /// module tree.
+    ///
+    /// The mirror check above only compares *file names*. A file that exists
+    /// but is never declared (`pub mod x;`) therefore passes it while never
+    /// being compiled and never running its tests — which is exactly how
+    /// `rapier/compat.rs` (16 tests) and `cosmos/flight/` (13 tests) went dead
+    /// while still inflating the published `TEST_COUNT`.
+    ///
+    /// Files whose name starts with `_` are treated as scratch and skipped.
+    #[test]
+    fn every_test_file_is_wired_into_the_module_tree() {
+        let src_root = sibling_crate_src("mps-test/src");
+        let mut files: Vec<PathBuf> = Vec::new();
+        collect_rs_files(&src_root, &mut files);
+
+        let sources: Vec<(String, String)> = files
+            .iter()
+            .filter_map(|p| {
+                fs::read_to_string(p)
+                    .ok()
+                    .map(|c| (p.display().to_string(), c))
+            })
+            .collect();
+
+        let mut unwired: Vec<String> = Vec::new();
+        for path in &files {
+            let Ok(rel) = path.strip_prefix(&src_root) else {
+                continue;
+            };
+            let file_name = rel.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            let stem = if file_name == "mod.rs" {
+                rel.parent()
+                    .and_then(|p| p.file_name())
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("")
+                    .to_string()
+            } else {
+                rel.file_stem()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("")
+                    .to_string()
+            };
+            if stem.is_empty() || stem == "lib" || stem.starts_with('_') {
+                continue;
+            }
+            let needle = format!("mod {stem};");
+            if !sources.iter().any(|(_, body)| body.contains(&needle)) {
+                unwired.push(rel.display().to_string());
+            }
+        }
+        unwired.sort();
+
+        assert!(
+            unwired.is_empty(),
+            "test files exist but are never declared with `mod <name>;` — they are \
+             not compiled and their tests never run: {unwired:?}\n  \
+             Fix by adding the `pub mod` line to the enclosing module, or delete the \
+             file. Do not silence this test."
+        );
+    }
+
+    /// Recursively collect every `*.rs` file under `dir`.
+    fn collect_rs_files(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
+        let Ok(entries) = fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                collect_rs_files(&path, out);
+            } else if path.extension().and_then(|s| s.to_str()) == Some("rs") {
+                out.push(path);
+            }
         }
     }
 }

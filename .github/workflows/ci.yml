@@ -66,6 +66,17 @@ jobs:
         run: |
           git diff --exit-code -- crates/mps-core/include/rigid_body.h crates/mps-cosmos/include/cosmos.h
 
+      # `crates/mps-web/src/metrics.rs` carries 18 constants consumed by the docs
+      # site. The in-repo guard (`verify_metrics_sync`) only recomputes 3 of them,
+      # so anything else could drift unnoticed. Regenerating and diffing is the
+      # authoritative check: it covers every constant and cannot drift from the
+      # generator, because it *is* the generator.
+      - name: Check generated metrics are up to date
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          cargo run -p xtask -- dump-metrics
+          git diff --exit-code -- crates/mps-web/src/metrics.rs
+
   # ==========================================================================
   # Web audit: i18n key parity, anchor integrity, stat-num hygiene
   # ==========================================================================

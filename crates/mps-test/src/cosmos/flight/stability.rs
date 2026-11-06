@@ -3,8 +3,8 @@
 #[cfg(test)]
 mod tests {
     use mps_cosmos::flight::{
-        Atmosphere, ConstantGravity, FlightControls, Gravity, RigidBodyState, SeaLevelAtmosphere,
-        default_airfoil, linearize, longitudinal_modes, longitudinal_submatrix, power_iteration,
+        ConstantGravity, FlightControls, RigidBodyState, SeaLevelAtmosphere, linearize,
+        longitudinal_modes, longitudinal_submatrix, power_iteration,
     };
     use mps_formula::rotor::RotorParams;
     use rapier3d::prelude::{Rotation, Vector};
@@ -84,33 +84,49 @@ mod tests {
         // Bad rotor
         let mut bad_rotor = r;
         bad_rotor.radius = 0.0;
-        assert!(linearize(&state(), &controls(), &bad_rotor, &t, &a, &g, 40.0, 0.0, 1.0e-3, 60).is_none());
+        assert!(
+            linearize(
+                &state(),
+                &controls(),
+                &bad_rotor,
+                &t,
+                &a,
+                &g,
+                40.0,
+                0.0,
+                1.0e-3,
+                60
+            )
+            .is_none()
+        );
     }
 
     #[test]
     fn power_iteration_converges_on_diagonal_identity() {
         let id = [
-            1.0, 0.0, 0.0, 0.0,
-            0.0, 1.0, 0.0, 0.0,
-            0.0, 0.0, 1.0, 0.0,
-            0.0, 0.0, 0.0, 1.0,
+            1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
         ];
         let r = power_iteration(&id);
         assert!(r.converged, "did not converge; iter={}", r.iterations);
-        assert!((r.dominant_eigenvalue - 1.0).abs() < 1.0e-6, "dominant={}", r.dominant_eigenvalue);
+        assert!(
+            (r.dominant_eigenvalue - 1.0).abs() < 1.0e-6,
+            "dominant={}",
+            r.dominant_eigenvalue
+        );
     }
 
     #[test]
     fn power_iteration_converges_on_diagonal_dominant() {
         let m = [
-            2.0, 0.0, 0.0, 0.0,
-            0.0, 0.5, 0.0, 0.0,
-            0.0, 0.0, 0.1, 0.0,
-            0.0, 0.0, 0.0, 0.05,
+            2.0, 0.0, 0.0, 0.0, 0.0, 0.5, 0.0, 0.0, 0.0, 0.0, 0.1, 0.0, 0.0, 0.0, 0.0, 0.05,
         ];
         let r = power_iteration(&m);
         assert!(r.converged);
-        assert!((r.dominant_eigenvalue - 2.0).abs() < 1.0e-6, "dominant={}", r.dominant_eigenvalue);
+        assert!(
+            (r.dominant_eigenvalue - 2.0).abs() < 1.0e-6,
+            "dominant={}",
+            r.dominant_eigenvalue
+        );
         // Eigenvector should be approximately [1, 0, 0, 0].
         assert!(r.dominant_eigenvector[0].abs() > 0.95);
         assert!(r.dominant_eigenvector[1].abs() < 0.1);
@@ -121,10 +137,7 @@ mod tests {
     #[test]
     fn longitudinal_modes_extracts_two_eigenpairs() {
         let m = [
-            2.0, 0.0, 0.0, 0.0,
-            0.0, 0.5, 0.0, 0.0,
-            0.0, 0.0, 0.1, 0.0,
-            0.0, 0.0, 0.0, 0.05,
+            2.0, 0.0, 0.0, 0.0, 0.0, 0.5, 0.0, 0.0, 0.0, 0.0, 0.1, 0.0, 0.0, 0.0, 0.0, 0.05,
         ];
         let modes = longitudinal_modes(&m);
         assert_eq!(modes.len(), 2);
@@ -152,7 +165,13 @@ mod tests {
         for i in 0..4 {
             for j in 0..4 {
                 let expected = (i as f64) * 10.0 + (j as f64) + 1.0;
-                assert!((out[i * 4 + j] - expected).abs() < 1.0e-12, "out[{}, {}] = {}", i, j, out[i * 4 + j]);
+                assert!(
+                    (out[i * 4 + j] - expected).abs() < 1.0e-12,
+                    "out[{}, {}] = {}",
+                    i,
+                    j,
+                    out[i * 4 + j]
+                );
             }
         }
     }

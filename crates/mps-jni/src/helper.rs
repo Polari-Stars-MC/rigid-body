@@ -88,3 +88,59 @@ pub fn jdoublearray_to_array(env: &JNIEnv, data: jdoubleArray) -> Option<Vec<f64
     env.get_double_array_region(&*data, 0, &mut buf).ok()?;
     Some(buf)
 }
+
+/// Same as [`jdoublearray_to_array`], but requires at least `needed` elements.
+///
+/// The C ABI these arrays feed (`collider_builder_create_compound_boxes`, …)
+/// receives only a bare pointer plus a count, so it cannot validate the buffer
+/// itself — it just walks `count * stride` doubles. Checking the *copy* length
+/// here is the only place the real allocation size is known: a Java caller that
+/// passes `box_count` larger than `box_data.length / 6` would otherwise make
+/// Rust read past the end of the copied `Vec`.
+pub fn jdoublearray_to_array_exact(
+    env: &JNIEnv,
+    data: jdoubleArray,
+    needed: usize,
+    what: &'static str,
+) -> Option<Vec<f64>> {
+    let values = jdoublearray_to_array(env, data)?;
+    check_len(values.len(), needed, what)?;
+    Some(values)
+}
+
+/// Same as [`jbytearray_to_array`], but requires at least `needed` bytes.
+///
+/// See [`jdoublearray_to_array_exact`] for why this has to be checked before
+/// the pointer is handed to the C ABI.
+pub fn jbytearray_to_array_exact(
+    env: &JNIEnv,
+    data: jbyteArray,
+    needed: usize,
+    what: &'static str,
+) -> Option<Vec<u8>> {
+    let values = jbytearray_to_array(env, data)?;
+    check_len(values.len(), needed, what)?;
+    Some(values)
+}
+
+/// Reject a copy that is shorter than the size the callee will traverse.
+///
+/// Rounded up to whole pages in the message so a 128³ voxel volume reports
+/// "16777216 bytes" rather than an opaque element count.
+fn check_len(actual: usize, needed: usize, what: &'static str) -> Option<()> {
+    if actual < needed {
+        crate::er::set_error(
+            crate::er::ERR_INVALID_ARGUMENT,
+            &format!("{what}: java array has {actual} elements but {needed} are required"),
+        );
+        return None;
+    }
+    Some(())
+}
+
+/// `size_x * size_y * size_z` with overflow detection (voxel volumes).
+pub fn voxel_len(size_x: u32, size_y: u32, size_z: u32) -> Option<usize> {
+    (size_x as usize)
+        .checked_mul(size_y as usize)
+        .and_then(|n| n.checked_mul(size_z as usize))
+}

@@ -485,7 +485,11 @@ pub static MARS: CelestialBody = CelestialBody {
     ref_radius: MARS_EQ_RADIUS,
     surface_density: 0.020, // Mars surface density ~0.02 kg/m³
     scale_height: 11_100.0,
-    solar_pressure_constant: SOLAR_PRESSURE_AT_1AU,
+    // Mars orbits at 1.524 AU. Every other planet in this table scales the 1 AU
+    // constant by 1/a² (see MERCURY / VENUS / JUPITER / SATURN / URANUS /
+    // NEPTUNE below); Mars was left at the unscaled value, which overstates
+    // solar-radiation pressure by 1.524² = 2.32×.
+    solar_pressure_constant: SOLAR_PRESSURE_AT_1AU / (1.524 * 1.524),
 };
 
 pub static JUPITER: CelestialBody = CelestialBody {

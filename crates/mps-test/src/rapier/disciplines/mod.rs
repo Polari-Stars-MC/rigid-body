@@ -4,7 +4,7 @@
 //! `field_id` 对齐契约（与 `scientists` 模块一致）。
 #[cfg(test)]
 mod tests {
-    use mps_core::rapier::disciplines::*;
+    use mps_formula::disciplines::*;
 
     #[test]
     fn quantum_mechanics_present() {
@@ -39,7 +39,11 @@ mod tests {
     fn discipline_field_ids_are_unique() {
         let mut seen = std::collections::HashSet::new();
         for d in DISCIPLINES {
-            assert!(seen.insert(d.field_id), "duplicate field_id: {}", d.field_id);
+            assert!(
+                seen.insert(d.field_id),
+                "duplicate field_id: {}",
+                d.field_id
+            );
         }
     }
 }

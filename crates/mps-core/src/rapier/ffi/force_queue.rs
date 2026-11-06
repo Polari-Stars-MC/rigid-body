@@ -22,11 +22,26 @@
 /// - `flags` bit 0 = paused (Java writes, Rust reads with acquire). Optional
 ///   gate; does **not** protect enqueue/cancel.
 /// - `generation` increments on `head` wrap to resolve ABA.
-use crate::rapier::error::{ERR_INVALID_ARGUMENT, ERR_NULL_POINTER, ERR_OK};
+use crate::rapier::error::{
+    ERR_INTERNAL, ERR_INVALID_ARGUMENT, ERR_NULL_POINTER, ERR_OK, ffi_guard, set_error,
+};
 use crate::rapier::ffi::convert::unpack_rigid_body_handle;
-use core::sync::atomic::{AtomicU64, Ordering};
+use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use mps_bindgen_macro::java_struct;
 use rapier3d::prelude::Vector;
+
+/// Upper bound on `capacity`.
+///
+/// The C ABI passes the queue as a bare pointer with **no length parameter**,
+/// so every bounds check inside this module is faith-based: the length of the
+/// `bitmap()` / `payload()` slices is derived from `capacity`, which the
+/// producer writes. Without a cap a corrupt or hostile header (`capacity =
+/// 1 << 40` is a valid power of two) makes `from_raw_parts` describe petabytes
+/// and the very first indexed access is out of bounds.
+///
+/// 1 M slots is 56 MiB of payload at stride 7 and far above any realistic
+/// per-frame force batch.
+pub const MAX_FORCE_QUEUE_CAPACITY: u64 = 1 << 20;
 
 #[repr(C, align(64))]
 #[java_struct(package = "org.polaris2023.mps.ffi")]
@@ -50,9 +65,18 @@ pub struct ForceQueueHeader {
 
 impl ForceQueueHeader {
     /// Returns `true` if the paused flag is set.
+    ///
+    /// Java writes `flags` concurrently, so this must be an atomic load — the
+    /// plain-field read it used to do was a data race even though the module
+    /// docs promise an acquire load. The field itself is `u32` in a
+    /// `#[repr(C, align(64))]` struct, so viewing it as `AtomicU32` is sound
+    /// (same size/alignment, no `repr(packed)`).
     #[inline]
     pub fn is_paused(&self) -> bool {
-        (self.flags & 1) != 0
+        let flags = unsafe {
+            (*(core::ptr::addr_of!(self.flags) as *const AtomicU32)).load(Ordering::Acquire)
+        };
+        (flags & 1) != 0
     }
 
     /// Number of u64 words in the bitmap array.
@@ -134,24 +158,30 @@ impl ForceQueueHeader {
     }
 
     /// Checks if the bitmap bit at `index` is set.
+    ///
+    /// Returns `false` for an out-of-range index instead of reading out of
+    /// bounds: this is a safe function, so it must not be able to invoke UB
+    /// (`get_unchecked` here was reachable with any `index`).
     #[inline]
     pub fn is_bit_set(&self, index: u64) -> bool {
         let word = index / 64;
         let bit = index % 64;
-        unsafe {
-            (*self.bitmap().get_unchecked(word as usize)).load(Ordering::Acquire) & (1u64 << bit)
-                != 0
+        let bitmap = unsafe { self.bitmap() };
+        match bitmap.get(word as usize) {
+            Some(word) => word.load(Ordering::Acquire) & (1u64 << bit) != 0,
+            None => false,
         }
     }
 
-    /// Clears the bitmap bit at `index` (Rust consumer side).
+    /// Clears the bitmap bit at `index` (Rust consumer side). No-op when the
+    /// index is out of range, for the same reason as `is_bit_set`.
     #[inline]
     pub fn clear_bit(&self, index: u64) {
         let word = index / 64;
         let bit = index % 64;
-        unsafe {
-            (*self.bitmap().get_unchecked(word as usize))
-                .fetch_and(!(1u64 << bit), Ordering::Release);
+        let bitmap = unsafe { self.bitmap() };
+        if let Some(word) = bitmap.get(word as usize) {
+            word.fetch_and(!(1u64 << bit), Ordering::Release);
         }
     }
 
@@ -160,6 +190,9 @@ impl ForceQueueHeader {
     #[inline]
     pub fn validate(&self) -> u32 {
         if self.capacity == 0 || !self.capacity.is_power_of_two() {
+            return ERR_INVALID_ARGUMENT;
+        }
+        if self.capacity > MAX_FORCE_QUEUE_CAPACITY {
             return ERR_INVALID_ARGUMENT;
         }
         if self.stride != 6 && self.stride != 7 {
@@ -182,80 +215,108 @@ pub extern "C" fn rigid_body_consume_force_queue(
     world: *mut crate::WorldHandle,
     queue: *mut ForceQueueHeader,
 ) -> u32 {
-    if world.is_null() || queue.is_null() {
-        return ERR_NULL_POINTER;
-    }
+    // This entry point dereferences two raw pointers and indexes a slice whose
+    // length comes from the producer's header, so it needs the same panic
+    // barrier as every other `extern "C"` entry: a panic here would abort the
+    // host JVM instead of surfacing as ERR_INTERNAL.
+    ffi_guard(ERR_INTERNAL, || {
+        if world.is_null() || queue.is_null() {
+            set_error(ERR_NULL_POINTER, "world or force queue is null");
+            return ERR_NULL_POINTER;
+        }
 
-    let hdr = unsafe { &*queue };
+        let hdr = unsafe { &*queue };
 
-    // Validate configuration
-    if hdr.validate() != ERR_OK {
-        return ERR_INVALID_ARGUMENT;
-    }
+        // Validate configuration
+        let validation = hdr.validate();
+        if validation != ERR_OK {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "force queue header is invalid (capacity must be a power of two \
+                 <= MAX_FORCE_QUEUE_CAPACITY; stride must be 6 or 7)",
+            );
+            return validation;
+        }
 
-    // Early exit if paused (Java sets flags bit 0)
-    if hdr.is_paused() {
-        return ERR_OK;
-    }
+        // Early exit if paused (Java sets flags bit 0)
+        if hdr.is_paused() {
+            return ERR_OK;
+        }
 
-    let world = unsafe { &mut *world };
-    let bitmap = unsafe { hdr.bitmap() };
-    let payload = unsafe { hdr.payload() };
+        let world = unsafe { &mut *world };
+        let bitmap = unsafe { hdr.bitmap() };
+        let payload = unsafe { hdr.payload() };
 
-    // Load head with Acquire ordering (pairs with Java's Release store)
-    let head =
-        unsafe { (*(core::ptr::addr_of!(hdr.head) as *const AtomicU64)).load(Ordering::Acquire) };
-    let mut tail =
-        unsafe { (*(core::ptr::addr_of!(hdr.tail) as *const AtomicU64)).load(Ordering::Relaxed) };
+        // Load head with Acquire ordering (pairs with Java's Release store)
+        let head = unsafe {
+            (*(core::ptr::addr_of!(hdr.head) as *const AtomicU64)).load(Ordering::Acquire)
+        };
+        let mut tail = unsafe {
+            (*(core::ptr::addr_of!(hdr.tail) as *const AtomicU64)).load(Ordering::Relaxed)
+        };
 
-    let capacity = hdr.capacity;
-    let mask = capacity - 1; // capacity is power of 2
-    let stride = hdr.stride as usize;
+        let capacity = hdr.capacity;
+        let mask = capacity - 1; // capacity is power of 2
+        let stride = hdr.stride as usize;
 
-    // Process slots [tail, head)
-    while tail != head {
-        let idx = tail & mask;
-        let word_idx = idx / 64;
-        let bit = idx % 64;
+        // A producer that publishes `head` more than `capacity` slots past
+        // `tail` is either corrupt or has wrapped without the consumer noticing.
+        // Without this check the loop below runs for as long as `tail != head`,
+        // i.e. up to 2^64 iterations of work inside a single FFI call.
+        if head.wrapping_sub(tail) > capacity {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "force queue head/tail are inconsistent (head - tail > capacity)",
+            );
+            return ERR_INVALID_ARGUMENT;
+        }
 
-        // Check if this slot is active (bitmap bit set)
-        let word = unsafe { bitmap.get_unchecked(word_idx as usize) };
-        if word.load(Ordering::Acquire) & (1u64 << bit) != 0 {
-            // Slot is active — read payload
-            let base = (idx as usize) * stride;
-            let body_id = payload[base] as u64;
-            let fx = payload[base + 1];
-            let fy = payload[base + 2];
-            let fz = payload[base + 3];
-            let force = Vector::new(fx, fy, fz);
+        // Process slots [tail, head)
+        while tail != head {
+            let idx = tail & mask;
+            let word_idx = idx / 64;
+            let bit = idx % 64;
 
-            // Apply force at center of mass
-            let handle = unpack_rigid_body_handle(body_id);
-            if let Some(body) = world.inner.bodies.get_mut(handle) {
-                body.add_force(force, true); // true = wake up
-            }
+            // Check if this slot is active (bitmap bit set)
+            let Some(word) = bitmap.get(word_idx as usize) else {
+                set_error(ERR_INVALID_ARGUMENT, "force queue bitmap is truncated");
+                return ERR_INVALID_ARGUMENT;
+            };
+            if word.load(Ordering::Acquire) & (1u64 << bit) != 0 {
+                // Slot is active — read payload
+                let base = (idx as usize) * stride;
+                let Some(slot) = payload.get(base..base + stride) else {
+                    set_error(ERR_INVALID_ARGUMENT, "force queue payload is truncated");
+                    return ERR_INVALID_ARGUMENT;
+                };
+                let body_id = slot[0] as u64;
+                let force = Vector::new(slot[1], slot[2], slot[3]);
 
-            // If stride == 7, also apply torque
-            if stride == 7 {
-                let tx = payload[base + 4];
-                let ty = payload[base + 5];
-                let tz = payload[base + 6];
-                let torque = Vector::new(tx, ty, tz);
+                // Apply force at center of mass
+                let handle = unpack_rigid_body_handle(body_id);
                 if let Some(body) = world.inner.bodies.get_mut(handle) {
-                    body.add_torque(torque, true);
+                    body.add_force(force, true); // true = wake up
                 }
+
+                // If stride == 7, also apply torque
+                if stride == 7 {
+                    let torque = Vector::new(slot[4], slot[5], slot[6]);
+                    if let Some(body) = world.inner.bodies.get_mut(handle) {
+                        body.add_torque(torque, true);
+                    }
+                }
+
+                // Clear bitmap bit with Release ordering (pairs with Java's Acquire load if any)
+                word.fetch_and(!(1u64 << bit), Ordering::Release);
             }
 
-            // Clear bitmap bit with Release ordering (pairs with Java's Acquire load if any)
-            word.fetch_and(!(1u64 << bit), Ordering::Release);
+            // Advance tail with Release ordering
+            tail = tail.wrapping_add(1);
+            unsafe {
+                (*(core::ptr::addr_of!(hdr.tail) as *mut AtomicU64)).store(tail, Ordering::Release);
+            }
         }
 
-        // Advance tail with Release ordering
-        tail = tail.wrapping_add(1);
-        unsafe {
-            (*(core::ptr::addr_of!(hdr.tail) as *mut AtomicU64)).store(tail, Ordering::Release);
-        }
-    }
-
-    ERR_OK
+        ERR_OK
+    })
 }

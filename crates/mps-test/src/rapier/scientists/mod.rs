@@ -1,15 +1,18 @@
 //! 科学家目录模块镜像测试（每科学家一个子文件 + 聚合 API）。
 #[cfg(test)]
 mod tests {
-    use mps_core::rapier::scientists::*;
-    use mps_core::rapier::disciplines::discipline_by_id;
+    use mps_formula::disciplines::discipline_by_id;
+    use mps_formula::scientists::*;
 
     #[test]
     fn each_scientist_file_registered_and_populated() {
         assert!(scientist_count() > 0);
         assert_eq!(SCIENTIST_ISAAC_NEWTON.id, "isaac_newton");
         assert_eq!(SCIENTIST_GALILEO_GALILEI.id, "galileo_galilei");
-        assert_eq!(SCIENTIST_WILLIAM_ROWAN_HAMILTON.id, "william_rowan_hamilton");
+        assert_eq!(
+            SCIENTIST_WILLIAM_ROWAN_HAMILTON.id,
+            "william_rowan_hamilton"
+        );
         assert_eq!(SCIENTIST_JOSEPH_LOUIS_LAGRANGE.id, "joseph_louis_lagrange");
         assert_eq!(SCIENTIST_LEONHARD_EULER.id, "leonhard_euler");
         assert_eq!(SCIENTIST_CLAUDE_LOUIS_NAVIER.id, "claude_louis_navier");
@@ -21,7 +24,10 @@ mod tests {
         assert_eq!(SCIENTIST_JAMES_CLERK_MAXWELL.id, "james_clerk_maxwell");
         assert_eq!(SCIENTIST_MICHAEL_FARADAY.id, "michael_faraday");
         assert_eq!(SCIENTIST_ANDRE_MARIE_AMPERE.id, "andre_marie_ampere");
-        assert_eq!(SCIENTIST_CHARLES_AUGUSTIN_DE_COULOMB.id, "charles_augustin_de_coulomb");
+        assert_eq!(
+            SCIENTIST_CHARLES_AUGUSTIN_DE_COULOMB.id,
+            "charles_augustin_de_coulomb"
+        );
         assert_eq!(SCIENTIST_GEORG_OHM.id, "georg_ohm");
         assert_eq!(SCIENTIST_HEINRICH_HERTZ.id, "heinrich_hertz");
         assert_eq!(SCIENTIST_HANS_CHRISTIAN_ORSTED.id, "hans_christian_orsted");
@@ -59,7 +65,10 @@ mod tests {
         assert_eq!(SCIENTIST_LORD_RAYLEIGH.id, "lord_rayleigh");
         assert_eq!(SCIENTIST_LUDWIG_PRANDTL.id, "ludwig_prandtl");
         assert_eq!(SCIENTIST_THEODORE_VON_KARMAN.id, "theodore_von_karman");
-        assert_eq!(SCIENTIST_JEAN_LE_ROND_DALEMBERT.id, "jean_le_rond_dalembert");
+        assert_eq!(
+            SCIENTIST_JEAN_LE_ROND_DALEMBERT.id,
+            "jean_le_rond_dalembert"
+        );
         assert_eq!(SCIENTIST_HENDRIK_LORENTZ.id, "hendrik_lorentz");
         assert_eq!(SCIENTIST_GOTTFRIED_LEIBNIZ.id, "gottfried_leibniz");
         assert_eq!(SCIENTIST_LOUIS_DE_BROGLIE.id, "louis_de_broglie");
@@ -76,15 +85,21 @@ mod tests {
         let n = scientist_by_id("isaac_newton").expect("Newton cataloged");
         assert_eq!(n.field_id, "mechanics");
         assert!(n.contribution.contains("universal gravitation"));
-        use mps_core::rapier::scientists::isaac_newton::formulas::*;
-        assert!(G > 0.0);
+        use mps_formula::scientists::isaac_newton::formulas::*;
+        // `G` is a `const`, so this is a compile-time property of the catalog
+        // rather than something to check per test run (clippy:
+        // `assertions_on_constants`). Value pinned to the CODATA-2018 figure.
+        const {
+            assert!(G > 0.0);
+            assert!((G - 6.67430e-11).abs() < 1.0e-16);
+        }
     }
 
     #[test]
     fn maxwell_lists_em_formulas() {
         let m = scientist_by_id("james_clerk_maxwell").expect("Maxwell cataloged");
         assert_eq!(m.field_id, "electromagnetism");
-        use mps_core::rapier::scientists::james_clerk_maxwell::formulas::*;
+        use mps_formula::scientists::james_clerk_maxwell::formulas::*;
         let _ = (poynting_vector, biot_savart_element);
     }
 

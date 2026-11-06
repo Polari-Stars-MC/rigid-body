@@ -67,6 +67,22 @@ pub fn run_cbindgen(crate_dir: &Path, header_name: &str) {
             cbindgen::Config::default()
         });
 
+    // `cbindgen::Builder::with_crate` shells out to `cargo metadata` from
+    // inside this build script. That nested cargo inherits the build-script
+    // environment, which cargo does *not* populate with `CARGO_NET_OFFLINE`,
+    // so the nested call happily tries to download every package in the
+    // resolve graph — including platform-specific ones the current target
+    // never builds (e.g. `alsa` on Windows). On a machine whose cargo
+    // registry cache is read-only, or with no network, header generation then
+    // fails with a message that points at cbindgen instead of at the real
+    // cause. Force the nested call offline: cargo has already resolved and
+    // fetched everything this crate needs before running this script, so
+    // offline metadata is sufficient and cannot reach the network.
+    //
+    // SAFETY: build scripts are single-threaded at this point and this runs
+    // before any thread is spawned.
+    unsafe { std::env::set_var("CARGO_NET_OFFLINE", "true") };
+
     cbindgen::Builder::new()
         .with_config(config)
         .with_crate(crate_dir)

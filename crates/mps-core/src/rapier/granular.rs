@@ -356,7 +356,12 @@ pub extern "C" fn granular_enable_collision(
             );
             return Bool::FALSE;
         }
-        if enabled == Bool::FALSE {
+        // Every path that (re)installs proxies tears the previous set down
+        // first. Overwriting the table entry — which is what the rebuild path
+        // used to do — orphaned a full set of dynamic bodies + colliders per
+        // call, and granular_enable_collision is documented as the way to
+        // re-sync after adding particles, so the leak grew on every append.
+        let remove_proxies = |world: &mut WorldHandle| {
             if let Some(proxies) = world.inner.granular_proxies.remove(&id) {
                 for ph in proxies.into_iter().flatten() {
                     world.inner.bodies.remove(
@@ -369,9 +374,13 @@ pub extern "C" fn granular_enable_collision(
                     );
                 }
             }
+        };
+        if enabled == Bool::FALSE {
+            remove_proxies(world);
             clear_error();
             return Bool::TRUE;
         }
+        remove_proxies(world);
         // (Re)build proxies for every particle. `world.inner.granular_bodies`
         // borrow ends before `bodies` is mutated (snapshot the poses first).
         let snapshot: Vec<(rapier3d::math::Vector, rapier3d::math::Vector, f64)> =

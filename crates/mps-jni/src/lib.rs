@@ -1,6 +1,5 @@
 mod helper;
 
-use crate::helper::{jbytearray_to_array, jdoublearray_to_array};
 use ljni::JNIEnv;
 use ljni::sys::{jbyte, jbyteArray, jclass, jdouble, jdoubleArray, jint, jlong, jstring};
 #[cfg(feature = "anvilkit-bridge")]
@@ -389,7 +388,15 @@ jni!(long colliderBuilderCreateSphere(double x, double y, double z, double radiu
 jni!(long colliderBuilderCreateObb(double cx, double cy, double cz, double hx, double hy, double hz, double qi, double qj, double qk, double qw) { to_jlong(col::collider_builder_create_obb(Obb {center: v3(cx, cy, cz),half_extents: v3(hx, hy, hz),rotation: qt(qi, qj, qk, qw),})) });
 jni!(long colliderBuilderCreateCompoundBoxes(long box_data, int box_count) { to_jlong(col::collider_builder_create_compound_boxes(p::<f64>(box_data), u32_from_jint(box_count))) });
 jni_e_c!(long colliderBuilderCreateCompoundBoxesArray(env _env, class _class, double_array box_data, int box_count) {
-    let Some(values) = jdoublearray_to_array(&_env, box_data) else {
+    // Each box is 6 doubles (min_x/min_y/min_z/max_x/max_y/max_z). The C ABI
+    // below only receives a pointer + count, so it cannot validate the buffer;
+    // the length check has to happen against the Java copy.
+    let Some(values) = helper::jdoublearray_to_array_exact(
+        &_env,
+        box_data,
+        (u32_from_jint(box_count) as usize) * 6,
+        "colliderBuilderCreateCompoundBoxesArray",
+    ) else {
         return 0;
     };
     to_jlong(col::collider_builder_create_compound_boxes(values.as_ptr(), u32_from_jint(box_count)))
@@ -414,16 +421,28 @@ jni!(long colliderBuilderCreateNeuralBounds(double cx, double cy, double cz, dou
 jni!(long colliderBuilderCreateVoxels(long voxels, int size_x, int size_y, int size_z, double voxel_size_x, double voxel_size_y, double voxel_size_z, double origin_x, double origin_y, double origin_z, int mode, int dynamic_body, int small_voxel_limit, int mesh_voxel_limit) { to_jlong(vx::collider_builder_create_voxels(p::<u8>(voxels), u32_from_jint(size_x), u32_from_jint(size_y), u32_from_jint(size_z), voxel_size_x, voxel_size_y, voxel_size_z, v3(origin_x, origin_y, origin_z), VoxelColliderOptions { mode: voxel_mode(mode), dynamic_body: jb(dynamic_body), small_voxel_limit: u32_from_jint(small_voxel_limit), mesh_voxel_limit: u32_from_jint(mesh_voxel_limit) })) });
 jni!(long colliderBuilderCreateVoxelsAuto(long voxels, int size_x, int size_y, int size_z, double voxel_size_x, double voxel_size_y, double voxel_size_z, double origin_x, double origin_y, double origin_z, int dynamic_body) { to_jlong(vx::collider_builder_create_voxels_auto(p::<u8>(voxels), u32_from_jint(size_x), u32_from_jint(size_y), u32_from_jint(size_z), voxel_size_x, voxel_size_y, voxel_size_z, v3(origin_x, origin_y, origin_z), jb(dynamic_body))) });
 jni_e_c!(long colliderBuilderCreateVoxelBytes(env _env, class _class, byte_array voxels, int size_x, int size_y, int size_z, double voxel_size_x, double voxel_size_y, double voxel_size_z, double origin_x, double origin_y, double origin_z, int mode, int dynamic_body, int small_voxel_limit, int mesh_voxel_limit) {
-    let Some(values) = jbytearray_to_array(&_env, voxels) else {
+    // The C ABI walks size_x*size_y*size_z bytes from the pointer it is given,
+    // so a short Java array would be read out of bounds. Check against the copy.
+    let (sx, sy, sz) = (u32_from_jint(size_x), u32_from_jint(size_y), u32_from_jint(size_z));
+    let Some(needed) = helper::voxel_len(sx, sy, sz) else {
+        er::set_error(er::ERR_INVALID_ARGUMENT, "colliderBuilderCreateVoxelBytes: voxel dimensions overflow");
         return 0;
     };
-    to_jlong(vx::collider_builder_create_voxels(values.as_ptr(), u32_from_jint(size_x), u32_from_jint(size_y), u32_from_jint(size_z), voxel_size_x, voxel_size_y, voxel_size_z, v3(origin_x, origin_y, origin_z), VoxelColliderOptions { mode: voxel_mode(mode), dynamic_body: jb(dynamic_body), small_voxel_limit: u32_from_jint(small_voxel_limit), mesh_voxel_limit: u32_from_jint(mesh_voxel_limit) }))
+    let Some(values) = helper::jbytearray_to_array_exact(&_env, voxels, needed, "colliderBuilderCreateVoxelBytes") else {
+        return 0;
+    };
+    to_jlong(vx::collider_builder_create_voxels(values.as_ptr(), sx, sy, sz, voxel_size_x, voxel_size_y, voxel_size_z, v3(origin_x, origin_y, origin_z), VoxelColliderOptions { mode: voxel_mode(mode), dynamic_body: jb(dynamic_body), small_voxel_limit: u32_from_jint(small_voxel_limit), mesh_voxel_limit: u32_from_jint(mesh_voxel_limit) }))
 });
 jni_e_c!(long colliderBuilderCreateVoxelBytesAuto(env _env, class _class, byte_array voxels, int size_x, int size_y, int size_z, double voxel_size_x, double voxel_size_y, double voxel_size_z, double origin_x, double origin_y, double origin_z, int dynamic_body) {
-    let Some(values) = jbytearray_to_array(&_env, voxels) else {
+    let (sx, sy, sz) = (u32_from_jint(size_x), u32_from_jint(size_y), u32_from_jint(size_z));
+    let Some(needed) = helper::voxel_len(sx, sy, sz) else {
+        er::set_error(er::ERR_INVALID_ARGUMENT, "colliderBuilderCreateVoxelBytesAuto: voxel dimensions overflow");
         return 0;
     };
-    to_jlong(vx::collider_builder_create_voxels_auto(values.as_ptr(), u32_from_jint(size_x), u32_from_jint(size_y), u32_from_jint(size_z), voxel_size_x, voxel_size_y, voxel_size_z, v3(origin_x, origin_y, origin_z), jb(dynamic_body)))
+    let Some(values) = helper::jbytearray_to_array_exact(&_env, voxels, needed, "colliderBuilderCreateVoxelBytesAuto") else {
+        return 0;
+    };
+    to_jlong(vx::collider_builder_create_voxels_auto(values.as_ptr(), sx, sy, sz, voxel_size_x, voxel_size_y, voxel_size_z, v3(origin_x, origin_y, origin_z), jb(dynamic_body)))
 });
 jni!(long colliderBuilderCreateVoxelAabb(double min_x, double min_y, double min_z, double max_x, double max_y, double max_z, double voxel_size_x, double voxel_size_y, double voxel_size_z, int mode, int dynamic_body, int small_voxel_limit, int mesh_voxel_limit) {
     to_jlong(vx::collider_builder_create_voxel_aabb(
@@ -513,16 +532,23 @@ jni!(boolean colliderVoxelEdit(long world, long handle, int x, int y, int z, int
     vx::collider_voxel_edit(m::<WH>(world), handle as CRaw, x as i64, y as i64, z as i64, solid).0 as jbyte
 });
 jni_e_c!(boolean colliderSetVoxels(env _env, class _class, long world, long handle, byte_array voxels, int size_x, int size_y, int size_z, double voxel_size_x, double voxel_size_y, double voxel_size_z, double origin_x, double origin_y, double origin_z, int mode, int dynamic_body, int small_voxel_limit, int mesh_voxel_limit) {
-    let Some(values) = jbytearray_to_array(&_env, voxels) else {
+    // Same contract as the builder entry points: the C ABI reads
+    // size_x*size_y*size_z bytes from the pointer, so validate the Java copy.
+    let (sx, sy, sz) = (u32_from_jint(size_x), u32_from_jint(size_y), u32_from_jint(size_z));
+    let Some(needed) = helper::voxel_len(sx, sy, sz) else {
+        er::set_error(er::ERR_INVALID_ARGUMENT, "colliderSetVoxels: voxel dimensions overflow");
+        return 0;
+    };
+    let Some(values) = helper::jbytearray_to_array_exact(&_env, voxels, needed, "colliderSetVoxels") else {
         return 0;
     };
     vx::collider_set_voxels(
         m::<WH>(world),
         handle as CRaw,
         values.as_ptr(),
-        u32_from_jint(size_x),
-        u32_from_jint(size_y),
-        u32_from_jint(size_z),
+        sx,
+        sy,
+        sz,
         voxel_size_x, voxel_size_y, voxel_size_z,
         v3(origin_x, origin_y, origin_z),
         shape_type(mode),
@@ -1852,14 +1878,16 @@ jni_space!(void cosmosBuilderSetGravityScale(long builder, double value) {
     if let Some(b) = builder_mut(builder) { b.gravity_scale = value; }
 });
 // **激活**平移锁定（动态刚体不再平动，仅可转动）。
-// `RigidBodyBuilder::lock_translations` 是消费 self 的链式 API，这里
-// 把裸指针的 builder 取出、调用后再放回原地，等价于链尾 `.lock_translations()`。
+// `RigidBodyBuilder::lock_translations` 是消费 self 的链式 API，所以在原地改写：
+// `ptr::read` 取出值、消费它、再 `ptr::write` 写回同一块内存。
+// 旧实现 `Box::from_raw` → 变换 → `Box::into_raw(Box::new(..))` 丢掉新地址，
+// 结果 Java 手里的 `long builder` 指向已释放内存（use-after-free）。
 jni_space!(void cosmosBuilderLockTranslations(long builder) {
     if builder != 0 {
         unsafe {
-            let b = Box::from_raw(builder as *mut RigidBodyBuilder);
-            let b = b.lock_translations();
-            let _ = Box::into_raw(Box::new(b));
+            let b = builder as *mut RigidBodyBuilder;
+            let owned = std::ptr::read(b);
+            std::ptr::write(b, owned.lock_translations());
         }
     }
 });

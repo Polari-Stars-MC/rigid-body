@@ -242,15 +242,8 @@ mod tests {
         let world = make_world();
         let vertices = triangle_vertices();
         let indices = [0u32, 1, 2];
-        let handle = world_insert_static_trimesh(
-            world,
-            vertices.as_ptr(),
-            9,
-            indices.as_ptr(),
-            3,
-            0.5,
-            0.0,
-        );
+        let handle =
+            world_insert_static_trimesh(world, vertices.as_ptr(), 9, indices.as_ptr(), 3, 0.5, 0.0);
         assert_ne!(handle, 0);
         assert_eq!(world_get_rigid_body_set_size(world), 1);
         world_destroy(world);
@@ -262,27 +255,11 @@ mod tests {
         let vertices = triangle_vertices();
         let indices = [0u32, 1, 2];
         assert_eq!(
-            world_insert_static_trimesh(
-                world,
-                std::ptr::null(),
-                9,
-                indices.as_ptr(),
-                3,
-                0.5,
-                0.0
-            ),
+            world_insert_static_trimesh(world, std::ptr::null(), 9, indices.as_ptr(), 3, 0.5, 0.0),
             0
         );
         assert_eq!(
-            world_insert_static_trimesh(
-                world,
-                vertices.as_ptr(),
-                9,
-                std::ptr::null(),
-                3,
-                0.5,
-                0.0
-            ),
+            world_insert_static_trimesh(world, vertices.as_ptr(), 9, std::ptr::null(), 3, 0.5, 0.0),
             0
         );
         assert_eq!(
@@ -363,7 +340,15 @@ mod tests {
         let vertices = triangle_vertices();
         let indices = [0u32, 1, 2];
         assert_eq!(
-            world_insert_static_trimesh(world, vertices.as_ptr(), 9, indices.as_ptr(), 3, -0.5, 0.0),
+            world_insert_static_trimesh(
+                world,
+                vertices.as_ptr(),
+                9,
+                indices.as_ptr(),
+                3,
+                -0.5,
+                0.0
+            ),
             0
         );
         world_destroy(world);
@@ -397,7 +382,10 @@ mod tests {
         world_step(world, 1.0 / 60.0);
 
         let filter = QueryFilterDesc::default();
-        assert_eq!(query_intersect_aabb_rigid_body_count(world, aabb(-5.0, 5.0), filter), 1);
+        assert_eq!(
+            query_intersect_aabb_rigid_body_count(world, aabb(-5.0, 5.0), filter),
+            1
+        );
 
         let mut out = [0u64; 4];
         let written =
@@ -420,17 +408,15 @@ mod tests {
             2
         );
         // Misses bodies outside the box.
-        assert_eq!(query_intersect_aabb_rigid_body_count(world, aabb(-5.0, 5.0), filter), 1);
+        assert_eq!(
+            query_intersect_aabb_rigid_body_count(world, aabb(-5.0, 5.0), filter),
+            1
+        );
 
         // Output capacity caps the number of written handles.
         let mut out = [0u64; 1];
-        let written = query_intersect_aabb_rigid_bodies(
-            world,
-            aabb(-5.0, 15.0),
-            filter,
-            out.as_mut_ptr(),
-            1,
-        );
+        let written =
+            query_intersect_aabb_rigid_bodies(world, aabb(-5.0, 15.0), filter, out.as_mut_ptr(), 1);
         assert_eq!(written, 1);
         world_destroy(world);
     }
@@ -457,7 +443,10 @@ mod tests {
             0
         );
         // Inverted AABB (mins > maxs).
-        assert_eq!(query_intersect_aabb_rigid_body_count(world, aabb(5.0, -5.0), filter), 0);
+        assert_eq!(
+            query_intersect_aabb_rigid_body_count(world, aabb(5.0, -5.0), filter),
+            0
+        );
         // Null output buffer / zero capacity.
         assert_eq!(
             query_intersect_aabb_rigid_bodies(

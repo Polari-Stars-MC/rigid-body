@@ -106,11 +106,19 @@ pub extern "C" fn rel_lorentz_boost(velocity: Vec3, out_boost: *mut LorentzBoost
     // Sum beta components with mul_add for better precision near c
     let beta_sq = mul_add(beta_x, beta_x, mul_add(beta_y, beta_y, beta_z * beta_z));
     let one_minus_beta_sq = -mul_add(beta_sq, 1.0_f64, -1.0_f64); // -(β² - 1) = 1 - β²
-    let gamma = if one_minus_beta_sq > 0.0 {
-        1.0 / one_minus_beta_sq.sqrt()
-    } else {
-        f64::INFINITY
-    };
+    // β² == 1 is the light-speed asymptote: gamma diverges, so there is no
+    // finite boost matrix. The old code substituted INFINITY for every matrix
+    // entry and returned `TRUE`, which contradicted `rel_lorentz_factor` (same
+    // velocity → ERR_INVALID_ARGUMENT) and handed the caller a NaN/Inf matrix
+    // it would happily multiply by.
+    if one_minus_beta_sq <= 0.0 {
+        set_error(
+            ERR_INVALID_ARGUMENT,
+            "velocity magnitude must be less than c (boost is singular at c)",
+        );
+        return Bool::FALSE;
+    }
+    let gamma = 1.0 / one_minus_beta_sq.sqrt();
     let g = gamma;
     let gm1_over_b2 = if beta_sq > 0.0 {
         (gamma - 1.0) / beta_sq
@@ -478,6 +486,10 @@ pub extern "C" fn rel_gravitational_time_dilation(
     }
     let rs = rel_schwarzschild_radius(mass, gravitational_constant);
     if !rs.is_finite() {
+        set_error(
+            ERR_INVALID_ARGUMENT,
+            "Schwarzschild radius is not finite (mass and G overflow)",
+        );
         return Bool::FALSE;
     }
     if radius <= rs + EPSILON {
@@ -488,15 +500,21 @@ pub extern "C" fn rel_gravitational_time_dilation(
         return Bool::FALSE;
     }
     let stationary_factor = (1.0 - rs / radius).sqrt();
-    // Orbital factor requires r > 1.5*rs (the ISCO for Schwarzschild)
+    // Orbital factor requires r > 1.5*rs (the ISCO for Schwarzschild). Below it
+    // there is no circular orbit, so this is a domain edge, not a NaN result:
+    // reporting `orbital_factor = NaN` while returning `TRUE` violated
+    // docs/formula-numeric-domains.md ("non-finite intermediate or result must
+    // fail") and poisoned every downstream computation with a silent NaN.
     let min_orbital_radius = 1.5 * rs;
-    let (orbital_factor, orbiting_velocity) = if radius > min_orbital_radius + EPSILON {
-        let of = (1.0 - 1.5 * rs / radius).sqrt();
-        let v = (gravitational_constant * mass / radius).sqrt();
-        (of, v)
-    } else {
-        (f64::NAN, 0.0)
-    };
+    if radius <= min_orbital_radius + EPSILON {
+        set_error(
+            ERR_INVALID_ARGUMENT,
+            "no circular orbit inside 1.5 * Schwarzschild radius (ISCO)",
+        );
+        return Bool::FALSE;
+    }
+    let orbital_factor = (1.0 - 1.5 * rs / radius).sqrt();
+    let orbiting_velocity = (gravitational_constant * mass / radius).sqrt();
     write_out(
         out_dilation,
         GravitationalTimeDilation {
@@ -594,10 +612,15 @@ pub extern "C" fn rel_length_contraction(
 
 /// Compute relativistic particle properties.
 ///
-/// For zero mass (photon-like), speed must equal c and the particle has
-/// no well-defined gamma from velocity alone — gamma and total energy
-/// are returned as INFINITY, and momentum is set to a unit vector scaled
-/// by INFINITY (direction only).
+/// For zero mass (photon-like), speed must equal c. `gamma`, total / kinetic
+/// energy, momentum magnitude and rapidity are then all `INFINITY` — a massless
+/// particle at c has no finite rest frame — and `momentum` carries the
+/// **direction** as a unit vector. Read `momentum_magnitude` for the (infinite)
+/// scalar; do not treat the vector's length as a physical value in that case.
+///
+/// Earlier this multiplied the direction by `INFINITY`, so any axis-aligned
+/// photon got `momentum = (inf, NaN, NaN)` (`0 * inf == NaN`) while the function
+/// returned success.
 ///
 /// # Safety
 ///
@@ -625,6 +648,8 @@ pub extern "C" fn rel_particle_properties(
     // Photon / massless particle
     if mass < EPSILON {
         if speed_sq >= c2 - EPSILON {
+            // Unit direction only: multiplying by INFINITY turned every
+            // axis-aligned photon into `(inf, NaN, NaN)` via `0 * inf == NaN`.
             let dir = if speed_sq > EPSILON {
                 v_vec / speed_sq.sqrt()
             } else {
@@ -637,7 +662,7 @@ pub extern "C" fn rel_particle_properties(
                     total_energy: f64::INFINITY,
                     kinetic_energy: f64::INFINITY,
                     momentum_magnitude: f64::INFINITY,
-                    momentum: vec3_from_rapier(dir * f64::INFINITY),
+                    momentum: vec3_from_rapier(dir),
                     rapidity: f64::INFINITY,
                 },
             );

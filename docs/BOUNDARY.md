@@ -97,7 +97,7 @@ rapier3d-f64 ← 只有 mps-core 与 mps-cosmos
 | --- | --- | --- |
 | `crates/mps-core/include/rigid_body.h` | 构建 `mps-core`（cbindgen） | 否。Linux CI 会 diff |
 | `crates/mps-cosmos/include/cosmos.h` | 构建 `mps-cosmos`（cbindgen） | 否。Linux CI 会 diff |
-| `crates/mps-web/src/metrics.rs` | `cargo run -p xtask -- dump-metrics` | 否。守门 `verify_metrics_sync` |
+| `crates/mps-web/src/metrics.rs` | `cargo run -p xtask -- dump-metrics` | 否。仓内守门 `verify_metrics_sync`（3 个核心计数）+ Linux CI 重新生成后 `git diff`（全部 18 个常量） |
 | xtask `gen-java` 输出 | `cargo run -p xtask -- gen-java [dir]` | 否 |
 
 Java 业务源码在仓库外。本仓库的 JNI 符号是契约，Java 声明要跟 C 头文件走，而不是反过来改 Rust 去凑一份未提交的 Java。

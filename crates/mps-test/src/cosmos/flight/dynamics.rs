@@ -12,31 +12,43 @@
 mod tests {
     use mps_cosmos::bodies::satellite_builder;
     use mps_cosmos::flight::{
-        ConstantGravity, FlightControls, SeaLevelAtmosphere, default_airfoil, simulate_one_step,
-        total_forces_and_moments,
-        dynamics::RigidBodyState,
+        ConstantGravity, FlightControls, SeaLevelAtmosphere, StepConfig, default_airfoil,
+        dynamics::RigidBodyState, simulate_one_step, total_forces_and_moments,
     };
     use mps_formula::rotor::RotorParams;
     use rapier3d::prelude::{ColliderSet, RigidBodySet, Rotation, Vector};
 
     fn main_rotor() -> RotorParams {
         RotorParams {
-            radius: 5.4, n_blades: 2, chord: 0.20, hinge_offset: 0.05,
-            lift_slope: 2.0 * std::f64::consts::PI, zero_lift_alpha: 0.0,
-            profile_cd0: 0.012, cd_k: 0.05,
+            radius: 5.4,
+            n_blades: 2,
+            chord: 0.20,
+            hinge_offset: 0.05,
+            lift_slope: 2.0 * std::f64::consts::PI,
+            zero_lift_alpha: 0.0,
+            profile_cd0: 0.012,
+            cd_k: 0.05,
         }
     }
     fn tail_rotor() -> RotorParams {
         RotorParams {
-            radius: 1.0, n_blades: 2, chord: 0.08, hinge_offset: 0.02,
-            lift_slope: 2.0 * std::f64::consts::PI, zero_lift_alpha: 0.0,
-            profile_cd0: 0.015, cd_k: 0.05,
+            radius: 1.0,
+            n_blades: 2,
+            chord: 0.08,
+            hinge_offset: 0.02,
+            lift_slope: 2.0 * std::f64::consts::PI,
+            zero_lift_alpha: 0.0,
+            profile_cd0: 0.015,
+            cd_k: 0.05,
         }
     }
     fn controls() -> FlightControls {
         FlightControls {
-            collective: 0.10, cyclic_lon: 0.0, cyclic_lat: 0.0,
-            tail_collective: 0.0, throttle: 1.0,
+            collective: 0.10,
+            cyclic_lon: 0.0,
+            cyclic_lat: 0.0,
+            tail_collective: 0.0,
+            throttle: 1.0,
         }
     }
 
@@ -53,9 +65,18 @@ mod tests {
             mass: 800.0,
         };
         let report = total_forces_and_moments(
-            &state, &rotor, &tail, &SeaLevelAtmosphere, &ConstantGravity { g: 9.81 },
-            &controls(), 40.0, 0.0, &airfoil, 60,
-        ).expect("valid inputs should yield Some");
+            &state,
+            &rotor,
+            &tail,
+            &SeaLevelAtmosphere,
+            &ConstantGravity { g: 9.81 },
+            &controls(),
+            40.0,
+            0.0,
+            &airfoil,
+            60,
+        )
+        .expect("valid inputs should yield Some");
         // Sanity: rotor thrust positive, gravity gives acc < 50 m/s², and
         // total power is finite.  The report's force mag for a hovering 800
         // kg craft should be in the kilo-Newton band — well below the 50 m/s²
@@ -81,10 +102,21 @@ mod tests {
             rotation: Rotation::IDENTITY,
             mass: 0.0,
         };
-        assert!(total_forces_and_moments(
-            &zero_state, &rotor, &tail, &SeaLevelAtmosphere, &ConstantGravity { g: 9.81 },
-            &controls(), 40.0, 0.0, &airfoil, 60,
-        ).is_none());
+        assert!(
+            total_forces_and_moments(
+                &zero_state,
+                &rotor,
+                &tail,
+                &SeaLevelAtmosphere,
+                &ConstantGravity { g: 9.81 },
+                &controls(),
+                40.0,
+                0.0,
+                &airfoil,
+                60,
+            )
+            .is_none()
+        );
         // NaN collective → controls invalid
         let nan_controls = FlightControls {
             collective: f64::NAN,
@@ -97,15 +129,37 @@ mod tests {
             rotation: Rotation::IDENTITY,
             mass: 800.0,
         };
-        assert!(total_forces_and_moments(
-            &state, &rotor, &tail, &SeaLevelAtmosphere, &ConstantGravity { g: 9.81 },
-            &nan_controls, 40.0, 0.0, &airfoil, 60,
-        ).is_none());
+        assert!(
+            total_forces_and_moments(
+                &state,
+                &rotor,
+                &tail,
+                &SeaLevelAtmosphere,
+                &ConstantGravity { g: 9.81 },
+                &nan_controls,
+                40.0,
+                0.0,
+                &airfoil,
+                60,
+            )
+            .is_none()
+        );
         // zero rotor omega
-        assert!(total_forces_and_moments(
-            &state, &rotor, &tail, &SeaLevelAtmosphere, &ConstantGravity { g: 9.81 },
-            &controls(), 0.0, 0.0, &airfoil, 60,
-        ).is_none());
+        assert!(
+            total_forces_and_moments(
+                &state,
+                &rotor,
+                &tail,
+                &SeaLevelAtmosphere,
+                &ConstantGravity { g: 9.81 },
+                &controls(),
+                0.0,
+                0.0,
+                &airfoil,
+                60,
+            )
+            .is_none()
+        );
         // dt presiveness tested in simulate_one_step below.
     }
 
@@ -118,15 +172,32 @@ mod tests {
         // See module doc: call recompute_mass_properties_from_colliders so
         // `body.mass()` reads our 800 kg; without this the additional-mass
         // shortcut leaves local_mprops zero.
-        let mut body = satellite_builder(800.0, Vector::new(0.0, 0.0, 100.0), Vector::ZERO, 1.0).build();
+        let mut body =
+            satellite_builder(800.0, Vector::new(0.0, 0.0, 100.0), Vector::ZERO, 1.0).build();
         body.recompute_mass_properties_from_colliders(&ColliderSet::new());
-        assert!((body.mass() - 800.0).abs() < 1.0e-6, "mass after recompute = {}", body.mass());
+        assert!(
+            (body.mass() - 800.0).abs() < 1.0e-6,
+            "mass after recompute = {}",
+            body.mass()
+        );
         let handle = bodies.insert(body);
         let body = bodies.get_mut(handle).unwrap();
         let report = simulate_one_step(
-            body, &rotor, &tail, &SeaLevelAtmosphere, &ConstantGravity { g: 9.81 },
-            &controls(), 40.0, 0.0, 0.01, &airfoil, 60,
-        ).expect("step should succeed with mass=800 body");
+            body,
+            &rotor,
+            &tail,
+            &SeaLevelAtmosphere,
+            &ConstantGravity { g: 9.81 },
+            &controls(),
+            &StepConfig {
+                rotor_omega: 40.0,
+                flat_plate_area: 0.0,
+                dt: 0.01,
+                stations: 60,
+            },
+            &airfoil,
+        )
+        .expect("step should succeed with mass=800 body");
         assert!(report.rotor_thrust > 0.0);
         // After one step, the linear velocity is non-zero (gravity plus rotor).
         let v = body.linvel();
@@ -135,15 +206,43 @@ mod tests {
         assert!(body.translation().y.abs() < 1.0e-3 || body.translation().length() > 0.0);
         // Zero dt → None.
         let body = bodies.get_mut(handle).unwrap();
-        assert!(simulate_one_step(
-            body, &rotor, &tail, &SeaLevelAtmosphere, &ConstantGravity { g: 9.81 },
-            &controls(), 40.0, 0.0, 0.0, &airfoil, 60,
-        ).is_none());
+        assert!(
+            simulate_one_step(
+                body,
+                &rotor,
+                &tail,
+                &SeaLevelAtmosphere,
+                &ConstantGravity { g: 9.81 },
+                &controls(),
+                &StepConfig {
+                    rotor_omega: 40.0,
+                    flat_plate_area: 0.0,
+                    dt: 0.0,
+                    stations: 60
+                },
+                &airfoil,
+            )
+            .is_none()
+        );
         // NaN dt → None.
         let body = bodies.get_mut(handle).unwrap();
-        assert!(simulate_one_step(
-            body, &rotor, &tail, &SeaLevelAtmosphere, &ConstantGravity { g: 9.81 },
-            &controls(), 40.0, 0.0, f64::NAN, &airfoil, 60,
-        ).is_none());
+        assert!(
+            simulate_one_step(
+                body,
+                &rotor,
+                &tail,
+                &SeaLevelAtmosphere,
+                &ConstantGravity { g: 9.81 },
+                &controls(),
+                &StepConfig {
+                    rotor_omega: 40.0,
+                    flat_plate_area: 0.0,
+                    dt: f64::NAN,
+                    stations: 60
+                },
+                &airfoil,
+            )
+            .is_none()
+        );
     }
 }

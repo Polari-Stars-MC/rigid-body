@@ -643,15 +643,21 @@ impl CosmosWorld {
             return;
         }
 
-        // 增量重建 arena index → handle 映射（仅 body 数变化时）。
+        // Rebuild the arena-index → handle map on every drain.
+        //
+        // Previously incremental, keyed off `bodies.len()`. Rapier's body set is
+        // a slot arena: a remove-then-insert pair between two steps keeps the
+        // length identical while changing which handle sits at which arena
+        // index, so the reused map addressed the wrong bodies (and dead handles
+        // made `bodies.get_mut` return `None`, dropping the command silently).
+        // O(n), and only when the arena actually delivered commands.
         let n_bodies = self.bodies.len();
-        if n_bodies != self.arena_idx_map_body_count {
-            self.arena_idx_map.clear();
-            for (h, _) in self.bodies.iter() {
-                self.arena_idx_map.push(h);
-            }
-            self.arena_idx_map_body_count = n_bodies;
+        self.arena_idx_map.clear();
+        self.arena_idx_map.reserve(n_bodies);
+        for (h, _) in self.bodies.iter() {
+            self.arena_idx_map.push(h);
         }
+        self.arena_idx_map_body_count = n_bodies;
         let idx = &self.arena_idx_map;
 
         for (cmd_type, body_index, a0, a1, a2) in commands {
@@ -665,18 +671,24 @@ impl CosmosWorld {
             };
             match cmd_type {
                 // AddForce — RapierForce 路径直接 add_force；显式积子路径先攒到
-                // `arena_cmd_forces`（按 arena index），由 `explicit_substep` 折成附加
-                // 加速度注入（rapier 的 user_force 在显式路径下不参与积分）。
+                // `arena_cmd_forces`，由 `explicit_substep` 折成附加加速度注入
+                // （rapier 的 user_force 在显式路径下不参与积分）。
                 0 => {
                     if matches!(self.orbit_integration, OrbitIntegration::RapierForce) {
                         body.add_force(Vector::new(a0, a1, a2), true);
                     } else {
-                        let bi = body_index as usize;
-                        if bi >= self.arena_cmd_forces.len() {
-                            self.arena_cmd_forces.resize_with(bi + 1, || None);
+                        // Keyed by the rapier slot id, which is what the reader in
+                        // `explicit_substep` uses (`handle.into_raw_parts().0`).
+                        // Keying this by the *arena* index made write and read
+                        // disagree as soon as any body had been removed: the
+                        // accumulated force then landed on a different body or was
+                        // dropped via `get(...) == None`.
+                        let key = h.into_raw_parts().0 as usize;
+                        if key >= self.arena_cmd_forces.len() {
+                            self.arena_cmd_forces.resize_with(key + 1, || None);
                         }
-                        let existing = self.arena_cmd_forces[bi].unwrap_or(Vector::ZERO);
-                        self.arena_cmd_forces[bi] = Some(existing + Vector::new(a0, a1, a2));
+                        let existing = self.arena_cmd_forces[key].unwrap_or(Vector::ZERO);
+                        self.arena_cmd_forces[key] = Some(existing + Vector::new(a0, a1, a2));
                     }
                 }
                 // AddTorque — 仅 RapierForce 路径消费（显式路径不积分角运动）。
@@ -1006,8 +1018,12 @@ impl CosmosWorld {
         // --- Arena: drain Java commands (Java→Rust zero-copy channel) ---
         // 在物理推进之前把 Java 写入命令环的命令应用到刚体；推进结束后 flush
         // body 槽供 Java 零拷贝回读（见本方法尾部）。
-        self.drain_arena_commands();
-
+        //
+        // 注意：`RapierForce` 路径**不能**在这里 drain。`step_via_rapier_force`
+        // 会先 `reset_forces` 再注入引力，任何在 reset 之前 `add_force` 进来的
+        // arena 命令都会被清零，宿主看到的现象是「命令环里的力全部丢失，但
+        // SetVelocity / ApplyImpulse 仍然生效」。RapierForce 的 drain 因此放在
+        // `step_via_rapier_force` 内部、reset 之后（见该函数）。
         let result = match self.orbit_integration {
             OrbitIntegration::RapierForce => {
                 if dt > MAX_STEP_DT {
@@ -1027,6 +1043,9 @@ impl CosmosWorld {
             | OrbitIntegration::ForestRuth8
             | OrbitIntegration::Yoshida4Kahan
             | OrbitIntegration::ForestRuth8Kahan => {
+                // 显式积子路径把 arena 的 AddForce 攒进 `arena_cmd_forces`，
+                // 由 `explicit_substep` 折成附加加速度，所以必须先 drain。
+                self.drain_arena_commands();
                 self.step_via_explicit(dt);
                 StepResult::Stepped(dt)
             }
@@ -1268,6 +1287,13 @@ impl CosmosWorld {
                 b.reset_torques(false);
             }
         }
+
+        // Arena commands land *after* the reset so they survive into
+        // `pipeline.step`. Draining before the reset (the old order) meant every
+        // AddForce per torque written through the shared-memory command ring was
+        // cleared before the solver ever saw it. Draining per substep is safe:
+        // the ring is emptied by the first substep, later ones see it empty.
+        self.drain_arena_commands();
 
         // 1. 计算并注入每体的合力（天体引力 + n-body + 环境扰动）—— 复用上方已
         //    collected 的 scratch_tasks，不再重调 collect/refresh（L3：子步切分

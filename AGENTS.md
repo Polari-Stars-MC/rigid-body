@@ -42,9 +42,9 @@
 - 错误码是 `u32`：`ERR_OK=0` … `ERR_INTERNAL=6`。`mps-formula` 与 `mps-core` **各自字面声明**（cbindgen 不认 `pub use`）。改一边必须改另一边。纯公式的数值域错误走 `FormulaError`，不写线程局部错误槽；FFI 边界再映射成 `ERR_*`。
 - 每个 `extern "C"` 入口用 `ffi_guard`（`catch_unwind`）。release profile 的 `panic` 必须保持 `"unwind"`。
 - 句柄：世界和 builder 是不透明指针；刚体、碰撞体、关节是 packed `u64`。不要把 Rapier 类型送过 ABI。
-- 新增 `mps-core` / `mps-cosmos` / `mps-formula` 子模块时，同步加 `mps-test` 镜像文件。守门在 `verify_module_mirror`。
+- 新增 `mps-core` / `mps-cosmos` / `mps-formula` 子模块时，同步加 `mps-test` 镜像文件，并在 `crates/mps-test/src/lib.rs` 里用 `pub mod` 挂上。守门在 `verify_module_mirror`（两条：文件名镜像 + 每个测试文件都必须被 `mod` 声明，未声明的文件不会被编译）。
 - 改了会进入头文件的 FFI 后要重新构建，并提交生成的 `rigid_body.h` 和 `cosmos.h`。CI 只在 Linux 上对这两份做 `git diff --exit-code`，不要手改。
-- 改了测试、JNI 或 core FFI 数量后跑 `cargo run -p xtask -- dump-metrics`，提交 `crates/mps-web/src/metrics.rs`。
+- 改了测试、JNI 或 core FFI 数量后跑 `cargo run -p xtask -- dump-metrics`，提交 `crates/mps-web/src/metrics.rs`。CI 会在 Linux 上重新生成再 `git diff`（覆盖全部 18 个常量）。
 - `default = []`。`anvilkit-bridge`、`relative-force`、`profiler` 不进默认集，也不要为了“顺便编译过”去开 `--all-features`。
 - 格式：`rustfmt.toml`（edition 2024，宽 100，4 空格）。文档注释里的缩写跟 `clippy.toml` 的 `doc-valid-idents` 一致，不要展开。
 

@@ -25,7 +25,7 @@ pub mod stability;
 pub mod trim;
 
 pub use dynamics::{
-    FlightControls, FlightDynamics, RigidBodyState, default_airfoil, simulate_one_step,
+    FlightControls, FlightDynamics, RigidBodyState, StepConfig, default_airfoil, simulate_one_step,
     total_forces_and_moments,
 };
 pub use stability::{

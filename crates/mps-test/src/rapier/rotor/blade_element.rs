@@ -6,8 +6,8 @@
 
 #[cfg(test)]
 mod tests {
-    use mps_core::rapier::rotor::*;
     use mps_core::rapier::rotor::blade_element::{Airfoil, LinearAirfoil};
+    use mps_core::rapier::rotor::*;
     use std::f64::consts::PI;
 
     fn rotor() -> RotorParams {
@@ -89,7 +89,10 @@ mod tests {
         assert!((lin - 2.0 * PI * 0.05).abs() < 1.0e-6, "lin_cl={lin}");
         // At stall_alpha (0.21 rad): C_l = 2π·0.21.
         let v_stall = a.cl(0.21);
-        assert!((v_stall - 2.0 * PI * 0.21).abs() < 1.0e-6, "stall_cl={v_stall}");
+        assert!(
+            (v_stall - 2.0 * PI * 0.21).abs() < 1.0e-6,
+            "stall_cl={v_stall}"
+        );
         // Past stall (0.5 rad): C_l clamps to stall value.
         let v_post = a.cl(0.5);
         assert!(

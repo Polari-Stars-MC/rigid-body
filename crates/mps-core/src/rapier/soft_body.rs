@@ -4164,6 +4164,42 @@ pub extern "C" fn soft_body_restore_state(
     })
 }
 
+/// Remove a soft body's collision proxies.
+///
+/// Each proxy is a real dynamic `RigidBody` plus a ball `Collider` inserted into
+/// the world, so dropping the `SoftBodySet` slot without this leaves invisible
+/// solid balls behind. Shared by `soft_body_enable_collision(false)` and by the
+/// full teardown below.
+fn remove_soft_body_proxies(world: &mut WorldHandle, id: u32) {
+    if let Some(proxies) = world.inner.soft_body_proxies.remove(&id) {
+        for ph in proxies.into_iter().flatten() {
+            world.inner.bodies.remove(
+                ph,
+                &mut world.inner.islands,
+                &mut world.inner.colliders,
+                &mut world.inner.impulse_joints,
+                &mut world.inner.multibody_joints,
+                false,
+            );
+        }
+    }
+}
+
+/// Remove every side table that belongs to a soft body: proxies, LBS skin
+/// binding, and voxel-edit metadata.
+///
+/// `soft_body_destroy` used to drop only the `SoftBodySet` slot. `world_step`
+/// skips ids that are no longer in `soft_bodies`, so the proxies stopped being
+/// driven — but they stayed in the world as dynamic colliders, i.e. a destroyed
+/// 512×512 cloth kept ~262k invisible solid balls shoving the rest of the
+/// scene around. `skin_bindings` / `voxel_soft_meta` were never removed at all,
+/// so they leaked for the lifetime of the world.
+fn teardown_soft_body(world: &mut WorldHandle, id: u32) {
+    remove_soft_body_proxies(world, id);
+    world.inner.skin_bindings.remove(&id);
+    world.inner.voxel_soft_meta.remove(&id);
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn soft_body_destroy(world: *mut WorldHandle, id: u32) -> Bool {
     ffi_guard(Bool::FALSE, || {
@@ -4173,6 +4209,7 @@ pub extern "C" fn soft_body_destroy(world: *mut WorldHandle, id: u32) -> Bool {
         };
         let sid = SoftBodyId(id);
         if world.inner.soft_bodies.remove(sid) {
+            teardown_soft_body(world, id);
             clear_error();
             Bool::TRUE
         } else {
@@ -4979,9 +5016,15 @@ pub extern "C" fn soft_body_enable_collision(
             return Bool::FALSE;
         };
         let sid = SoftBodyId(id);
-        let Some(body) = world.inner.soft_bodies.get_mut(sid) else {
-            set_error(ERR_NOT_FOUND, "soft_body_enable_collision: unknown id");
-            return Bool::FALSE;
+        // Validate up front, and without holding a `&mut` into `soft_bodies`:
+        // the proxy teardown below mutates `bodies`/`colliders`, and a live
+        // field borrow of `soft_bodies` would make that a double borrow.
+        let particle_count = match world.inner.soft_bodies.get(sid) {
+            Some(body) => body.particles.len(),
+            None => {
+                set_error(ERR_NOT_FOUND, "soft_body_enable_collision: unknown id");
+                return Bool::FALSE;
+            }
         };
         if particle_radius <= 0.0 || !particle_radius.is_finite() {
             set_error(
@@ -4990,28 +5033,26 @@ pub extern "C" fn soft_body_enable_collision(
             );
             return Bool::FALSE;
         }
+        // Both branches tear the previous proxy set down first. Re-enabling
+        // must not leak it: the old code overwrote the table entry directly, so
+        // every repeated `enable_collision(true)` (the documented way to
+        // re-sync after adding particles) orphaned a full set of dynamic
+        // bodies + colliders that stayed in the world and kept colliding.
+        remove_soft_body_proxies(world, id);
         if enabled == Bool::FALSE {
-            // Tear down existing proxies.
-            if let Some(proxies) = world.inner.soft_body_proxies.remove(&id) {
-                for ph in proxies.into_iter().flatten() {
-                    world.inner.bodies.remove(
-                        ph,
-                        &mut world.inner.islands,
-                        &mut world.inner.colliders,
-                        &mut world.inner.impulse_joints,
-                        &mut world.inner.multibody_joints,
-                        false,
-                    );
-                }
+            if let Some(body) = world.inner.soft_bodies.get_mut(sid) {
+                body.collide = false;
             }
-            body.collide = false;
             clear_error();
             return Bool::TRUE;
         }
-        // Build proxies.
+        let Some(body) = world.inner.soft_bodies.get_mut(sid) else {
+            set_error(ERR_NOT_FOUND, "soft_body_enable_collision: unknown id");
+            return Bool::FALSE;
+        };
         body.collide = true;
         body.particle_radius = particle_radius;
-        let mut proxies: Vec<Option<RigidBodyHandle>> = Vec::with_capacity(body.particles.len());
+        let mut proxies: Vec<Option<RigidBodyHandle>> = Vec::with_capacity(particle_count);
         for p in &body.particles {
             if p.inv_mass == 0.0 {
                 proxies.push(None); // pinned: no proxy

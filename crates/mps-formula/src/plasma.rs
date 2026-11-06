@@ -125,15 +125,20 @@ pub extern "C" fn pl_plasma_params(
     let me = ELECTRON_MASS;
     let kb = BOLTZMANN;
 
-    // Debye length
-    let debye_len = if electron_density > EPSILON {
+    // Debye length.
+    //
+    // The threshold must match the domain check above (`> 0`). With `> EPSILON`
+    // a legitimately positive density such as 1e-13 produced `INFINITY` while
+    // the function still reported success — violating the documented rule that a
+    // non-finite result must fail.
+    let debye_len = if electron_density > 0.0 {
         (eps0 * kb * electron_temperature / (electron_density * e * e)).sqrt()
     } else {
         f64::INFINITY
     };
 
     // Electron plasma frequency
-    let omega_pe = if electron_density > EPSILON {
+    let omega_pe = if electron_density > 0.0 {
         (electron_density * e * e / (eps0 * me)).sqrt()
     } else {
         0.0
@@ -149,7 +154,7 @@ pub extern "C" fn pl_plasma_params(
     };
 
     // Debye sphere count
-    let nd = if debye_len.is_finite() && electron_density > EPSILON {
+    let nd = if debye_len.is_finite() && electron_density > 0.0 {
         (4.0 * PI / 3.0) * electron_density * debye_len.powi(3)
     } else {
         0.0

@@ -169,17 +169,25 @@ pub extern "C" fn cosmos_builder_set_gravity_scale(builder: *mut RigidBodyBuilde
 }
 
 /// **激活**平移锁定（动态刚体不再平动，仅可转动）。`RigidBodyBuilder::lock_translations`
-/// 是消费 self 的链式 API，这里把裸指针的 builder 取出、调用后再放回原地。
+/// 是消费 self 的链式 API，所以这里在**原地**改写：`ptr::read` 取出值、消费它、
+/// 再 `ptr::write` 写回同一块内存。
+///
+/// 之前是 `Box::from_raw` → 变换 → `Box::into_raw(Box::new(..))` 并且丢掉新地址：
+/// 旧内存被释放、`builder` 句柄变成悬垂指针，调用方下一次 set/insert 就是
+/// use-after-free（分配器恰好复用同一地址时还会「看起来正常」）。
 #[unsafe(no_mangle)]
 pub extern "C" fn cosmos_builder_lock_translations(builder: *mut RigidBodyBuilder) {
     ffi_guard((), || {
-        if builder.is_null() {
+        let Some(b) = (unsafe { builder.as_mut() }) else {
+            set_error(ERR_NULL_POINTER, "builder is null");
             return;
-        }
+        };
+        // SAFETY: `b` is a valid, aligned, uniquely-borrowed builder; `read`
+        // moves the value out and `write` puts the transformed value back into
+        // the same allocation, so no pointer handed out earlier is invalidated.
         unsafe {
-            let b = Box::from_raw(builder);
-            let b = b.lock_translations();
-            let _ = Box::into_raw(Box::new(b));
+            let owned = std::ptr::read(b);
+            std::ptr::write(b, owned.lock_translations());
         }
     });
 }

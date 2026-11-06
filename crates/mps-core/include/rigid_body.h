@@ -56,6 +56,21 @@
 #define ERR_INTERNAL 6
 
 /**
+ * Upper bound on `capacity`.
+ *
+ * The C ABI passes the queue as a bare pointer with **no length parameter**,
+ * so every bounds check inside this module is faith-based: the length of the
+ * `bitmap()` / `payload()` slices is derived from `capacity`, which the
+ * producer writes. Without a cap a corrupt or hostile header (`capacity =
+ * 1 << 40` is a valid power of two) makes `from_raw_parts` describe petabytes
+ * and the very first indexed access is out of bounds.
+ *
+ * 1 M slots is 56 MiB of payload at stride 7 and far above any realistic
+ * per-frame force batch.
+ */
+#define MAX_FORCE_QUEUE_CAPACITY (1 << 20)
+
+/**
  * Upper bound on rope particles accepted in one creation call.
  *
  * Ropes are one-dimensional; 64k particles is far past any interactive
@@ -9607,7 +9622,14 @@ struct WorldHandle *world_create(Vec3 gravity);
 void world_destroy(struct WorldHandle *world);
 
 /**
- * Advance the simulation by `delta_seconds` (clamped to (0, 1]).
+ * Advance the simulation by `delta_seconds`. Valid range is `(0, 1]`
+ * (`MAX_STEP_SECONDS`); anything else is rejected with `ERR_INVALID_ARGUMENT`
+ * and the world is left untouched.
+ *
+ * `world_step` returns `()` so a rejected call cannot be reported through a
+ * sentinel. The error slot is the only channel — it is written here so a host
+ * that steps with a NaN / non-positive / too-large `dt` can tell that nothing
+ * happened instead of silently losing a frame.
  *
  * # Safety
  * `world` must be a valid pointer returned by `world_create` and not yet destroyed.
