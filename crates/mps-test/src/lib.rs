@@ -96,6 +96,7 @@ pub mod rapier {
     pub mod servo_body;
     pub mod shared_arena;
     pub mod soft_body;
+    pub mod soft_data;
     pub mod soft_upstream;
     pub mod softbody;
     pub mod spaceflight;

@@ -46,7 +46,7 @@ mod tests {
     };
     use mps_core::rapier::voxel::{collider_builder_create_voxels, collider_voxel_edit};
     use mps_core::rapier::world::{world_create, world_destroy, world_step};
-    use rapier3d::prelude::soft_body_fork::SoftBodyId;
+    use mps_core::rapier::soft_data::SoftBodyId;
 
     fn make_world() -> *mut WorldHandle {
         world_create(Vec3 {
@@ -211,7 +211,7 @@ mod tests {
             &(*world)
                 .inner
                 .soft_bodies
-                .get(rapier3d::prelude::soft_body_fork::SoftBodyId(id))
+                .get(mps_core::rapier::soft_data::SoftBodyId(id))
         };
         let sb = sb.expect("soft body present");
         assert!(sb.particles.len() >= 8, "expected >=8 solid particles");
@@ -270,7 +270,7 @@ mod tests {
             &(*world)
                 .inner
                 .soft_bodies
-                .get(rapier3d::prelude::soft_body_fork::SoftBodyId(id))
+                .get(mps_core::rapier::soft_data::SoftBodyId(id))
         };
         let sb = sb.expect("soft body present");
         assert!(
@@ -5749,7 +5749,7 @@ mod tests {
             assert!(
                 matches!(
                     sb.solver,
-                    rapier3d::prelude::soft_body_fork::SoftSolver::Xpbd { .. }
+                    mps_core::rapier::soft_data::SoftSolver::Xpbd { .. }
                 ),
                 "grid uses XPBD solver"
             );

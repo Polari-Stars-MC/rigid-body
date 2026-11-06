@@ -20,13 +20,15 @@
 
 use std::collections::HashMap;
 
+use crate::rapier::soft_data::{
+    SoftBody as ForkSoftBody, SoftBodyId, SoftBodySet as ForkSoftBodySet, TearCriterion,
+};
+use rapier3d::prelude::SpringCoefficients;
+use rapier3d::math::Real;
 use rapier3d::prelude::{
     CohesionParams, ColliderSet, ForkTearCriterion, ImpulseJointSet, IslandManager,
     MultibodyJointSet, RigidBodySet, SoftBodyBuilder, SoftBodyHandle, SoftBodySet, ThermalParams,
     Vector, ViscoelasticParams, Wind,
-    soft_body_fork::{
-        SoftBody as ForkSoftBody, SoftBodyId, SoftBodySet as ForkSoftBodySet, TearCriterion,
-    },
 };
 
 /// 软体求解后端。
@@ -135,7 +137,6 @@ fn sync_extras(sim: &mut rapier3d::prelude::SoftBody, body: &ForkSoftBody) {
         accel: w.accel,
         drag: w.drag,
     }));
-    sim.set_internal_pressure(body.pressure);
     let _ = sim.set_fork_damping(body.damping.clamp(0.0, 0.999));
     let _ = sim.set_thermal_field(body.temperature.map(|t| ThermalParams {
         temp: t.temp,
@@ -244,6 +245,8 @@ pub(crate) fn prepare(
             continue;
         };
 
+
+
         // 拓扑/外部参数：每次全量同步（都是廉价的字段赋值与 wake）。
         sync_extras(sim, body);
 
@@ -257,6 +260,13 @@ pub(crate) fn prepare(
                 sim.set_particle_position(i, p.pos);
                 sim.set_particle_velocity(i, p.vel);
             }
+            // 绑定到刚体的粒子：官方有自己的 attachment（锚点按当前位姿算局部坐标），
+            // 重建时注册一次即可。
+            for i in 0..n {
+                if let Some(anchor) = body.particles[i].bound_body {
+                    sim.attach_particle(i, anchor, &*bodies);
+                }
+            }
         }
 
         // 每体重力：官方 g 已关，这里按 fork 的 `gravity` 逐粒子施加。
@@ -268,6 +278,35 @@ pub(crate) fn prepare(
             }
             let mass = 1.0 / inv_mass;
             sim.add_particle_force(i, gravity * mass, false);
+        }
+
+        // 逐边静止长度：把每个弹簧/距离约束自己的 activation（主动应变）折算成官方边的
+        // rest length（`rest·(1 − γ)`）。官方的边顺序与 `build` 里一致：先 `springs`
+        // 后 `distance_constraints`，所以按下标直接对上。
+        let base = body.springs.len();
+        for (k, s) in body.springs.iter().enumerate() {
+            sim.set_edge_rest_length(k, s.rest_length * (1.0 - s.activation.clamp(0.0, 1.0)));
+        }
+        for (k, c) in body.distance_constraints.iter().enumerate() {
+            sim.set_edge_rest_length(base + k, c.rest * (1.0 - c.activation.clamp(0.0, 1.0)));
+        }
+
+        // 逐边刚度：fork 用的是 `Spring.stiffness`（N/m）与 `DistanceConstraint.compliance`
+        // （XPBD α），官方边用的是 `SpringCoefficients`（固有频率 Hz + 阻尼比）。这里做单调
+        // 换算：`f = √(k/m)/2π`；α 则取 `f = 1/(2π√(α·m))`，α→0 视为刚性（高频）。
+        for (k, s) in body.springs.iter().enumerate() {
+            let m = edge_mass(body, s.a, s.b);
+            let f = (s.stiffness / m).sqrt() / (2.0 * std::f64::consts::PI);
+            sim.set_edge_softness(k, Some(softness(f)));
+        }
+        for (k, c) in body.distance_constraints.iter().enumerate() {
+            let m = edge_mass(body, c.a, c.b);
+            let f = if c.compliance <= 1.0e-9 {
+                RIGID_FREQUENCY
+            } else {
+                1.0 / (2.0 * std::f64::consts::PI * (c.compliance * m).sqrt())
+            };
+            sim.set_edge_softness(base + k, Some(softness(f)));
         }
 
         // 授权数据的 `sleeping` 直接映射到官方的 enabled 开关：官方有自己的睡眠
@@ -299,5 +338,25 @@ pub(crate) fn collect(
             body.particles[i].vel = sim.particle_velocity(i);
         }
         body.sleeping = sim.is_sleeping();
+    }
+}
+
+/// 逐边换算用的阻尼比：接近临界阻尼，避免引入额外振荡。
+const EDGE_DAMPING_RATIO: Real = 0.7;
+/// 视为“刚性”的固有频率（Hz）。
+const RIGID_FREQUENCY: Real = 120.0;
+
+/// 一条边的等效质量：两端粒子质量的平均值。
+fn edge_mass(body: &ForkSoftBody, a: usize, b: usize) -> Real {
+    let ma = body.particles.get(a).map(|p| p.mass()).unwrap_or(1.0);
+    let mb = body.particles.get(b).map(|p| p.mass()).unwrap_or(1.0);
+    ((ma + mb) * 0.5).max(1.0e-9)
+}
+
+/// 把固有频率折成官方边的软度系数（频率夹在合理区间内）。
+fn softness(frequency: Real) -> SpringCoefficients<Real> {
+    SpringCoefficients {
+        natural_frequency: frequency.clamp(0.1, RIGID_FREQUENCY),
+        damping_ratio: EDGE_DAMPING_RATIO,
     }
 }
