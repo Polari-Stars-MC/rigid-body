@@ -33,12 +33,12 @@ use crate::rapier::ffi::{
     Bool, RigidBodyHandleRaw, Sphere, Vec3, WorldHandle, pack_rigid_body_handle,
     unpack_rigid_body_handle, vec3_finite, vec3_from_rapier, vec3_to_rapier,
 };
-use rapier3d::dynamics::soft_body_fork::TearCriterion;
+use crate::rapier::soft_data::TearCriterion;
 use rapier3d::math::{Rotation, Vector};
-use rapier3d::prelude::soft_body_fork::{
+use crate::rapier::soft_data::{
     CohesionParams, PlasticityParams, SelfCollisionParams, ThermalParams, ViscoelasticParams, Wind,
 };
-use rapier3d::prelude::soft_body_fork::{SoftBody, SoftBodyId, SoftSolver};
+use crate::rapier::soft_data::{SoftBody, SoftBodyId, SoftSolver};
 use rapier3d::prelude::{
     ColliderBuilder, ColliderHandle, Group, InteractionGroups, RigidBodyBuilder, RigidBodyHandle,
     RigidBodyType,
@@ -453,7 +453,7 @@ pub extern "C" fn soft_body_voxel_build(
         }
         let grid = unsafe { std::slice::from_raw_parts(voxels, voxels_len as usize) };
 
-        let mut body = rapier3d::prelude::soft_body_fork::SoftBody::new(Vector::ZERO);
+        let mut body = crate::rapier::soft_data::SoftBody::new(Vector::ZERO);
         // Map (x,y,z) -> particle index; only solid cells get a particle.
         let mut index: Vec<i64> = vec![-1; n];
         let mut count = 0u32;
@@ -569,7 +569,7 @@ pub extern "C" fn soft_body_set_gravity(world: *mut WorldHandle, id: u32, gravit
             set_error(ERR_INVALID_ARGUMENT, "soft_body_set_gravity: bad gravity");
             return Bool::FALSE;
         }
-        let sid = rapier3d::prelude::soft_body_fork::SoftBodyId(id);
+        let sid = crate::rapier::soft_data::SoftBodyId(id);
         let Some(body) = world.inner.soft_bodies.get_mut(sid) else {
             set_error(ERR_NOT_FOUND, "soft_body_set_gravity: unknown id");
             return Bool::FALSE;
@@ -615,7 +615,7 @@ pub extern "C" fn soft_body_apply_wind(
             set_error(ERR_INVALID_ARGUMENT, "soft_body_apply_wind: bad accel/drag");
             return Bool::FALSE;
         }
-        let sid = rapier3d::prelude::soft_body_fork::SoftBodyId(id);
+        let sid = crate::rapier::soft_data::SoftBodyId(id);
         let Some(body) = world.inner.soft_bodies.get_mut(sid) else {
             set_error(ERR_NOT_FOUND, "soft_body_apply_wind: unknown id");
             return Bool::FALSE;
@@ -640,7 +640,7 @@ pub extern "C" fn soft_body_clear_wind(world: *mut WorldHandle, id: u32) -> Bool
             set_error(ERR_NULL_POINTER, "world is null");
             return Bool::FALSE;
         };
-        let sid = rapier3d::prelude::soft_body_fork::SoftBodyId(id);
+        let sid = crate::rapier::soft_data::SoftBodyId(id);
         let Some(body) = world.inner.soft_bodies.get_mut(sid) else {
             set_error(ERR_NOT_FOUND, "soft_body_clear_wind: unknown id");
             return Bool::FALSE;
@@ -672,7 +672,7 @@ pub extern "C" fn soft_body_clear_pressure(world: *mut WorldHandle, id: u32) -> 
             set_error(ERR_NULL_POINTER, "world is null");
             return Bool::FALSE;
         };
-        let sid = rapier3d::prelude::soft_body_fork::SoftBodyId(id);
+        let sid = crate::rapier::soft_data::SoftBodyId(id);
         let Some(sb) = world.inner.soft_bodies.get_mut(sid) else {
             set_error(ERR_NOT_FOUND, "soft_body_clear_pressure: unknown id");
             return Bool::FALSE;
@@ -697,7 +697,7 @@ pub extern "C" fn soft_body_clear_self_collision(world: *mut WorldHandle, id: u3
             set_error(ERR_NULL_POINTER, "world is null");
             return Bool::FALSE;
         };
-        let sid = rapier3d::prelude::soft_body_fork::SoftBodyId(id);
+        let sid = crate::rapier::soft_data::SoftBodyId(id);
         let Some(sb) = world.inner.soft_bodies.get_mut(sid) else {
             set_error(ERR_NOT_FOUND, "soft_body_clear_self_collision: unknown id");
             return Bool::FALSE;
@@ -722,7 +722,7 @@ pub extern "C" fn soft_body_clear_cross_collision(world: *mut WorldHandle, id: u
             set_error(ERR_NULL_POINTER, "world is null");
             return Bool::FALSE;
         };
-        let sid = rapier3d::prelude::soft_body_fork::SoftBodyId(id);
+        let sid = crate::rapier::soft_data::SoftBodyId(id);
         let Some(sb) = world.inner.soft_bodies.get_mut(sid) else {
             set_error(ERR_NOT_FOUND, "soft_body_clear_cross_collision: unknown id");
             return Bool::FALSE;
@@ -747,7 +747,7 @@ pub extern "C" fn soft_body_clear_volume_conservation(world: *mut WorldHandle, i
             set_error(ERR_NULL_POINTER, "world is null");
             return Bool::FALSE;
         };
-        let sid = rapier3d::prelude::soft_body_fork::SoftBodyId(id);
+        let sid = crate::rapier::soft_data::SoftBodyId(id);
         let Some(sb) = world.inner.soft_bodies.get_mut(sid) else {
             set_error(
                 ERR_NOT_FOUND,
@@ -791,7 +791,7 @@ pub extern "C" fn soft_body_set_corotated(
             );
             return Bool::FALSE;
         }
-        let sid = rapier3d::prelude::soft_body_fork::SoftBodyId(id);
+        let sid = crate::rapier::soft_data::SoftBodyId(id);
         let Some(sb) = world.inner.soft_bodies.get_mut(sid) else {
             set_error(ERR_NOT_FOUND, "soft_body_set_corotated: unknown id");
             return Bool::FALSE;
@@ -825,7 +825,7 @@ pub extern "C" fn soft_body_clear_corotated(world: *mut WorldHandle, id: u32) ->
             set_error(ERR_NULL_POINTER, "world is null");
             return Bool::FALSE;
         };
-        let sid = rapier3d::prelude::soft_body_fork::SoftBodyId(id);
+        let sid = crate::rapier::soft_data::SoftBodyId(id);
         let Some(sb) = world.inner.soft_bodies.get_mut(sid) else {
             set_error(ERR_NOT_FOUND, "soft_body_clear_corotated: unknown id");
             return Bool::FALSE;
@@ -859,7 +859,7 @@ pub extern "C" fn soft_body_set_neo_hookean(
             set_error(ERR_NULL_POINTER, "world is null");
             return Bool::FALSE;
         };
-        let sid = rapier3d::prelude::soft_body_fork::SoftBodyId(id);
+        let sid = crate::rapier::soft_data::SoftBodyId(id);
         let Some(sb) = world.inner.soft_bodies.get_mut(sid) else {
             set_error(ERR_NOT_FOUND, "soft_body_set_neo_hookean: unknown id");
             return Bool::FALSE;
@@ -893,7 +893,7 @@ pub extern "C" fn soft_body_clear_neo_hookean(world: *mut WorldHandle, id: u32) 
             set_error(ERR_NULL_POINTER, "world is null");
             return Bool::FALSE;
         };
-        let sid = rapier3d::prelude::soft_body_fork::SoftBodyId(id);
+        let sid = crate::rapier::soft_data::SoftBodyId(id);
         let Some(sb) = world.inner.soft_bodies.get_mut(sid) else {
             set_error(ERR_NOT_FOUND, "soft_body_clear_neo_hookean: unknown id");
             return Bool::FALSE;
@@ -921,7 +921,7 @@ pub extern "C" fn soft_body_set_activation(world: *mut WorldHandle, id: u32, gam
             set_error(ERR_NULL_POINTER, "world is null");
             return Bool::FALSE;
         };
-        let sid = rapier3d::prelude::soft_body_fork::SoftBodyId(id);
+        let sid = crate::rapier::soft_data::SoftBodyId(id);
         let Some(sb) = world.inner.soft_bodies.get_mut(sid) else {
             set_error(ERR_NOT_FOUND, "soft_body_set_activation: unknown id");
             return Bool::FALSE;
@@ -957,7 +957,7 @@ pub extern "C" fn soft_body_set_spring_activation(
             set_error(ERR_NULL_POINTER, "world is null");
             return Bool::FALSE;
         };
-        let sid = rapier3d::prelude::soft_body_fork::SoftBodyId(id);
+        let sid = crate::rapier::soft_data::SoftBodyId(id);
         let Some(sb) = world.inner.soft_bodies.get_mut(sid) else {
             set_error(ERR_NOT_FOUND, "soft_body_set_spring_activation: unknown id");
             return Bool::FALSE;
@@ -993,7 +993,7 @@ pub extern "C" fn soft_body_set_distance_constraint_activation(
             set_error(ERR_NULL_POINTER, "world is null");
             return Bool::FALSE;
         };
-        let sid = rapier3d::prelude::soft_body_fork::SoftBodyId(id);
+        let sid = crate::rapier::soft_data::SoftBodyId(id);
         let Some(sb) = world.inner.soft_bodies.get_mut(sid) else {
             set_error(
                 ERR_NOT_FOUND,
@@ -1035,7 +1035,7 @@ pub extern "C" fn soft_body_set_fibre_direction(
             set_error(ERR_NULL_POINTER, "world is null");
             return Bool::FALSE;
         };
-        let sid = rapier3d::prelude::soft_body_fork::SoftBodyId(id);
+        let sid = crate::rapier::soft_data::SoftBodyId(id);
         let Some(sb) = world.inner.soft_bodies.get_mut(sid) else {
             set_error(ERR_NOT_FOUND, "soft_body_set_fibre_direction: unknown id");
             return Bool::FALSE;
@@ -1078,7 +1078,7 @@ pub extern "C" fn soft_body_set_spring_fibre_direction(
             set_error(ERR_NULL_POINTER, "world is null");
             return Bool::FALSE;
         };
-        let sid = rapier3d::prelude::soft_body_fork::SoftBodyId(id);
+        let sid = crate::rapier::soft_data::SoftBodyId(id);
         let Some(sb) = world.inner.soft_bodies.get_mut(sid) else {
             set_error(
                 ERR_NOT_FOUND,
@@ -1118,7 +1118,7 @@ pub extern "C" fn soft_body_clear_cohesion(world: *mut WorldHandle, id: u32) -> 
             set_error(ERR_NULL_POINTER, "world is null");
             return Bool::FALSE;
         };
-        let sid = rapier3d::prelude::soft_body_fork::SoftBodyId(id);
+        let sid = crate::rapier::soft_data::SoftBodyId(id);
         let Some(sb) = world.inner.soft_bodies.get_mut(sid) else {
             set_error(ERR_NOT_FOUND, "soft_body_clear_cohesion: unknown id");
             return Bool::FALSE;
@@ -1177,7 +1177,7 @@ pub extern "C" fn soft_body_sleep(world: *mut WorldHandle, id: u32) -> Bool {
             set_error(ERR_NULL_POINTER, "world is null");
             return Bool::FALSE;
         };
-        let sid = rapier3d::prelude::soft_body_fork::SoftBodyId(id);
+        let sid = crate::rapier::soft_data::SoftBodyId(id);
         if !world.inner.soft_bodies.sleep(sid) {
             set_error(ERR_NOT_FOUND, "soft_body_sleep: unknown id");
             return Bool::FALSE;
@@ -1202,7 +1202,7 @@ pub extern "C" fn soft_body_wake(world: *mut WorldHandle, id: u32) -> Bool {
             set_error(ERR_NULL_POINTER, "world is null");
             return Bool::FALSE;
         };
-        let sid = rapier3d::prelude::soft_body_fork::SoftBodyId(id);
+        let sid = crate::rapier::soft_data::SoftBodyId(id);
         if !world.inner.soft_bodies.wake(sid) {
             set_error(ERR_NOT_FOUND, "soft_body_wake: unknown id");
             return Bool::FALSE;
@@ -1227,7 +1227,7 @@ pub extern "C" fn soft_body_is_sleeping(world: *const WorldHandle, id: u32) -> B
             set_error(ERR_NULL_POINTER, "world is null");
             return Bool::FALSE;
         };
-        let sid = rapier3d::prelude::soft_body_fork::SoftBodyId(id);
+        let sid = crate::rapier::soft_data::SoftBodyId(id);
         if world.inner.soft_bodies.get(sid).is_none() {
             set_error(ERR_NOT_FOUND, "soft_body_is_sleeping: unknown id");
             return Bool::FALSE;
@@ -1252,7 +1252,7 @@ pub extern "C" fn soft_body_kinetic_energy(world: *const WorldHandle, id: u32) -
             set_error(ERR_NULL_POINTER, "world is null");
             return 0.0;
         };
-        let sid = rapier3d::prelude::soft_body_fork::SoftBodyId(id);
+        let sid = crate::rapier::soft_data::SoftBodyId(id);
         let Some(body) = world.inner.soft_bodies.get(sid) else {
             set_error(ERR_NOT_FOUND, "soft_body_kinetic_energy: unknown id");
             return 0.0;
@@ -1279,7 +1279,7 @@ pub extern "C" fn soft_body_total_volume(world: *const WorldHandle, id: u32) -> 
             set_error(ERR_NULL_POINTER, "world is null");
             return 0.0;
         };
-        let sid = rapier3d::prelude::soft_body_fork::SoftBodyId(id);
+        let sid = crate::rapier::soft_data::SoftBodyId(id);
         let Some(body) = world.inner.soft_bodies.get(sid) else {
             set_error(ERR_NOT_FOUND, "soft_body_total_volume: unknown id");
             return 0.0;
@@ -1322,7 +1322,7 @@ pub extern "C" fn soft_body_attach_particle(
             );
             return Bool::FALSE;
         }
-        let sid = rapier3d::prelude::soft_body_fork::SoftBodyId(id);
+        let sid = crate::rapier::soft_data::SoftBodyId(id);
         let Some(sb) = world.inner.soft_bodies.get_mut(sid) else {
             set_error(ERR_NOT_FOUND, "soft_body_attach_particle: unknown id");
             return Bool::FALSE;
@@ -1370,7 +1370,7 @@ pub extern "C" fn soft_body_detach_particle(
             set_error(ERR_NULL_POINTER, "world is null");
             return Bool::FALSE;
         };
-        let sid = rapier3d::prelude::soft_body_fork::SoftBodyId(id);
+        let sid = crate::rapier::soft_data::SoftBodyId(id);
         let Some(sb) = world.inner.soft_bodies.get_mut(sid) else {
             set_error(ERR_NOT_FOUND, "soft_body_detach_particle: unknown id");
             return Bool::FALSE;
@@ -1426,7 +1426,7 @@ pub extern "C" fn soft_body_set_tear_strain(
             );
             return Bool::FALSE;
         }
-        let sid = rapier3d::prelude::soft_body_fork::SoftBodyId(id);
+        let sid = crate::rapier::soft_data::SoftBodyId(id);
         let Some(sb) = world.inner.soft_bodies.get_mut(sid) else {
             set_error(ERR_NOT_FOUND, "soft_body_set_tear_strain: unknown id");
             return Bool::FALSE;
@@ -1470,7 +1470,7 @@ pub extern "C" fn soft_body_set_tear_stress(
             );
             return Bool::FALSE;
         }
-        let sid = rapier3d::prelude::soft_body_fork::SoftBodyId(id);
+        let sid = crate::rapier::soft_data::SoftBodyId(id);
         let Some(sb) = world.inner.soft_bodies.get_mut(sid) else {
             set_error(ERR_NOT_FOUND, "soft_body_set_tear_stress: unknown id");
             return Bool::FALSE;
@@ -1513,7 +1513,7 @@ pub extern "C" fn soft_body_set_tear_energy(
             );
             return Bool::FALSE;
         }
-        let sid = rapier3d::prelude::soft_body_fork::SoftBodyId(id);
+        let sid = crate::rapier::soft_data::SoftBodyId(id);
         let Some(sb) = world.inner.soft_bodies.get_mut(sid) else {
             set_error(ERR_NOT_FOUND, "soft_body_set_tear_energy: unknown id");
             return Bool::FALSE;
@@ -1559,7 +1559,7 @@ pub extern "C" fn soft_body_set_anisotropy(
             );
             return Bool::FALSE;
         }
-        let sid = rapier3d::prelude::soft_body_fork::SoftBodyId(id);
+        let sid = crate::rapier::soft_data::SoftBodyId(id);
         let Some(sb) = world.inner.soft_bodies.get_mut(sid) else {
             set_error(ERR_NOT_FOUND, "soft_body_set_anisotropy: unknown id");
             return Bool::FALSE;
@@ -1602,14 +1602,14 @@ pub extern "C" fn soft_body_set_viscoelastic(
             );
             return Bool::FALSE;
         }
-        let sid = rapier3d::prelude::soft_body_fork::SoftBodyId(id);
+        let sid = crate::rapier::soft_data::SoftBodyId(id);
         let Some(sb) = world.inner.soft_bodies.get_mut(sid) else {
             set_error(ERR_NOT_FOUND, "soft_body_set_viscoelastic: unknown id");
             return Bool::FALSE;
         };
         let ok = if enabled != 0 && rate_coefficient >= 0.0 {
             sb.set_viscoelastic(Some(
-                rapier3d::prelude::soft_body_fork::ViscoelasticParams { rate_coefficient },
+                crate::rapier::soft_data::ViscoelasticParams { rate_coefficient },
             ))
         } else {
             sb.set_viscoelastic(None)
@@ -1660,13 +1660,13 @@ pub extern "C" fn soft_body_set_thermal(
             );
             return Bool::FALSE;
         }
-        let sid = rapier3d::prelude::soft_body_fork::SoftBodyId(id);
+        let sid = crate::rapier::soft_data::SoftBodyId(id);
         let Some(sb) = world.inner.soft_bodies.get_mut(sid) else {
             set_error(ERR_NOT_FOUND, "soft_body_set_thermal: unknown id");
             return Bool::FALSE;
         };
         let ok = if enabled != 0 {
-            sb.set_thermal(Some(rapier3d::prelude::soft_body_fork::ThermalParams {
+            sb.set_thermal(Some(crate::rapier::soft_data::ThermalParams {
                 temp,
                 ambient,
                 expansion,
@@ -1722,13 +1722,13 @@ pub extern "C" fn soft_body_set_plasticity(
             );
             return Bool::FALSE;
         }
-        let sid = rapier3d::prelude::soft_body_fork::SoftBodyId(id);
+        let sid = crate::rapier::soft_data::SoftBodyId(id);
         let Some(sb) = world.inner.soft_bodies.get_mut(sid) else {
             set_error(ERR_NOT_FOUND, "soft_body_set_plasticity: unknown id");
             return Bool::FALSE;
         };
         let params = if enabled != 0 && yield_strain > 0.0 {
-            Some(rapier3d::dynamics::soft_body_fork::PlasticityParams {
+            Some(crate::rapier::soft_data::PlasticityParams {
                 yield_strain,
                 creep,
             })
@@ -1764,7 +1764,7 @@ pub extern "C" fn soft_body_apply_plasticity(world: *mut WorldHandle, id: u32) -
             set_error(ERR_NULL_POINTER, "world is null");
             return Bool::FALSE;
         };
-        let sid = rapier3d::prelude::soft_body_fork::SoftBodyId(id);
+        let sid = crate::rapier::soft_data::SoftBodyId(id);
         let Some(sb) = world.inner.soft_bodies.get_mut(sid) else {
             set_error(ERR_NOT_FOUND, "soft_body_apply_plasticity: unknown id");
             return Bool::FALSE;
@@ -1793,7 +1793,7 @@ pub extern "C" fn soft_body_tear_now(world: *mut WorldHandle, id: u32) -> Bool {
             set_error(ERR_NULL_POINTER, "world is null");
             return Bool::FALSE;
         };
-        let sid = rapier3d::prelude::soft_body_fork::SoftBodyId(id);
+        let sid = crate::rapier::soft_data::SoftBodyId(id);
         let Some(sb) = world.inner.soft_bodies.get_mut(sid) else {
             set_error(ERR_NOT_FOUND, "soft_body_tear_now: unknown id");
             return Bool::FALSE;
@@ -1870,7 +1870,7 @@ pub extern "C" fn soft_body_set_pressure(world: *mut WorldHandle, id: u32, press
             );
             return Bool::FALSE;
         }
-        let sid = rapier3d::prelude::soft_body_fork::SoftBodyId(id);
+        let sid = crate::rapier::soft_data::SoftBodyId(id);
         let Some(sb) = world.inner.soft_bodies.get_mut(sid) else {
             set_error(ERR_NOT_FOUND, "soft_body_set_pressure: unknown id");
             return Bool::FALSE;
@@ -1913,7 +1913,7 @@ pub extern "C" fn soft_body_set_self_collision(
             );
             return Bool::FALSE;
         }
-        let sid = rapier3d::prelude::soft_body_fork::SoftBodyId(id);
+        let sid = crate::rapier::soft_data::SoftBodyId(id);
         let Some(sb) = world.inner.soft_bodies.get_mut(sid) else {
             set_error(ERR_NOT_FOUND, "soft_body_set_self_collision: unknown id");
             return Bool::FALSE;
@@ -1957,7 +1957,7 @@ pub extern "C" fn soft_body_set_spring_stiffness(
             set_error(ERR_NULL_POINTER, "world is null");
             return Bool::FALSE;
         };
-        let sid = rapier3d::prelude::soft_body_fork::SoftBodyId(id);
+        let sid = crate::rapier::soft_data::SoftBodyId(id);
         let Some(sb) = world.inner.soft_bodies.get_mut(sid) else {
             set_error(ERR_NOT_FOUND, "soft_body_set_spring_stiffness: unknown id");
             return Bool::FALSE;
@@ -1998,7 +1998,7 @@ pub extern "C" fn soft_body_set_distance_constraint_compliance(
             set_error(ERR_NULL_POINTER, "world is null");
             return Bool::FALSE;
         };
-        let sid = rapier3d::prelude::soft_body_fork::SoftBodyId(id);
+        let sid = crate::rapier::soft_data::SoftBodyId(id);
         let Some(sb) = world.inner.soft_bodies.get_mut(sid) else {
             set_error(
                 ERR_NOT_FOUND,
@@ -2045,7 +2045,7 @@ pub extern "C" fn soft_body_set_distance_constraint_compression(
             set_error(ERR_NULL_POINTER, "world is null");
             return Bool::FALSE;
         };
-        let sid = rapier3d::prelude::soft_body_fork::SoftBodyId(id);
+        let sid = crate::rapier::soft_data::SoftBodyId(id);
         let Some(sb) = world.inner.soft_bodies.get_mut(sid) else {
             set_error(
                 ERR_NOT_FOUND,
@@ -2098,7 +2098,7 @@ pub extern "C" fn soft_body_set_cross_collision(
             );
             return Bool::FALSE;
         }
-        let sid = rapier3d::prelude::soft_body_fork::SoftBodyId(id);
+        let sid = crate::rapier::soft_data::SoftBodyId(id);
         let Some(sb) = world.inner.soft_bodies.get_mut(sid) else {
             set_error(ERR_NOT_FOUND, "soft_body_set_cross_collision: unknown id");
             return Bool::FALSE;
@@ -2132,7 +2132,7 @@ pub extern "C" fn soft_body_set_self_collision_friction(
             set_error(ERR_NULL_POINTER, "world is null");
             return Bool::FALSE;
         };
-        let sid = rapier3d::prelude::soft_body_fork::SoftBodyId(id);
+        let sid = crate::rapier::soft_data::SoftBodyId(id);
         let Some(sb) = world.inner.soft_bodies.get_mut(sid) else {
             set_error(
                 ERR_NOT_FOUND,
@@ -2169,7 +2169,7 @@ pub extern "C" fn soft_body_set_cross_collision_friction(
             set_error(ERR_NULL_POINTER, "world is null");
             return Bool::FALSE;
         };
-        let sid = rapier3d::prelude::soft_body_fork::SoftBodyId(id);
+        let sid = crate::rapier::soft_data::SoftBodyId(id);
         let Some(sb) = world.inner.soft_bodies.get_mut(sid) else {
             set_error(
                 ERR_NOT_FOUND,
@@ -2221,7 +2221,7 @@ pub extern "C" fn soft_body_set_volume_conservation(
             );
             return Bool::FALSE;
         }
-        let sid = rapier3d::prelude::soft_body_fork::SoftBodyId(id);
+        let sid = crate::rapier::soft_data::SoftBodyId(id);
         let Some(sb) = world.inner.soft_bodies.get_mut(sid) else {
             set_error(
                 ERR_NOT_FOUND,
@@ -2267,7 +2267,7 @@ pub extern "C" fn soft_body_set_damping(world: *mut WorldHandle, id: u32, d: f64
             );
             return Bool::FALSE;
         }
-        let sid = rapier3d::prelude::soft_body_fork::SoftBodyId(id);
+        let sid = crate::rapier::soft_data::SoftBodyId(id);
         let Some(sb) = world.inner.soft_bodies.get_mut(sid) else {
             set_error(ERR_NOT_FOUND, "soft_body_set_damping: unknown id");
             return Bool::FALSE;
@@ -2312,7 +2312,7 @@ pub extern "C" fn soft_body_set_cohesion(
             set_error(ERR_NULL_POINTER, "world is null");
             return Bool::FALSE;
         };
-        let sid = rapier3d::prelude::soft_body_fork::SoftBodyId(id);
+        let sid = crate::rapier::soft_data::SoftBodyId(id);
         let Some(sb) = world.inner.soft_bodies.get_mut(sid) else {
             set_error(ERR_NOT_FOUND, "soft_body_set_cohesion: unknown id");
             return Bool::FALSE;
@@ -4085,9 +4085,9 @@ fn sb_deserialize_body(c: &mut SbCursor) -> Option<SoftBody> {
 /// Local aliases so the deserializer reads the exact field types without pulling
 /// the fork's private struct names into scope. `Spring`/`DistanceConstraint` are
 /// `Clone + Copy` with public fields, so we construct them field-by-field.
-use rapier3d::dynamics::soft_body_fork::DistanceConstraint as SoftDistance;
-use rapier3d::dynamics::soft_body_fork::SoftParticle;
-use rapier3d::dynamics::soft_body_fork::Spring as SoftSpring;
+use crate::rapier::soft_data::DistanceConstraint as SoftDistance;
+use crate::rapier::soft_data::SoftParticle;
+use crate::rapier::soft_data::Spring as SoftSpring;
 
 /// Return the exact serialized size (in bytes) of a soft body's state, or
 /// `u32::MAX` if `world` is null or `id` is unknown. Allocate a buffer of this
@@ -4519,7 +4519,8 @@ pub extern "C" fn soft_body_step_mass_spring(world: *mut WorldHandle, id: u32, d
             set_error(ERR_NOT_FOUND, "soft_body_step_mass_spring: unknown id");
             return ERR_NOT_FOUND;
         };
-        body.step_mass_spring(dt);
+        // 求解已统一交给官方软体（随 world_step 的管线一起跑），这里只校验 id。
+        let _ = (body, dt);
         clear_error();
         ERR_OK
     })
@@ -4537,7 +4538,8 @@ pub extern "C" fn soft_body_step_implicit(world: *mut WorldHandle, id: u32, dt: 
             set_error(ERR_NOT_FOUND, "soft_body_step_implicit: unknown id");
             return ERR_NOT_FOUND;
         };
-        body.step_implicit_euler(dt);
+        // 求解已统一交给官方软体（隐式/显式积分不再分开），这里只校验 id。
+        let _ = (body, dt);
         clear_error();
         ERR_OK
     })

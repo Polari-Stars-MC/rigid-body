@@ -63,6 +63,7 @@ pub use mps_formula::rotor;
 pub mod servo_body;
 pub mod shared_arena;
 pub mod soft_body;
+pub mod soft_data;
 pub mod soft_upstream;
 pub use mps_formula::softbody;
 pub mod spaceflight;

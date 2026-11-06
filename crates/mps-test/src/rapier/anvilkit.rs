@@ -84,7 +84,7 @@ mod tests {
             (*world)
                 .inner
                 .soft_bodies
-                .get(rapier3d::prelude::soft_body_fork::SoftBodyId(sb_id))
+                .get(mps_core::rapier::soft_data::SoftBodyId(sb_id))
         };
         let sb = sb.expect("soft body present in world");
         // Phase 5c: the bound soft body is a bounding-box tetra mesh — eight corner

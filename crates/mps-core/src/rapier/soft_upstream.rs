@@ -20,13 +20,13 @@
 
 use std::collections::HashMap;
 
+use crate::rapier::soft_data::{
+    SoftBody as ForkSoftBody, SoftBodyId, SoftBodySet as ForkSoftBodySet, TearCriterion,
+};
 use rapier3d::prelude::{
     CohesionParams, ColliderSet, ForkTearCriterion, ImpulseJointSet, IslandManager,
     MultibodyJointSet, RigidBodySet, SoftBodyBuilder, SoftBodyHandle, SoftBodySet, ThermalParams,
     Vector, ViscoelasticParams, Wind,
-    soft_body_fork::{
-        SoftBody as ForkSoftBody, SoftBodyId, SoftBodySet as ForkSoftBodySet, TearCriterion,
-    },
 };
 
 /// 软体求解后端。
@@ -135,7 +135,6 @@ fn sync_extras(sim: &mut rapier3d::prelude::SoftBody, body: &ForkSoftBody) {
         accel: w.accel,
         drag: w.drag,
     }));
-    sim.set_internal_pressure(body.pressure);
     let _ = sim.set_fork_damping(body.damping.clamp(0.0, 0.999));
     let _ = sim.set_thermal_field(body.temperature.map(|t| ThermalParams {
         temp: t.temp,
@@ -244,6 +243,8 @@ pub(crate) fn prepare(
             continue;
         };
 
+
+
         // 拓扑/外部参数：每次全量同步（都是廉价的字段赋值与 wake）。
         sync_extras(sim, body);
 
@@ -256,6 +257,13 @@ pub(crate) fn prepare(
                 let p = &body.particles[i];
                 sim.set_particle_position(i, p.pos);
                 sim.set_particle_velocity(i, p.vel);
+            }
+            // 绑定到刚体的粒子：官方有自己的 attachment（锚点按当前位姿算局部坐标），
+            // 重建时注册一次即可。
+            for i in 0..n {
+                if let Some(anchor) = body.particles[i].bound_body {
+                    sim.attach_particle(i, anchor, &*bodies);
+                }
             }
         }
 

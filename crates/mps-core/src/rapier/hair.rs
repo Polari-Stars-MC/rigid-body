@@ -62,7 +62,7 @@ pub(crate) struct HairSystem {
     /// Hair strand descriptors (used for recreation).
     pub strands: Vec<HairStrandDesc>,
     /// Soft body IDs for each strand (one SoftBody per strand).
-    pub strand_soft_bodies: Vec<rapier3d::prelude::soft_body_fork::SoftBodyId>,
+    pub strand_soft_bodies: Vec<crate::rapier::soft_data::SoftBodyId>,
     /// Wind force applied to all strands.
     pub wind: Vec3,
     /// Gravity scale (1.0 = normal gravity, 0.0 = no gravity).
@@ -202,7 +202,7 @@ pub extern "C" fn hair_system_build(world: *mut WorldHandle, id: u32) -> Bool {
             let dir = vec3_to_rapier(strand_desc.direction).normalize_or_zero();
             let root_world = attached_pose * vec3_to_rapier(strand_desc.root_local);
 
-            let mut soft_body = rapier3d::prelude::soft_body_fork::SoftBody::new(Vector::ZERO);
+            let mut soft_body = crate::rapier::soft_data::SoftBody::new(Vector::ZERO);
             for i in 0..=strand_desc.segment_count {
                 let offset = dir * (i as f64 * segment_length);
                 let idx = soft_body.add_particle(root_world + offset);

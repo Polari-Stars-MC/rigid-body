@@ -146,6 +146,13 @@
 #define FORCE_SUMMARY_SIZE 64
 
 /**
+ * `ForceKind::Custom` discriminator for soft-body internal spring/damping forces.
+ * Routed through `force_containers` so they share the same `Persistent` lifecycle
+ * and `compute_body_effective_forces` summation as gravity/thrust (Phase 2).
+ */
+#define SOFT_SPRING_CUSTOM_ID 20546
+
+/**
  * Aggregation policy applied to per-line accelerations after the
  * cross-consistency check.
  */

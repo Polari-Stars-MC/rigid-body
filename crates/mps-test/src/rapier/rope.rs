@@ -84,7 +84,7 @@ mod tests {
             (*world)
                 .inner
                 .soft_bodies
-                .get(rapier3d::prelude::soft_body_fork::SoftBodyId(id))
+                .get(mps_core::rapier::soft_data::SoftBodyId(id))
                 .expect("rope present")
         };
         assert_eq!(sb.distance_constraints.len(), 8);
@@ -95,7 +95,7 @@ mod tests {
         }
         assert!(matches!(
             sb.solver,
-            rapier3d::prelude::soft_body_fork::SoftSolver::Xpbd { .. }
+            mps_core::rapier::soft_data::SoftSolver::Xpbd { .. }
         ));
         assert_eq!(sb.particles[0].inv_mass, 0.0, "start pinned");
         assert_eq!(sb.particles[8].inv_mass, 0.0, "end pinned");
@@ -115,7 +115,7 @@ mod tests {
             (*world)
                 .inner
                 .soft_bodies
-                .get(rapier3d::prelude::soft_body_fork::SoftBodyId(id))
+                .get(mps_core::rapier::soft_data::SoftBodyId(id))
                 .expect("rope present")
         };
         for c in &sb.distance_constraints {
@@ -136,7 +136,7 @@ mod tests {
             (*world)
                 .inner
                 .soft_bodies
-                .get(rapier3d::prelude::soft_body_fork::SoftBodyId(id))
+                .get(mps_core::rapier::soft_data::SoftBodyId(id))
                 .expect("rope present")
         };
         let total: f64 = sb.distance_constraints.iter().map(|c| c.rest).sum();
@@ -197,7 +197,7 @@ mod tests {
             (*world)
                 .inner
                 .soft_bodies
-                .get(rapier3d::prelude::soft_body_fork::SoftBodyId(id))
+                .get(mps_core::rapier::soft_data::SoftBodyId(id))
                 .expect("rope present")
                 .distance_constraints
                 .iter()
