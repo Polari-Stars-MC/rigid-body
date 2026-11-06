@@ -322,6 +322,14 @@ pub struct PhysicsWorld {
     /// `ColliderSet::remove` still take a `SoftBodySet`, so this one stays empty
     /// and exists only to satisfy those signatures.
     pub(crate) upstream_soft_bodies: rapier3d::dynamics::SoftBodySet,
+    /// Soft-body solver backend: the fork's own integrator (`Fork`, default) or
+    /// rapier v0.36's official `SoftBody` (`Upstream`), which integrates soft
+    /// bodies inside the pipeline with their deformable colliders. Selected with
+    /// `soft_body_set_backend`; the C ABI is identical either way.
+    pub(crate) soft_backend: crate::rapier::soft_upstream::SoftBodyBackend,
+    /// Upstream-backend mirrors, keyed by the `SoftBodyId` slot index.
+    pub(crate) soft_upstream_slots:
+        std::collections::HashMap<u32, crate::rapier::soft_upstream::UpstreamSlot>,
     /// All SPH fluid bodies (particle clouds). Stepped independently after the
     /// rigid-body pipeline, mirroring `soft_bodies`. See
     /// `.hermes/plans/2026-08-30_fluid-sph-roadmap.md`.
@@ -485,6 +493,8 @@ impl PhysicsWorld {
             ccd_solver: CCDSolver::new(),
             soft_bodies: SoftBodySet::new(),
             upstream_soft_bodies: rapier3d::dynamics::SoftBodySet::new(),
+            soft_backend: crate::rapier::soft_upstream::SoftBodyBackend::Fork,
+            soft_upstream_slots: std::collections::HashMap::new(),
             fluids: Vec::new(),
             granular_bodies: Vec::new(),
             granular_proxies: std::collections::HashMap::new(),
@@ -884,68 +894,83 @@ pub extern "C" fn world_step(world: *mut WorldHandle, delta_seconds: f64) {
                 rb.add_force(p.force, false);
             }
         }
-        world
-            .inner
-            .soft_bodies
-            .write_spring_forces(&mut world.inner.bodies);
-        world
-            .inner
-            .soft_bodies
-            .step(world.inner.integration_parameters.dt);
-        // Phase 3 (skinned soft body): drive bound particles from live bone
-        // transforms via linear-blend skinning, after the soft-body integration.
-        for (sb_id, skin) in &world.inner.skin_bindings {
-            // Snapshot live bone transforms.
-            let mut bone_trans: Vec<Vector> = Vec::with_capacity(skin.bones.len());
-            let mut bone_rot: Vec<Rotation> = Vec::with_capacity(skin.bones.len());
-            let mut ok = true;
-            for h in &skin.bones {
-                match world.inner.bodies.get(*h) {
-                    Some(rb) => {
-                        bone_trans.push(rb.translation());
-                        bone_rot.push(*rb.rotation());
-                    }
-                    None => {
-                        ok = false;
-                        break;
-                    }
-                }
-            }
-            if !ok {
-                continue; // a bone handle disappeared; skip this body this step
-            }
-            if let Some(sb) = world.inner.soft_bodies.get_mut(SoftBodyId(*sb_id)) {
-                for (pi, vw) in &skin.vertices {
-                    let mut acc = Vector::ZERO;
-                    for k in 0..4 {
-                        if vw.weight[k] > 0.0 {
-                            let bi = vw.bone_idx[k] as usize;
-                            if bi < bone_trans.len() {
-                                let skinned = bone_rot[bi] * vw.local[k] + bone_trans[bi];
-                                acc += vw.weight[k] * skinned;
-                            }
+        if world.inner.soft_backend == crate::rapier::soft_upstream::SoftBodyBackend::Upstream {
+            // 官方后端：把授权数据镜像成 rapier `SoftBody`，位姿/外力推进官方体；
+            // 真正的求解在下面的 `pipeline.step` 里完成，步进后 `collect` 写回。
+            crate::rapier::soft_upstream::prepare(
+                &mut world.inner.soft_bodies,
+                &mut world.inner.upstream_soft_bodies,
+                &mut world.inner.soft_upstream_slots,
+                &mut world.inner.islands,
+                &mut world.inner.bodies,
+                &mut world.inner.colliders,
+                &mut world.inner.impulse_joints,
+                &mut world.inner.multibody_joints,
+            );
+        } else {
+            world
+                .inner
+                .soft_bodies
+                .write_spring_forces(&mut world.inner.bodies);
+            world
+                .inner
+                .soft_bodies
+                .step(world.inner.integration_parameters.dt);
+            // Phase 3 (skinned soft body): drive bound particles from live bone
+            // transforms via linear-blend skinning, after the soft-body integration.
+            for (sb_id, skin) in &world.inner.skin_bindings {
+                // Snapshot live bone transforms.
+                let mut bone_trans: Vec<Vector> = Vec::with_capacity(skin.bones.len());
+                let mut bone_rot: Vec<Rotation> = Vec::with_capacity(skin.bones.len());
+                let mut ok = true;
+                for h in &skin.bones {
+                    match world.inner.bodies.get(*h) {
+                        Some(rb) => {
+                            bone_trans.push(rb.translation());
+                            bone_rot.push(*rb.rotation());
+                        }
+                        None => {
+                            ok = false;
+                            break;
                         }
                     }
-                    if let Some(p) = sb.particles.get_mut(*pi as usize) {
-                        p.pos = acc;
+                }
+                if !ok {
+                    continue; // a bone handle disappeared; skip this body this step
+                }
+                if let Some(sb) = world.inner.soft_bodies.get_mut(SoftBodyId(*sb_id)) {
+                    for (pi, vw) in &skin.vertices {
+                        let mut acc = Vector::ZERO;
+                        for k in 0..4 {
+                            if vw.weight[k] > 0.0 {
+                                let bi = vw.bone_idx[k] as usize;
+                                if bi < bone_trans.len() {
+                                    let skinned = bone_rot[bi] * vw.local[k] + bone_trans[bi];
+                                    acc += vw.weight[k] * skinned;
+                                }
+                            }
+                        }
+                        if let Some(p) = sb.particles.get_mut(*pi as usize) {
+                            p.pos = acc;
+                        }
                     }
                 }
             }
+            // Phase 14: world-level soft-soft (cross-body) collision. Runs after every
+            // body has stepped; only bodies with `cross_collision` set collide with each
+            // other (see `solve_cross_body_collisions`).
+            rapier3d::dynamics::soft_body_fork::solve_cross_body_collisions(
+                &mut world.inner.soft_bodies,
+                world.inner.integration_parameters.dt,
+            );
+            // Phase 17: world-level cohesion (adhesion / breakable glue) between bodies
+            // with `cohesion` set (see `solve_cohesion`). Runs after cross-collision so the
+            // two composes: bodies first repel on overlap, then glue together at contact.
+            rapier3d::dynamics::soft_body_fork::solve_cohesion(
+                &mut world.inner.soft_bodies,
+                world.inner.integration_parameters.dt,
+            );
         }
-        // Phase 14: world-level soft-soft (cross-body) collision. Runs after every
-        // body has stepped; only bodies with `cross_collision` set collide with each
-        // other (see `solve_cross_body_collisions`).
-        rapier3d::dynamics::soft_body_fork::solve_cross_body_collisions(
-            &mut world.inner.soft_bodies,
-            world.inner.integration_parameters.dt,
-        );
-        // Phase 17: world-level cohesion (adhesion / breakable glue) between bodies
-        // with `cohesion` set (see `solve_cohesion`). Runs after cross-collision so the
-        // two composes: bodies first repel on overlap, then glue together at contact.
-        rapier3d::dynamics::soft_body_fork::solve_cohesion(
-            &mut world.inner.soft_bodies,
-            world.inner.integration_parameters.dt,
-        );
 
         // Phase 2 (fluid SPH ↔ rigid): sync each coupled fluid's particle poses into
         // its collision proxies *before* the rigid step, so the narrow-phase sees the
@@ -997,6 +1022,16 @@ pub extern "C" fn world_step(world: *mut WorldHandle, delta_seconds: f64) {
         );
         #[cfg(feature = "profiler")]
         let after_pipeline = profile_start.elapsed();
+
+        // 官方软体后端：求解在 `pipeline.step` 内完成，这里把解写回授权数据，
+        // 让 `soft_body_*` 的读接口（粒子/能量/体积）拿到本步结果。
+        if world.inner.soft_backend == crate::rapier::soft_upstream::SoftBodyBackend::Upstream {
+            crate::rapier::soft_upstream::collect(
+                &mut world.inner.soft_bodies,
+                &world.inner.upstream_soft_bodies,
+                &world.inner.soft_upstream_slots,
+            );
+        }
 
         // Phase 5f: read the contacted proxy poses back into the soft-body particles
         // so collision response propagates into the soft body (free particles only;

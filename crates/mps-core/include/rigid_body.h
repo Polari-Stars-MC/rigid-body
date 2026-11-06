@@ -6347,6 +6347,23 @@ Bool soft_body_set_spring_fibre_direction(struct WorldHandle *world,
 Bool soft_body_clear_cohesion(struct WorldHandle *world, uint32_t id);
 
 /**
+ * Selects the soft-body solver backend for this world.
+ *
+ * `mode` is `0` for the fork's own integrator (the historical default) and `1`
+ * for rapier v0.36's official `SoftBody`, which integrates soft bodies inside the
+ * physics pipeline together with their deformable colliders. The C ABI is
+ * identical either way: creation, authoring, queries and destruction all still go
+ * through the same `soft_body_*` entry points.
+ *
+ * # Returns
+ * `Bool::TRUE` on success, `Bool::FALSE` on `ERR_*` (null world, unknown mode).
+ *
+ * # Safety
+ * `world` must be a valid world pointer.
+ */
+Bool soft_body_set_backend(struct WorldHandle *world, uint32_t mode);
+
+/**
  * Phase 7: mark a soft body as sleeping (no further integration until woken).
  *
  * # Returns

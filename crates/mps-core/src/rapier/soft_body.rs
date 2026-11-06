@@ -1129,6 +1129,39 @@ pub extern "C" fn soft_body_clear_cohesion(world: *mut WorldHandle, id: u32) -> 
     })
 }
 
+/// Selects the soft-body solver backend for this world.
+///
+/// `mode` is `0` for the fork's own integrator (the historical default) and `1`
+/// for rapier v0.36's official `SoftBody`, which integrates soft bodies inside the
+/// physics pipeline together with their deformable colliders. The C ABI is
+/// identical either way: creation, authoring, queries and destruction all still go
+/// through the same `soft_body_*` entry points.
+///
+/// # Returns
+/// `Bool::TRUE` on success, `Bool::FALSE` on `ERR_*` (null world, unknown mode).
+///
+/// # Safety
+/// `world` must be a valid world pointer.
+#[unsafe(no_mangle)]
+pub extern "C" fn soft_body_set_backend(world: *mut WorldHandle, mode: u32) -> Bool {
+    ffi_guard(Bool::FALSE, || {
+        let Some(world) = (unsafe { world.as_mut() }) else {
+            set_error(ERR_NULL_POINTER, "soft_body_set_backend: world is null");
+            return Bool::FALSE;
+        };
+        let Some(backend) = crate::rapier::soft_upstream::SoftBodyBackend::from_ffi(mode) else {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "soft_body_set_backend: mode must be 0 (fork) or 1 (upstream)",
+            );
+            return Bool::FALSE;
+        };
+        world.inner.soft_backend = backend;
+        clear_error();
+        Bool::TRUE
+    })
+}
+
 /// Phase 7: mark a soft body as sleeping (no further integration until woken).
 ///
 /// # Returns
