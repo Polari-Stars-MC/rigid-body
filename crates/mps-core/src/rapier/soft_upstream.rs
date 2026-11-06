@@ -278,6 +278,17 @@ pub(crate) fn prepare(
             sim.add_particle_force(i, gravity * mass, false);
         }
 
+        // 逐边静止长度：把每个弹簧/距离约束自己的 activation（主动应变）折算成官方边的
+        // rest length（`rest·(1 − γ)`）。官方的边顺序与 `build` 里一致：先 `springs`
+        // 后 `distance_constraints`，所以按下标直接对上。
+        let base = body.springs.len();
+        for (k, s) in body.springs.iter().enumerate() {
+            sim.set_edge_rest_length(k, s.rest_length * (1.0 - s.activation.clamp(0.0, 1.0)));
+        }
+        for (k, c) in body.distance_constraints.iter().enumerate() {
+            sim.set_edge_rest_length(base + k, c.rest * (1.0 - c.activation.clamp(0.0, 1.0)));
+        }
+
         // 授权数据的 `sleeping` 直接映射到官方的 enabled 开关：官方有自己的睡眠
         // 体系（island + 根刚体），这里只保证“标记为睡着的软体不被推进”。
         sim.set_enabled(!body.sleeping);
