@@ -124,6 +124,9 @@ impl super::SharedPhysicsArena {
                 RigidBodyType::Fixed => 1u32,
                 RigidBodyType::KinematicVelocityBased => 2u32,
                 RigidBodyType::KinematicPositionBased => 3u32,
+                // Upstream v0.36 soft-body proxy: reported as dynamic, matching
+                // `RigidBodyType::is_dynamic`.
+                RigidBodyType::SoftFrame => 0u32,
             };
 
             let sleeping = if body.is_sleeping() { 1u32 } else { 0u32 };

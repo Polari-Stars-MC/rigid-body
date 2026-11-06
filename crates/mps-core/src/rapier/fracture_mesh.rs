@@ -399,6 +399,7 @@ pub(crate) fn trigger_fracture_mesh(world: &mut WorldHandle, id: u32) -> Bool {
             &mut world.inner.colliders,
             &mut world.inner.impulse_joints,
             &mut world.inner.multibody_joints,
+            &mut world.inner.upstream_soft_bodies,
             true,
         );
         if let Some(mesh_body) = world.inner.fracture_mesh_bodies.get_mut(id) {
@@ -678,6 +679,7 @@ pub extern "C" fn fracture_mesh_body_remove(world: *mut WorldHandle, id: u32) ->
                 &mut world.inner.colliders,
                 &mut world.inner.impulse_joints,
                 &mut world.inner.multibody_joints,
+                &mut world.inner.upstream_soft_bodies,
                 true,
             );
         }

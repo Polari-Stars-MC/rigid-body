@@ -16,7 +16,7 @@
 - 生命周期：`soft_body_save_state`/`restore_state`、`soft_body_tear_*`（应力阈值撕裂）、`soft_body_subdivide_*`、`soft_body_wake_up`/`sleep`、`soft_body_is_*`、`soft_body_remove_*`、`soft_body_scale_*`、`soft_body_clear_*` ×8、`soft_body_step_*`。
 
 ## 依赖
-- fork `rapier3d::prelude::soft_body::{SoftBody, SoftBodySet, SoftBodyId, SoftSolver, SoftParticle, Spring, DistanceConstraint}`。
+- fork `rapier3d::prelude::soft_body_fork::{SoftBody, SoftBodySet, SoftBodyId, SoftSolver, SoftParticle, Spring, DistanceConstraint}`。
 - `crate::rapier::world`（`soft_body_proxies`、`voxel_soft_meta`、step 内的耦合流水线）。
 - `crate::rapier::ffi`（`Bool`、`Vec3`、`WorldHandle`、handle 打包、`vec3_*`）、`crate::rapier::error`。
 

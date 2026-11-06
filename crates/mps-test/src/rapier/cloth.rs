@@ -70,7 +70,7 @@ mod tests {
             (*world)
                 .inner
                 .soft_bodies
-                .get(rapier3d::prelude::soft_body::SoftBodyId(id))
+                .get(rapier3d::prelude::soft_body_fork::SoftBodyId(id))
                 .expect("cloth present")
                 .springs
                 .len()

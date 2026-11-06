@@ -3,7 +3,7 @@ use anvilkit::ecs::physics as ak_physics;
 use anvilkit::ecs::prelude::*;
 use dashmap::DashMap;
 use rapier3d::math::Vector;
-use rapier3d::prelude::soft_body::SoftBodyId;
+use rapier3d::prelude::soft_body_fork::SoftBodyId;
 use rapier3d::prelude::{ColliderBuilder, RigidBodyBuilder, RigidBodyType};
 
 use crate::rapier::aerodynamics;

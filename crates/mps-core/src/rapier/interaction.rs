@@ -320,7 +320,7 @@ fn apply_coulomb_friction_forces_with_facade(
             continue;
         }
 
-        for manifold in &contact_pair.manifolds {
+        for manifold in contact_pair.manifolds() {
             let normal = manifold.data.normal;
             for contact in &manifold.points {
                 let p1_world = body1.position() * contact.local_p1;

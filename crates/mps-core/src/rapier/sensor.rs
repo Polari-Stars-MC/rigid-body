@@ -480,6 +480,7 @@ pub extern "C" fn sensor_zone_destroy(world: *mut WorldHandle, id: u32) -> Bool 
                     handle,
                     &mut world.inner.islands,
                     &mut world.inner.bodies,
+                    &mut world.inner.upstream_soft_bodies,
                     true,
                 );
                 Bool::TRUE

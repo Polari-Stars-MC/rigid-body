@@ -467,6 +467,7 @@ pub extern "C" fn world_remove_rigid_body(
                 &mut world.inner.colliders,
                 &mut world.inner.impulse_joints,
                 &mut world.inner.multibody_joints,
+                &mut world.inner.upstream_soft_bodies,
                 remove_attached_colliders.0 != 0,
             )
             .is_some();

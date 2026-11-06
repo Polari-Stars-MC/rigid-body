@@ -543,6 +543,16 @@ impl EventHandler for CollectingEventHandler {
         let pc = unsafe { &*self.producer_cache.get() };
         pc.dispatch_contact_force(record);
     }
+
+    /// Upstream v0.36 soft-body tear events. This project uses its own soft-body
+    /// system (`rapier3d::dynamics::soft_body_fork`), never upstream's
+    /// `SoftBodySet`, so no tear event can reach this handler.
+    fn handle_soft_body_tear_event(
+        &self,
+        _soft_bodies: &rapier3d::prelude::SoftBodySet,
+        _event: &rapier3d::prelude::SoftBodyTearEvent,
+    ) {
+    }
 }
 
 #[derive(Default)]
@@ -561,7 +571,7 @@ impl PhysicsHooks for CallbackPhysicsHooks {
         &self,
         _context: &rapier3d::prelude::PairFilterContext,
     ) -> Option<SolverFlags> {
-        Some(SolverFlags::COMPUTE_IMPULSES)
+        Some(SolverFlags::COMPUTE_RIGID_IMPULSES)
     }
 
     fn filter_intersection_pair(&self, _context: &rapier3d::prelude::PairFilterContext) -> bool {
@@ -605,18 +615,22 @@ impl PhysicsHooks for CallbackPhysicsHooks {
                 .unwrap_or(Vector::ZERO),
             (None, None) => Vector::ZERO,
         };
-        let normal_speed = relative_velocity.dot(*context.normal);
-        let tangential_speed = (relative_velocity - *context.normal * normal_speed).length();
+        // rapier3d 0.36 moved the rigid-contact fields (`normal`, `friction`, …)
+        // behind `ContactModificationContext::rigid_mut()`: a pair of two soft
+        // surfaces has no manifold, and this project never produces those, so
+        // `None` here means there is nothing to modify.
+        let Some(rigid) = context.rigid_mut() else {
+            return;
+        };
+        let normal_speed = relative_velocity.dot(*rigid.normal);
+        let tangential_speed = (relative_velocity - *rigid.normal * normal_speed).length();
         let friction = if tangential_speed <= threshold {
             static_mu
         } else {
             dynamic_mu
         };
-
-        // rapier3d 0.35 moved `friction` off of per-point `SolverContact` and
-        // onto the manifold (`ContactModificationContext::friction`). Setting
-        // one value here applies to every solver contact of this manifold.
-        *context.friction = friction;
+        // One value per manifold: it applies to every solver contact below.
+        *rigid.friction = friction;
     }
 }
 

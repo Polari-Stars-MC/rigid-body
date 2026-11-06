@@ -13,7 +13,7 @@
 - 内部：`HairSystem`（世界内 `hair_systems` 哈希表）、`MAX_HAIR_STRANDS = 512`、`MAX_HAIR_SEGMENTS = 64`、`FALLBACK_STIFFNESS`（stiffness 为 0 时的弹簧常数兜底）、`HAIR_WIND_DRAG`。
 
 ## 依赖
-- fork `rapier3d::prelude::soft_body::{SoftBody, SoftBodyId}` — `new`/`add_particle`/`add_spring`/`attach_particle`/`apply_wind`。
+- fork `rapier3d::prelude::soft_body_fork::{SoftBody, SoftBodyId}` — `new`/`add_particle`/`add_spring`/`attach_particle`/`apply_wind`。
 - `crate::rapier::ffi` — `Bool`、`Vec3`、`WorldHandle`、`RigidBodyHandleRaw`（`unpack_rigid_body_handle`）、`vec3_finite`/`vec3_to_rapier`。
 - `crate::rapier::error` — 错误码与 `ffi_guard`。
 

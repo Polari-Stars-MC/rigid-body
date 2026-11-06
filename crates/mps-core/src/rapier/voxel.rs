@@ -1665,6 +1665,7 @@ pub extern "C" fn collider_voxel_edit(
                         unpack_collider_handle(handle),
                         &mut world.inner.islands,
                         &mut world.inner.bodies,
+                        &mut world.inner.upstream_soft_bodies,
                         true,
                     )
                     .is_some()
@@ -1783,6 +1784,7 @@ pub extern "C" fn collider_set_voxels(
                         unpack_collider_handle(handle),
                         &mut world.inner.islands,
                         &mut world.inner.bodies,
+                        &mut world.inner.upstream_soft_bodies,
                         true,
                     )
                     .is_some()

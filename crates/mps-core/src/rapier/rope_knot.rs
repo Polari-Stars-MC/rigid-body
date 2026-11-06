@@ -73,7 +73,7 @@ pub(crate) struct RopeKnotSystem {
     /// Rope knot descriptor.
     pub desc: RopeKnotDesc,
     /// Soft body IDs, one per strand (braids) or a single body (knots/custom).
-    pub soft_bodies: Vec<rapier3d::prelude::soft_body::SoftBodyId>,
+    pub soft_bodies: Vec<rapier3d::prelude::soft_body_fork::SoftBodyId>,
     /// Wind force applied to the rope.
     pub wind: Vec3,
 }
@@ -250,7 +250,7 @@ pub extern "C" fn rope_knot_build(
         } else {
             FALLBACK_COMPLIANCE
         };
-        let solver = rapier3d::prelude::soft_body::SoftSolver::Xpbd {
+        let solver = rapier3d::prelude::soft_body_fork::SoftSolver::Xpbd {
             iterations: KNOT_XPBD_ITERATIONS,
             compliance,
         };
@@ -322,7 +322,7 @@ pub extern "C" fn rope_knot_build(
             let mass =
                 (desc.density * std::f64::consts::PI * desc.radius.powi(2) * spacing).max(1e-9);
 
-            let mut soft_body = rapier3d::prelude::soft_body::SoftBody::new(Vector::ZERO);
+            let mut soft_body = rapier3d::prelude::soft_body_fork::SoftBody::new(Vector::ZERO);
             soft_body.solver = solver;
             for p in points {
                 let idx = soft_body.add_particle(*p);
@@ -344,7 +344,7 @@ pub extern "C" fn rope_knot_build(
         if let Some(knot) = world.inner.rope_knots.get_mut(id) {
             knot.soft_bodies = strand_ids
                 .iter()
-                .map(|&sid| rapier3d::prelude::soft_body::SoftBodyId(sid))
+                .map(|&sid| rapier3d::prelude::soft_body_fork::SoftBodyId(sid))
                 .collect();
         }
         for sid in strand_ids {
@@ -460,6 +460,7 @@ pub extern "C" fn rope_knot_remove(world: *mut WorldHandle, id: u32) -> Bool {
                         &mut world.inner.colliders,
                         &mut world.inner.impulse_joints,
                         &mut world.inner.multibody_joints,
+                        &mut world.inner.upstream_soft_bodies,
                         false,
                     );
                 }

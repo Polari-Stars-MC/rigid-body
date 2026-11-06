@@ -344,6 +344,9 @@ impl SharedArena {
             rapier3d::prelude::RigidBodyType::Fixed => 1u32,
             rapier3d::prelude::RigidBodyType::KinematicVelocityBased => 2u32,
             rapier3d::prelude::RigidBodyType::KinematicPositionBased => 3u32,
+            // Upstream v0.36 soft-body proxy: reported as dynamic, matching
+            // `RigidBodyType::is_dynamic`. mps-cosmos never creates soft bodies.
+            rapier3d::prelude::RigidBodyType::SoftFrame => 0u32,
         };
         let sleeping = if body.is_sleeping() { 1u32 } else { 0u32 };
         let user_data = (body.user_data & 0xFFFF_FFFF_FFFF_FFFF) as u64;

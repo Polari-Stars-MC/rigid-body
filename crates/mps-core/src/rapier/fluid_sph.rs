@@ -279,6 +279,7 @@ pub extern "C" fn fluid_enable_collision(
                         &mut world.inner.colliders,
                         &mut world.inner.impulse_joints,
                         &mut world.inner.multibody_joints,
+                        &mut world.inner.upstream_soft_bodies,
                         false,
                     );
                 }

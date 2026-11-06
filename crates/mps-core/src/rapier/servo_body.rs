@@ -454,6 +454,7 @@ pub extern "C" fn servo_body_destroy(world: *mut WorldHandle, id: u32) -> Bool {
                     &mut world.inner.colliders,
                     &mut world.inner.impulse_joints,
                     &mut world.inner.multibody_joints,
+                    &mut world.inner.upstream_soft_bodies,
                     true,
                 );
                 clear_error();

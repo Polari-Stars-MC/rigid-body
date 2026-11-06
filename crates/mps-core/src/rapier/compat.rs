@@ -127,6 +127,7 @@ pub extern "C" fn world_insert_dynamic_cuboids(
                 &mut world.inner.colliders,
                 &mut world.inner.impulse_joints,
                 &mut world.inner.multibody_joints,
+                &mut world.inner.upstream_soft_bodies,
                 true,
             );
             set_error(ERR_INVALID_ARGUMENT, "no valid cuboids");
@@ -213,6 +214,7 @@ pub extern "C" fn world_insert_static_trimesh(
                 &mut world.inner.colliders,
                 &mut world.inner.impulse_joints,
                 &mut world.inner.multibody_joints,
+                &mut world.inner.upstream_soft_bodies,
                 true,
             );
             set_error(ERR_INVALID_ARGUMENT, "failed to build trimesh collider");

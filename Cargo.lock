@@ -2569,9 +2569,9 @@ checksum = "f70749695b063ecbf6b62949ccccde2e733ec3ecbbd71d467dca4e5c6c97cca0"
 
 [[package]]
 name = "glam"
-version = "0.33.1"
+version = "0.33.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "898f5a568a84989b6c0f8caa50a93074b97dbdc58fc6d9543157bb4562758933"
+checksum = "37bfe73dc8ec21f54d181e5a60554327ec3f1c600c455a75ccbfc65d2106a6c4"
 dependencies = [
  "approx",
  "libm",
@@ -2579,12 +2579,12 @@ dependencies = [
 
 [[package]]
 name = "glamx"
-version = "0.3.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9847f980afb0628849bcd6a406cdffd29eb9d53fca83e1646005901a9acd4c5c"
+checksum = "28d74079318e3a077bd3d15faa90fde24fa37bb9f157f92f853e6019a15fd413"
 dependencies = [
  "approx",
- "glam 0.33.1",
+ "glam 0.33.12",
  "nalgebra 0.35.0",
  "num-traits",
  "simba 0.10.2",
@@ -3867,7 +3867,7 @@ dependencies = [
  "glam 0.30.10",
  "glam 0.31.1",
  "glam 0.32.1",
- "glam 0.33.1",
+ "glam 0.33.12",
  "matrixmultiply",
  "nalgebra-macros 0.3.0",
  "num-complex",
@@ -4002,6 +4002,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.118",
+]
+
+[[package]]
+name = "num-derive"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e4e98dc3b890f6c23a0f9d3d491a2823d0dea0fa656302a13dd225fa924112a8"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.3",
 ]
 
 [[package]]
@@ -4296,7 +4307,7 @@ dependencies = [
  "jni 0.21.1",
  "ndk 0.8.0",
  "ndk-context",
- "num-derive",
+ "num-derive 0.4.2",
  "num-traits",
  "oboe-sys",
 ]
@@ -4400,7 +4411,7 @@ dependencies = [
  "downcast-rs 1.2.1",
  "either",
  "nalgebra 0.32.6",
- "num-derive",
+ "num-derive 0.4.2",
  "num-traits",
  "rustc-hash 1.1.0",
  "simba 0.8.1",
@@ -4411,7 +4422,7 @@ dependencies = [
 
 [[package]]
 name = "parry3d-f64"
-version = "0.30.2"
+version = "0.31.1"
 dependencies = [
  "approx",
  "arrayvec",
@@ -4423,7 +4434,7 @@ dependencies = [
  "glamx",
  "hashbrown 0.17.1",
  "log",
- "num-derive",
+ "num-derive 0.5.1",
  "num-traits",
  "ordered-float",
  "rayon",
@@ -4795,7 +4806,7 @@ dependencies = [
  "crossbeam",
  "downcast-rs 1.2.1",
  "nalgebra 0.32.6",
- "num-derive",
+ "num-derive 0.4.2",
  "num-traits",
  "parry3d",
  "rustc-hash 1.1.0",
@@ -4804,7 +4815,7 @@ dependencies = [
 
 [[package]]
 name = "rapier3d-f64"
-version = "0.35.3"
+version = "0.36.1"
 dependencies = [
  "approx",
  "arrayvec",

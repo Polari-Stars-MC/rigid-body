@@ -1194,6 +1194,7 @@ pub extern "C" fn world_remove_collider(
                 unpack_collider_handle(handle),
                 &mut world.inner.islands,
                 &mut world.inner.bodies,
+                &mut world.inner.upstream_soft_bodies,
                 wake_up.0 != 0,
             )
             .is_some();

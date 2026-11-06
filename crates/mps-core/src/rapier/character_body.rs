@@ -871,6 +871,7 @@ pub extern "C" fn character_body_destroy(world: *mut WorldHandle, id: u32) -> Bo
                     &mut world.inner.colliders,
                     &mut world.inner.impulse_joints,
                     &mut world.inner.multibody_joints,
+                    &mut world.inner.upstream_soft_bodies,
                     false,
                 );
                 clear_error();

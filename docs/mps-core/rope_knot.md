@@ -13,7 +13,7 @@
 
 ## 依赖
 - `crate::rapier::soft_body::soft_body_enable_collision` — 复用其代理构建与碰撞组逻辑。
-- fork `rapier3d::prelude::soft_body::{SoftBody, SoftBodyId, SoftSolver}` — `Xpbd { iterations, compliance }` 变体、`add_particle`/`add_distance_constraint`/`apply_wind`。
+- fork `rapier3d::prelude::soft_body_fork::{SoftBody, SoftBodyId, SoftSolver}` — `Xpbd { iterations, compliance }` 变体、`add_particle`/`add_distance_constraint`/`apply_wind`。
 - `crate::rapier::ffi` — `Bool`、`Vec3`、`WorldHandle`、`vec3_finite`/`vec3_to_rapier`；`soft_body_proxies` teardown 所需的世界字段。
 - `crate::rapier::error` — 错误码与 `ffi_guard`。
 

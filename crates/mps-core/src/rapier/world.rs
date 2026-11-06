@@ -2,7 +2,7 @@ use super::body_spatial_index::BodySpatialIndex;
 use rapier3d::math::Rotation;
 use rapier3d::prelude::fluid::FluidWorld;
 use rapier3d::prelude::granular::GranularWorld;
-use rapier3d::prelude::soft_body::{SoftBodyId, SoftBodySet};
+use rapier3d::prelude::soft_body_fork::{SoftBodyId, SoftBodySet};
 use rapier3d::prelude::{
     ActiveHooks, BroadPhaseBvh, CCDSolver, ColliderHandle, ColliderSet, ImpulseJointSet,
     IntegrationParameters, IslandManager, MultibodyJointSet, NarrowPhase, PhysicsPipeline,
@@ -316,6 +316,12 @@ pub struct PhysicsWorld {
     /// is applied inside `SoftBody::step`; bound particles route their spring
     /// forces into the rigid-body `force_containers` via `write_spring_forces`.
     pub soft_bodies: SoftBodySet,
+    /// Upstream (rapier v0.36) soft-body set. This project's soft bodies live in
+    /// `soft_bodies` (the fork's own `rapier3d::dynamics::soft_body_fork`
+    /// system); upstream's `PhysicsPipeline::step`, `RigidBodySet::remove` and
+    /// `ColliderSet::remove` still take a `SoftBodySet`, so this one stays empty
+    /// and exists only to satisfy those signatures.
+    pub(crate) upstream_soft_bodies: rapier3d::dynamics::SoftBodySet,
     /// All SPH fluid bodies (particle clouds). Stepped independently after the
     /// rigid-body pipeline, mirroring `soft_bodies`. See
     /// `.hermes/plans/2026-08-30_fluid-sph-roadmap.md`.
@@ -478,6 +484,7 @@ impl PhysicsWorld {
             multibody_joints: MultibodyJointSet::new(),
             ccd_solver: CCDSolver::new(),
             soft_bodies: SoftBodySet::new(),
+            upstream_soft_bodies: rapier3d::dynamics::SoftBodySet::new(),
             fluids: Vec::new(),
             granular_bodies: Vec::new(),
             granular_proxies: std::collections::HashMap::new(),
@@ -928,14 +935,14 @@ pub extern "C" fn world_step(world: *mut WorldHandle, delta_seconds: f64) {
         // Phase 14: world-level soft-soft (cross-body) collision. Runs after every
         // body has stepped; only bodies with `cross_collision` set collide with each
         // other (see `solve_cross_body_collisions`).
-        rapier3d::dynamics::soft_body::solve_cross_body_collisions(
+        rapier3d::dynamics::soft_body_fork::solve_cross_body_collisions(
             &mut world.inner.soft_bodies,
             world.inner.integration_parameters.dt,
         );
         // Phase 17: world-level cohesion (adhesion / breakable glue) between bodies
         // with `cohesion` set (see `solve_cohesion`). Runs after cross-collision so the
         // two composes: bodies first repel on overlap, then glue together at contact.
-        rapier3d::dynamics::soft_body::solve_cohesion(
+        rapier3d::dynamics::soft_body_fork::solve_cohesion(
             &mut world.inner.soft_bodies,
             world.inner.integration_parameters.dt,
         );
@@ -983,6 +990,7 @@ pub extern "C" fn world_step(world: *mut WorldHandle, delta_seconds: f64) {
             &mut world.inner.colliders,
             &mut world.inner.impulse_joints,
             &mut world.inner.multibody_joints,
+            &mut world.inner.upstream_soft_bodies,
             &mut world.inner.ccd_solver,
             &world.inner.hooks,
             &*world.inner.events,

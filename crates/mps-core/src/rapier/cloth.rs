@@ -51,7 +51,7 @@ use crate::rapier::error::{
     ERR_CAPACITY, ERR_INVALID_ARGUMENT, ERR_NULL_POINTER, clear_error, ffi_guard, set_error,
 };
 use crate::rapier::ffi::{Vec3, WorldHandle, vec3_finite, vec3_to_rapier};
-use rapier3d::prelude::soft_body::SoftBody;
+use rapier3d::prelude::soft_body_fork::SoftBody;
 
 /// Upper bound on cloth particles accepted in one creation call.
 ///

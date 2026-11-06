@@ -168,6 +168,10 @@ pub(crate) fn body_status_from_rapier(status: rapier3d::prelude::RigidBodyType) 
         rapier3d::prelude::RigidBodyType::KinematicVelocityBased => {
             BodyStatus::KinematicVelocityBased
         }
+        // Upstream v0.36: rigid proxies of soft bodies, counted as dynamic by
+        // `is_dynamic`. This project never creates them (its own soft bodies use
+        // plain dynamic proxies), so this arm is unreachable in practice.
+        rapier3d::prelude::RigidBodyType::SoftFrame => BodyStatus::Dynamic,
     }
 }
 

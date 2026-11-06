@@ -396,6 +396,7 @@ pub extern "C" fn world_replace_body_with_fracture_fragments(
                 &mut world.inner.colliders,
                 &mut world.inner.impulse_joints,
                 &mut world.inner.multibody_joints,
+                &mut world.inner.upstream_soft_bodies,
                 true,
             );
         }

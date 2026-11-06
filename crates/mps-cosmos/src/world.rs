@@ -331,6 +331,10 @@ pub struct CosmosWorld {
     impulse_joints: ImpulseJointSet,
     multibody_joints: MultibodyJointSet,
     ccd_solver: CCDSolver,
+    /// Upstream (rapier v0.36) soft-body set. mps-cosmos never creates soft
+    /// bodies; `PhysicsPipeline::step` still takes a `SoftBodySet`, so this stays
+    /// empty and exists only to satisfy the signature.
+    upstream_soft_bodies: rapier3d::prelude::SoftBodySet,
 
     celestials: Vec<CelestialSource>,
     n_body_sources: Vec<NBodySource>,
@@ -481,6 +485,7 @@ impl CosmosWorld {
             impulse_joints: ImpulseJointSet::new(),
             multibody_joints: MultibodyJointSet::new(),
             ccd_solver: CCDSolver::new(),
+            upstream_soft_bodies: rapier3d::prelude::SoftBodySet::new(),
             celestials: Vec::new(),
             n_body_sources: Vec::new(),
             n_body_softening_sq: config.n_body_softening_sq,
@@ -548,6 +553,7 @@ impl CosmosWorld {
             impulse_joints: ImpulseJointSet::new(),
             multibody_joints: MultibodyJointSet::new(),
             ccd_solver: CCDSolver::new(),
+            upstream_soft_bodies: rapier3d::prelude::SoftBodySet::new(),
             // celestials / n_body_sources intentionally dropped: see doc above.
             celestials: Vec::new(),
             n_body_sources: Vec::new(),
@@ -1312,6 +1318,7 @@ impl CosmosWorld {
             &mut self.colliders,
             &mut self.impulse_joints,
             &mut self.multibody_joints,
+            &mut self.upstream_soft_bodies,
             &mut self.ccd_solver,
             &(),
             &(),
@@ -2076,6 +2083,7 @@ impl Clone for CosmosWorld {
             impulse_joints: self.impulse_joints.clone(),
             multibody_joints: self.multibody_joints.clone(),
             ccd_solver: self.ccd_solver.clone(),
+            upstream_soft_bodies: self.upstream_soft_bodies.clone(),
             celestials: self.celestials.clone(),
             n_body_sources: self.n_body_sources.clone(),
             n_body_softening_sq: self.n_body_softening_sq,
