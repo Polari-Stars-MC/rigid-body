@@ -114,9 +114,37 @@ fn build(
         .map(|(i, _)| i as u32)
         .collect();
 
+    // Mirror the fork's per-particle masses. The official solver computes
+    // acceleration as `force × official_inv_mass`, and `prepare` pushes
+    // fork-mass-scaled forces (`gravity · m_fork`); if the official body kept
+    // the builder default (mass 1.0), gravity would be under-applied by the
+    // mass ratio (a 0.02-mass balloon would feel g/50). Pinned particles
+    // report mass 0 in the fork data; their value is irrelevant (they are
+    // pinned via `pinned_particles`), so fill them with the free-particle mean
+    // to keep the builder's all-positive finite-masses validation happy.
+    let mut masses: Vec<Real> = body.particles.iter().map(|p| p.mass()).collect();
+    let mean_free_mass = {
+        let free: Vec<Real> = masses
+            .iter()
+            .copied()
+            .filter(|m| m.is_finite() && *m > 0.0)
+            .collect();
+        if free.is_empty() {
+            1.0
+        } else {
+            free.iter().sum::<Real>() / free.len() as Real
+        }
+    };
+    for m in &mut masses {
+        if !m.is_finite() || *m <= 0.0 {
+            *m = mean_free_mass;
+        }
+    }
+
     let mut builder = SoftBodyBuilder::new(positions)
         .edges(edges)
         .pinned_particles(pinned)
+        .masses(masses)
         // 每个软体可以有自己的重力：官方只认世界重力 × gravity_scale，所以这里关掉，
         // 由 `prepare` 每步按 `body.gravity` 折算成粒子力。
         .gravity_scale(0.0)
@@ -340,7 +368,12 @@ pub(crate) fn collect(
             body.particles[i].pos = sim.particle_position(i);
             body.particles[i].vel = sim.particle_velocity(i);
         }
-        body.sleeping = sim.is_sleeping();
+        // The authorized `sleeping` flag is the source of truth (set by
+        // `soft_body_sleep`/`soft_body_wake`); never clear it from the mirror — a
+        // disabled official body reports `is_sleeping() == false`, which would
+        // otherwise clobber a forced sleep and re-enable the body next step.
+        // Natural (energy-based) sleep only ever *sets* the flag here.
+        body.sleeping = body.sleeping || sim.is_sleeping();
     }
 }
 

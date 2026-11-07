@@ -5095,8 +5095,12 @@ pub extern "C" fn soft_body_enable_collision(
                 continue;
             }
             let mass = 1.0 / p.inv_mass;
+            // NOTE: gravity_scale must stay at the world default (1.0): the proxy is a
+            // real dynamic body solved by the rigid solver, and there is no soft-side
+            // integrator that would re-apply gravity (unlike the fluid/granular DEM
+            // clouds, which integrate gravity themselves). With gravity_scale(0) the
+            // proxy — and therefore the particle read back from it — never falls.
             let rb = RigidBodyBuilder::new(RigidBodyType::Dynamic)
-                .gravity_scale(0.0)
                 .additional_mass(mass)
                 .translation(p.pos)
                 .linvel(p.vel)
