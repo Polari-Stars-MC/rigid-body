@@ -71,6 +71,12 @@
 #define MAX_FORCE_QUEUE_CAPACITY (1 << 20)
 
 /**
+ * Magic stamped into every live [`WorldHandle`] so a stale or forged `jlong`
+ * can be detected instead of dereferenced (use-after-free / wild pointer).
+ */
+#define WORLD_HANDLE_MAGIC 5571044408009313348
+
+/**
  * Upper bound on rope particles accepted in one creation call.
  *
  * Ropes are one-dimensional; 64k particles is far past any interactive

@@ -562,6 +562,7 @@ pub extern "C" fn world_create(gravity: Vec3) -> *mut WorldHandle {
         };
 
         Box::into_raw(Box::new(WorldHandle {
+            magic: crate::rapier::ffi::types::WORLD_HANDLE_MAGIC,
             inner: PhysicsWorld::new(gravity),
         }))
     })
@@ -580,6 +581,8 @@ pub extern "C" fn world_destroy(world: *mut WorldHandle) {
         }
 
         unsafe {
+            // Zero the magic first so any stale handle is detectable afterwards.
+            (*world).magic = 0;
             drop(Box::from_raw(world));
         }
     })
