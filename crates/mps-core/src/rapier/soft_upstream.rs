@@ -137,6 +137,9 @@ fn sync_extras(sim: &mut rapier3d::prelude::SoftBody, body: &ForkSoftBody) {
         accel: w.accel,
         drag: w.drag,
     }));
+    // Phase 11 内压：官方求解器直接消费 `fork.pressure`（边界面压力），
+    // 这里必须逐帧同步（`soft_body_set_pressure` 只写授权数据）。
+    sim.set_internal_pressure(body.pressure);
     let _ = sim.set_fork_damping(body.damping.clamp(0.0, 0.999));
     let _ = sim.set_thermal_field(body.temperature.map(|t| ThermalParams {
         temp: t.temp,
