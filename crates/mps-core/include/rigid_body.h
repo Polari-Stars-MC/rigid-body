@@ -105,9 +105,14 @@
 #define ARENA_MAGIC 5571044407640212814
 
 /**
- * Current arena layout version — increment when layout changes
+ * Current arena layout version — increment when layout changes.
+ *
+ * Named `MPS_ARENA_VERSION` (not `ARENA_VERSION`) because cbindgen turns this
+ * const into a C macro in `include/rigid_body.h`, and a bare `ARENA_VERSION`
+ * macro would collide with `cosmos.h`'s `ARENA_VERSION 1` when a host includes
+ * both headers. A protocol v3 (new arena layout) must still bump this value.
  */
-#define ARENA_VERSION 2
+#define MPS_ARENA_VERSION 2
 
 /**
  * Strides (must match Java side exactly)

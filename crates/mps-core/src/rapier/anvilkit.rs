@@ -1,9 +1,9 @@
+use crate::rapier::soft_data::SoftBodyId;
 use anvilkit::core::math::Transform;
 use anvilkit::ecs::physics as ak_physics;
 use anvilkit::ecs::prelude::*;
 use dashmap::DashMap;
 use rapier3d::math::Vector;
-use crate::rapier::soft_data::SoftBodyId;
 use rapier3d::prelude::{ColliderBuilder, RigidBodyBuilder, RigidBodyType};
 
 use crate::rapier::aerodynamics;

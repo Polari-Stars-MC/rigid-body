@@ -246,8 +246,20 @@ pub use layout::CommandType;
 /// Magic number identifying a valid arena: "MPS_AREN"
 pub const ARENA_MAGIC: u64 = 0x4D50535F4152454E;
 
-/// Current arena layout version — increment when layout changes
-pub const ARENA_VERSION: u32 = 2;
+/// Current arena layout version — increment when layout changes.
+///
+/// Named `MPS_ARENA_VERSION` (not `ARENA_VERSION`) because cbindgen turns this
+/// const into a C macro in `include/rigid_body.h`, and a bare `ARENA_VERSION`
+/// macro would collide with `cosmos.h`'s `ARENA_VERSION 1` when a host includes
+/// both headers. A protocol v3 (new arena layout) must still bump this value.
+pub const MPS_ARENA_VERSION: u32 = 2;
+
+/// Backward-compatible Rust alias so in-workspace readers (mps-test version
+/// pins) keep compiling. cbindgen does not export `pub use` items, so this
+/// alias never appears in the generated header — `MPS_ARENA_VERSION` is the
+/// only macro there.
+#[doc(hidden)]
+pub use MPS_ARENA_VERSION as ARENA_VERSION;
 
 /// Strides (must match Java side exactly)
 pub const BODY_SLOT_STRIDE: u32 = 96;
@@ -410,7 +422,7 @@ impl SharedPhysicsArena {
         // Write header
         unsafe {
             (ptr as *mut u64).write_unaligned(ARENA_MAGIC);
-            (ptr.add(8) as *mut u32).write_unaligned(ARENA_VERSION);
+            (ptr.add(8) as *mut u32).write_unaligned(MPS_ARENA_VERSION);
             (ptr.add(12) as *mut u32).write_unaligned(0);
             (ptr.add(16) as *mut u32).write_unaligned(max_bodies);
             (ptr.add(20) as *mut u32).write_unaligned(max_colliders);

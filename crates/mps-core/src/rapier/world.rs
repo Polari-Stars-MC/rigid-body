@@ -1,8 +1,7 @@
 use super::body_spatial_index::BodySpatialIndex;
-use rapier3d::math::Rotation;
+use crate::rapier::soft_data::{SoftBodyId, SoftBodySet};
 use rapier3d::prelude::fluid::FluidWorld;
 use rapier3d::prelude::granular::GranularWorld;
-use crate::rapier::soft_data::{SoftBodyId, SoftBodySet};
 use rapier3d::prelude::{
     ActiveHooks, BroadPhaseBvh, CCDSolver, ColliderHandle, ColliderSet, ImpulseJointSet,
     IntegrationParameters, IslandManager, MultibodyJointSet, NarrowPhase, PhysicsPipeline,
@@ -764,7 +763,11 @@ pub extern "C" fn world_step(world: *mut WorldHandle, delta_seconds: f64) {
                                 body.set_angular_damping(a0);
                             }
                             12 => {
-                                // AddForceAtPoint — a0..a2 = force, need point from next cmd or use COM
+                                // AddForceAtPoint — a0..a2 = force. NOTE: currently applies at the
+                                // COM; the point argument is ignored. The 32-byte CommandSlot has
+                                // no room for an application point — a protocol v3 would add it
+                                // (Java side would need updating too). Behavior is intentionally
+                                // unchanged until then.
                                 body.add_force(rapier3d::prelude::Vector::new(a0, a1, a2), true);
                             }
                             _ => {}
@@ -868,18 +871,18 @@ pub extern "C" fn world_step(world: *mut WorldHandle, delta_seconds: f64) {
         #[cfg(feature = "profiler")]
         let after_forces = profile_start.elapsed();
 
-            // 官方后端：把授权数据镜像成 rapier `SoftBody`，位姿/外力推进官方体；
-            // 真正的求解在下面的 `pipeline.step` 里完成，步进后 `collect` 写回。
-            crate::rapier::soft_upstream::prepare(
-                &mut world.inner.soft_bodies,
-                &mut world.inner.upstream_soft_bodies,
-                &mut world.inner.soft_upstream_slots,
-                &mut world.inner.islands,
-                &mut world.inner.bodies,
-                &mut world.inner.colliders,
-                &mut world.inner.impulse_joints,
-                &mut world.inner.multibody_joints,
-            );
+        // 官方后端：把授权数据镜像成 rapier `SoftBody`，位姿/外力推进官方体；
+        // 真正的求解在下面的 `pipeline.step` 里完成，步进后 `collect` 写回。
+        crate::rapier::soft_upstream::prepare(
+            &mut world.inner.soft_bodies,
+            &mut world.inner.upstream_soft_bodies,
+            &mut world.inner.soft_upstream_slots,
+            &mut world.inner.islands,
+            &mut world.inner.bodies,
+            &mut world.inner.colliders,
+            &mut world.inner.impulse_joints,
+            &mut world.inner.multibody_joints,
+        );
 
         // Phase 2 (fluid SPH ↔ rigid): sync each coupled fluid's particle poses into
         // its collision proxies *before* the rigid step, so the narrow-phase sees the
@@ -889,7 +892,12 @@ pub extern "C" fn world_step(world: *mut WorldHandle, delta_seconds: f64) {
             if let Some(proxies) = world.inner.fluid_proxies.get(&(fi as u32)) {
                 for (pi, ph) in proxies.iter().enumerate() {
                     if let (Some(h), Some(p)) = (ph, fluid.particles.get(pi)) {
-                        if let Some(rb) = world.inner.bodies.get_mut(*h) {
+                        // `get_mut_internal`: this is an internal pose sync, not a user
+                        // change — it must not push the proxy into `modified_bodies` every
+                        // step (next-step user-changes handling + CCD fixed-target cache
+                        // invalidation). Wake-up comes from `set_translation(_, true)`
+                        // below, not from the accessor.
+                        if let Some(rb) = world.inner.bodies.get_mut_internal(*h) {
                             rb.set_translation(p.pos, true);
                             rb.set_linvel(p.vel, true);
                         }
@@ -905,7 +913,10 @@ pub extern "C" fn world_step(world: *mut WorldHandle, delta_seconds: f64) {
                 for (pi, ph) in proxies.iter().enumerate() {
                     if let Some(p) = g.particles.get(pi)
                         && let Some(h) = ph
-                        && let Some(rb) = world.inner.bodies.get_mut(*h)
+                        // `get_mut_internal`: internal pose sync, not a user change — see
+                        // the fluid block above for why this must not touch
+                        // `modified_bodies`. Wake-up comes from `set_translation(_, true)`.
+                        && let Some(rb) = world.inner.bodies.get_mut_internal(*h)
                     {
                         rb.set_translation(p.pos, true);
                         rb.set_linvel(p.vel, true);
@@ -935,8 +946,8 @@ pub extern "C" fn world_step(world: *mut WorldHandle, delta_seconds: f64) {
         // 官方软体后端：求解在 `pipeline.step` 内完成，这里把解写回授权数据，
         // 让 `soft_body_*` 的读接口（粒子/能量/体积）拿到本步结果。
         crate::rapier::soft_upstream::collect(
-                &mut world.inner.soft_bodies,
-                &world.inner.upstream_soft_bodies,
+            &mut world.inner.soft_bodies,
+            &world.inner.upstream_soft_bodies,
             &world.inner.soft_upstream_slots,
         );
 
@@ -994,6 +1005,10 @@ pub extern "C" fn world_step(world: *mut WorldHandle, delta_seconds: f64) {
         // Phase 2 (fluid SPH ↔ rigid): read the contacted proxy poses back into the
         // particles so collision response (against terrain/entities) propagates into
         // the fluid. Runs after `fluid.step` so the SPH integration happens first.
+        // Ordering asymmetry with granular (next block) is intentional: fluid reads
+        // back AFTER `fluid.step` — SPH integrates first and collision response
+        // overwrites its result; granular reads back BEFORE `granular.step` — the DEM
+        // integrator runs on top of the collision response.
         for (fi, fluid) in world.inner.fluids.iter_mut().enumerate() {
             #[allow(clippy::collapsible_if)]
             if let Some(proxies) = world.inner.fluid_proxies.get(&(fi as u32)) {
@@ -1014,6 +1029,10 @@ pub extern "C" fn world_step(world: *mut WorldHandle, delta_seconds: f64) {
         // into the particles (collision response), then run the DEM integrator
         // on the corrected cloud — gravity + inter-particle repulsion apply on
         // top of the collision response, and nothing is overwritten.
+        // Ordering asymmetry with fluid (previous block) is intentional: granular
+        // reads back BEFORE `granular.step` — the DEM integrator runs on top of the
+        // collision response; fluid reads back AFTER `fluid.step` — SPH integrates
+        // first and collision response overwrites its result.
         for (gi, proxies) in world.inner.granular_proxies.iter() {
             if let Some(g) = world.inner.granular_bodies.get_mut(*gi as usize) {
                 for (pi, ph) in proxies.iter().enumerate() {

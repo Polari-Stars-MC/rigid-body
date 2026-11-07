@@ -38,8 +38,8 @@ use crate::rapier::error::{
     ERR_CAPACITY, ERR_INVALID_ARGUMENT, ERR_NULL_POINTER, clear_error, ffi_guard, set_error,
 };
 use crate::rapier::ffi::{Vec3, WorldHandle, vec3_finite};
-use rapier3d::math::Vector;
 use crate::rapier::soft_data::{SoftBody, SoftSolver};
+use rapier3d::math::Vector;
 
 /// Upper bound on balloon particles accepted in one creation call.
 ///
