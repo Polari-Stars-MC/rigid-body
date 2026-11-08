@@ -1,6 +1,7 @@
 use std::cell::{Cell, RefCell};
 use std::ffi::CString;
 use std::os::raw::c_char;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 
 thread_local! {
     static LAST_ERROR_CODE: Cell<u32> = const { Cell::new(0) };
@@ -27,6 +28,26 @@ pub fn set_error(code: u32, message: &str) {
             *cell.borrow_mut() = value;
         }
     });
+}
+
+/// Run `f`, converting any panic into `ERR_INTERNAL` and `default`.
+///
+/// Every `extern "C"` entry point in this crate wraps its body in this guard
+/// so a Rust panic can never unwind across the C ABI boundary (which would
+/// abort the host JVM). Same shape as `mps-core`'s `ffi_guard`
+/// (`crates/mps-core/src/rapier/error.rs`) and `mps-cosmos`'s local copy
+/// (`crates/mps-cosmos/src/ffi.rs`); this crate cannot depend on either, so
+/// the barrier lives here next to the shared error slot. `default` is the
+/// return value a caller already treats as the failure sentinel for that
+/// entry point (`0` / `f64::NAN` / `Bool::FALSE` / `()`).
+pub fn ffi_guard<R>(default: R, f: impl FnOnce() -> R) -> R {
+    match catch_unwind(AssertUnwindSafe(f)) {
+        Ok(value) => value,
+        Err(_) => {
+            set_error(ERR_INTERNAL, "internal panic");
+            default
+        }
+    }
 }
 
 /// Current thread's last error code (`ERR_OK` when no error).

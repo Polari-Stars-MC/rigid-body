@@ -1,7 +1,8 @@
 use std::slice;
 
 use crate::error::{
-    ERR_CAPACITY, ERR_INVALID_ARGUMENT, ERR_NULL_POINTER, ERR_UNSUPPORTED, clear_error, set_error,
+    ERR_CAPACITY, ERR_INVALID_ARGUMENT, ERR_NULL_POINTER, ERR_UNSUPPORTED, clear_error, ffi_guard,
+    set_error,
 };
 use crate::ffi::{
     AcousticContactDesc, AcousticExcitationReport, AcousticMaterial, AcousticResonanceReport,
@@ -238,115 +239,119 @@ pub extern "C" fn acoustic_generalized_modal_analysis(
     mode_shape_capacity: u32,
     out_report: *mut ModalAnalysisReport,
 ) -> Bool {
-    if dof == 0 || dof > MAX_MODAL_DOF {
-        set_error(
-            ERR_CAPACITY,
-            "invalid modal analysis degree-of-freedom count",
-        );
-        return Bool::FALSE;
-    }
-    let mode_count = requested_modes.min(dof);
-    if mode_count == 0 || eigen_capacity < mode_count || mode_shape_capacity < mode_count * dof {
-        set_error(ERR_CAPACITY, "invalid modal analysis output capacity");
-        return Bool::FALSE;
-    }
-    if stiffness_matrix.is_null()
-        || mass_matrix.is_null()
-        || out_eigenvalues.is_null()
-        || out_frequencies_hz.is_null()
-        || out_mode_shapes.is_null()
-    {
-        set_error(ERR_NULL_POINTER, "modal analysis pointers are null");
-        return Bool::FALSE;
-    }
-
-    let n = dof as usize;
-    let Some(nn) = n.checked_mul(n) else {
-        set_error(ERR_INVALID_ARGUMENT, "matrix size overflow");
-        return Bool::FALSE;
-    };
-    let Some(stiffness) =
-        (unsafe { crate::ffi::checked_input_slice(stiffness_matrix, nn, "stiffness_matrix") }).ok()
-    else {
-        set_error(ERR_INVALID_ARGUMENT, "invalid stiffness matrix");
-        return Bool::FALSE;
-    };
-    let Some(mass) =
-        (unsafe { crate::ffi::checked_input_slice(mass_matrix, nn, "mass_matrix") }).ok()
-    else {
-        set_error(ERR_INVALID_ARGUMENT, "invalid mass matrix");
-        return Bool::FALSE;
-    };
-    if stiffness.iter().chain(mass).any(|value| !value.is_finite()) {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "modal analysis matrices contain non-finite values",
-        );
-        return Bool::FALSE;
-    }
-    let Some(mass_lower) = cholesky_decompose(mass, n) else {
-        set_error(ERR_INVALID_ARGUMENT, "mass matrix is not positive definite");
-        return Bool::FALSE;
-    };
-    let transformed = transform_generalized(stiffness, &mass_lower, n);
-    let Some((eigenvalues, modal_vectors)) = jacobi_eigen_symmetric(transformed, n) else {
-        set_error(
-            ERR_UNSUPPORTED,
-            "Jacobi solver does not support n > 200; use a different eigensolver",
-        );
-        return Bool::FALSE;
-    };
-    let mut order = (0..n).collect::<Vec<_>>();
-    order.sort_by(|&a, &b| eigenvalues[a].total_cmp(&eigenvalues[b]));
-
-    let Some(out_eigenvalues) = (unsafe {
-        crate::ffi::checked_output_slice(
-            out_eigenvalues,
-            eigen_capacity as usize,
-            "out_eigenvalues",
-        )
-    })
-    .ok() else {
-        set_error(ERR_INVALID_ARGUMENT, "invalid output buffer");
-        return Bool::FALSE;
-    };
-    let out_frequencies =
-        unsafe { slice::from_raw_parts_mut(out_frequencies_hz, eigen_capacity as usize) };
-    let out_modes =
-        unsafe { slice::from_raw_parts_mut(out_mode_shapes, mode_shape_capacity as usize) };
-
-    let mut stable_modes = 0;
-    let mut max_frequency_hz = 0.0;
-    for mode in 0..mode_count as usize {
-        let source = order[mode];
-        let eigenvalue = eigenvalues[source].max(0.0);
-        let frequency = eigenvalue.sqrt() / (2.0 * std::f64::consts::PI);
-        out_eigenvalues[mode] = eigenvalue;
-        out_frequencies[mode] = frequency;
-        max_frequency_hz = f64::max(max_frequency_hz, frequency);
-        if eigenvalues[source] >= 0.0 {
-            stable_modes += 1;
+    ffi_guard(Bool::FALSE, || {
+        if dof == 0 || dof > MAX_MODAL_DOF {
+            set_error(
+                ERR_CAPACITY,
+                "invalid modal analysis degree-of-freedom count",
+            );
+            return Bool::FALSE;
+        }
+        let mode_count = requested_modes.min(dof);
+        if mode_count == 0 || eigen_capacity < mode_count || mode_shape_capacity < mode_count * dof
+        {
+            set_error(ERR_CAPACITY, "invalid modal analysis output capacity");
+            return Bool::FALSE;
+        }
+        if stiffness_matrix.is_null()
+            || mass_matrix.is_null()
+            || out_eigenvalues.is_null()
+            || out_frequencies_hz.is_null()
+            || out_mode_shapes.is_null()
+        {
+            set_error(ERR_NULL_POINTER, "modal analysis pointers are null");
+            return Bool::FALSE;
         }
 
-        let y = (0..n)
-            .map(|row| modal_vectors[matrix_index(row, source, n)])
-            .collect::<Vec<_>>();
-        let x = solve_upper_from_lower(&mass_lower, &y, n);
-        for row in 0..n {
-            out_modes[mode * n + row] = x[row];
-        }
-    }
-
-    if let Some(out_report) = unsafe { out_report.as_mut() } {
-        *out_report = ModalAnalysisReport {
-            dof,
-            mode_count,
-            stable_mode_count: stable_modes,
-            max_frequency_hz,
+        let n = dof as usize;
+        let Some(nn) = n.checked_mul(n) else {
+            set_error(ERR_INVALID_ARGUMENT, "matrix size overflow");
+            return Bool::FALSE;
         };
-    }
-    clear_error();
-    Bool::TRUE
+        let Some(stiffness) =
+            (unsafe { crate::ffi::checked_input_slice(stiffness_matrix, nn, "stiffness_matrix") })
+                .ok()
+        else {
+            set_error(ERR_INVALID_ARGUMENT, "invalid stiffness matrix");
+            return Bool::FALSE;
+        };
+        let Some(mass) =
+            (unsafe { crate::ffi::checked_input_slice(mass_matrix, nn, "mass_matrix") }).ok()
+        else {
+            set_error(ERR_INVALID_ARGUMENT, "invalid mass matrix");
+            return Bool::FALSE;
+        };
+        if stiffness.iter().chain(mass).any(|value| !value.is_finite()) {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "modal analysis matrices contain non-finite values",
+            );
+            return Bool::FALSE;
+        }
+        let Some(mass_lower) = cholesky_decompose(mass, n) else {
+            set_error(ERR_INVALID_ARGUMENT, "mass matrix is not positive definite");
+            return Bool::FALSE;
+        };
+        let transformed = transform_generalized(stiffness, &mass_lower, n);
+        let Some((eigenvalues, modal_vectors)) = jacobi_eigen_symmetric(transformed, n) else {
+            set_error(
+                ERR_UNSUPPORTED,
+                "Jacobi solver does not support n > 200; use a different eigensolver",
+            );
+            return Bool::FALSE;
+        };
+        let mut order = (0..n).collect::<Vec<_>>();
+        order.sort_by(|&a, &b| eigenvalues[a].total_cmp(&eigenvalues[b]));
+
+        let Some(out_eigenvalues) = (unsafe {
+            crate::ffi::checked_output_slice(
+                out_eigenvalues,
+                eigen_capacity as usize,
+                "out_eigenvalues",
+            )
+        })
+        .ok() else {
+            set_error(ERR_INVALID_ARGUMENT, "invalid output buffer");
+            return Bool::FALSE;
+        };
+        let out_frequencies =
+            unsafe { slice::from_raw_parts_mut(out_frequencies_hz, eigen_capacity as usize) };
+        let out_modes =
+            unsafe { slice::from_raw_parts_mut(out_mode_shapes, mode_shape_capacity as usize) };
+
+        let mut stable_modes = 0;
+        let mut max_frequency_hz = 0.0;
+        for mode in 0..mode_count as usize {
+            let source = order[mode];
+            let eigenvalue = eigenvalues[source].max(0.0);
+            let frequency = eigenvalue.sqrt() / (2.0 * std::f64::consts::PI);
+            out_eigenvalues[mode] = eigenvalue;
+            out_frequencies[mode] = frequency;
+            max_frequency_hz = f64::max(max_frequency_hz, frequency);
+            if eigenvalues[source] >= 0.0 {
+                stable_modes += 1;
+            }
+
+            let y = (0..n)
+                .map(|row| modal_vectors[matrix_index(row, source, n)])
+                .collect::<Vec<_>>();
+            let x = solve_upper_from_lower(&mass_lower, &y, n);
+            for row in 0..n {
+                out_modes[mode * n + row] = x[row];
+            }
+        }
+
+        if let Some(out_report) = unsafe { out_report.as_mut() } {
+            *out_report = ModalAnalysisReport {
+                dof,
+                mode_count,
+                stable_mode_count: stable_modes,
+                max_frequency_hz,
+            };
+        }
+        clear_error();
+        Bool::TRUE
+    })
 }
 
 /// Computes natural frequency and damping characteristics of a single-DOF
@@ -364,39 +369,44 @@ pub extern "C" fn acoustic_structural_mode_sdof(
     damping: f64,
     out_report: *mut StructuralModeReport,
 ) -> Bool {
-    if !finite_non_negative(stiffness) || !finite_positive(mass) || !finite_non_negative(damping) {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "invalid single-DOF structural mode parameters",
-        );
-        return Bool::FALSE;
-    }
-    let angular_frequency = (stiffness / mass).sqrt();
-    let frequency_hz = angular_frequency / (2.0 * std::f64::consts::PI);
-    let critical_damping = 2.0 * (stiffness * mass).sqrt();
-    let damping_ratio = if critical_damping > EPSILON {
-        damping / critical_damping
-    } else {
-        0.0
-    };
-    let damped_frequency_hz = if damping_ratio < 1.0 {
-        frequency_hz * (1.0 - damping_ratio * damping_ratio).sqrt()
-    } else {
-        0.0
-    };
-    let Some(out_report) = (unsafe { out_report.as_mut() }) else {
-        set_error(ERR_NULL_POINTER, "structural mode output is null");
-        return Bool::FALSE;
-    };
-    *out_report = StructuralModeReport {
-        angular_frequency,
-        frequency_hz,
-        damping_ratio,
-        damped_frequency_hz,
-        critical_damping,
-    };
-    clear_error();
-    Bool::TRUE
+    ffi_guard(Bool::FALSE, || {
+        if !finite_non_negative(stiffness)
+            || !finite_positive(mass)
+            || !finite_non_negative(damping)
+        {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "invalid single-DOF structural mode parameters",
+            );
+            return Bool::FALSE;
+        }
+        let angular_frequency = (stiffness / mass).sqrt();
+        let frequency_hz = angular_frequency / (2.0 * std::f64::consts::PI);
+        let critical_damping = 2.0 * (stiffness * mass).sqrt();
+        let damping_ratio = if critical_damping > EPSILON {
+            damping / critical_damping
+        } else {
+            0.0
+        };
+        let damped_frequency_hz = if damping_ratio < 1.0 {
+            frequency_hz * (1.0 - damping_ratio * damping_ratio).sqrt()
+        } else {
+            0.0
+        };
+        let Some(out_report) = (unsafe { out_report.as_mut() }) else {
+            set_error(ERR_NULL_POINTER, "structural mode output is null");
+            return Bool::FALSE;
+        };
+        *out_report = StructuralModeReport {
+            angular_frequency,
+            frequency_hz,
+            damping_ratio,
+            damped_frequency_hz,
+            critical_damping,
+        };
+        clear_error();
+        Bool::TRUE
+    })
 }
 
 /// Advances one explicit time step of the discrete acoustic wave equation over
@@ -422,76 +432,86 @@ pub extern "C" fn acoustic_wave_equation_step(
     capacity: u32,
     out_report: *mut AcousticWaveReport,
 ) -> Bool {
-    if cell_count == 0 || cell_count > MAX_WAVE_CELLS || capacity < cell_count {
-        set_error(ERR_CAPACITY, "invalid acoustic wave capacity");
-        return Bool::FALSE;
-    }
-    if previous_pressure.is_null()
-        || current_pressure.is_null()
-        || laplacian_pressure.is_null()
-        || out_next_pressure.is_null()
-    {
-        set_error(ERR_NULL_POINTER, "acoustic wave pointers are null");
-        return Bool::FALSE;
-    }
-    if !finite_positive(sound_speed) || !finite_non_negative(damping) || !finite_non_negative(dt) {
-        set_error(ERR_INVALID_ARGUMENT, "invalid acoustic wave parameters");
-        return Bool::FALSE;
-    }
+    ffi_guard(Bool::FALSE, || {
+        if cell_count == 0 || cell_count > MAX_WAVE_CELLS || capacity < cell_count {
+            set_error(ERR_CAPACITY, "invalid acoustic wave capacity");
+            return Bool::FALSE;
+        }
+        if previous_pressure.is_null()
+            || current_pressure.is_null()
+            || laplacian_pressure.is_null()
+            || out_next_pressure.is_null()
+        {
+            set_error(ERR_NULL_POINTER, "acoustic wave pointers are null");
+            return Bool::FALSE;
+        }
+        if !finite_positive(sound_speed)
+            || !finite_non_negative(damping)
+            || !finite_non_negative(dt)
+        {
+            set_error(ERR_INVALID_ARGUMENT, "invalid acoustic wave parameters");
+            return Bool::FALSE;
+        }
 
-    let count = cell_count as usize;
-    macro_rules! input {
-        ($p:expr, $name:expr) => {
-            match unsafe { crate::ffi::checked_input_slice($p, count, $name) } {
-                Ok(v) => v,
-                Err(e) => {
-                    crate::ffi::formula_result::<()>(Err(e));
-                    return Bool::FALSE;
+        let count = cell_count as usize;
+        macro_rules! input {
+            ($p:expr, $name:expr) => {
+                match unsafe { crate::ffi::checked_input_slice($p, count, $name) } {
+                    Ok(v) => v,
+                    Err(e) => {
+                        crate::ffi::formula_result::<()>(Err(e));
+                        return Bool::FALSE;
+                    }
                 }
+            };
+        }
+        let previous = input!(previous_pressure, "previous_pressure");
+        let current = input!(current_pressure, "current_pressure");
+        let laplacian = input!(laplacian_pressure, "laplacian_pressure");
+        let next = match unsafe {
+            crate::ffi::checked_output_slice(
+                out_next_pressure,
+                capacity as usize,
+                "out_next_pressure",
+            )
+        } {
+            Ok(v) => v,
+            Err(e) => {
+                crate::ffi::formula_result::<()>(Err(e));
+                return Bool::FALSE;
             }
         };
-    }
-    let previous = input!(previous_pressure, "previous_pressure");
-    let current = input!(current_pressure, "current_pressure");
-    let laplacian = input!(laplacian_pressure, "laplacian_pressure");
-    let next = match unsafe {
-        crate::ffi::checked_output_slice(out_next_pressure, capacity as usize, "out_next_pressure")
-    } {
-        Ok(v) => v,
-        Err(e) => {
-            crate::ffi::formula_result::<()>(Err(e));
-            return Bool::FALSE;
+        let mut max_pressure = 0.0;
+        let mut acoustic_energy_acc = KahanSum::default();
+        for index in 0..count {
+            if !previous[index].is_finite()
+                || !current[index].is_finite()
+                || !laplacian[index].is_finite()
+            {
+                set_error(
+                    ERR_INVALID_ARGUMENT,
+                    "acoustic wave cell contains non-finite values",
+                );
+                return Bool::FALSE;
+            }
+            let velocity_term = (current[index] - previous[index]) * (1.0 - damping * dt);
+            next[index] = current[index]
+                + velocity_term
+                + sound_speed * sound_speed * dt * dt * laplacian[index];
+            max_pressure = f64::max(max_pressure, next[index].abs());
+            acoustic_energy_acc.add(0.5 * next[index] * next[index]);
         }
-    };
-    let mut max_pressure = 0.0;
-    let mut acoustic_energy_acc = KahanSum::default();
-    for index in 0..count {
-        if !previous[index].is_finite()
-            || !current[index].is_finite()
-            || !laplacian[index].is_finite()
-        {
-            set_error(
-                ERR_INVALID_ARGUMENT,
-                "acoustic wave cell contains non-finite values",
-            );
-            return Bool::FALSE;
-        }
-        let velocity_term = (current[index] - previous[index]) * (1.0 - damping * dt);
-        next[index] =
-            current[index] + velocity_term + sound_speed * sound_speed * dt * dt * laplacian[index];
-        max_pressure = f64::max(max_pressure, next[index].abs());
-        acoustic_energy_acc.add(0.5 * next[index] * next[index]);
-    }
 
-    if let Some(out_report) = unsafe { out_report.as_mut() } {
-        *out_report = AcousticWaveReport {
-            cell_count,
-            max_pressure,
-            acoustic_energy: acoustic_energy_acc.value(),
-        };
-    }
-    clear_error();
-    Bool::TRUE
+        if let Some(out_report) = unsafe { out_report.as_mut() } {
+            *out_report = AcousticWaveReport {
+                cell_count,
+                max_pressure,
+                acoustic_energy: acoustic_energy_acc.value(),
+            };
+        }
+        clear_error();
+        Bool::TRUE
+    })
 }
 
 /// Finds the modal frequency nearest to an excitation frequency and reports
@@ -513,72 +533,74 @@ pub extern "C" fn acoustic_detect_resonance(
     tolerance_hz: f64,
     out_report: *mut AcousticResonanceReport,
 ) -> Bool {
-    if mode_count == 0 || mode_count > MAX_MODAL_DOF {
-        set_error(ERR_CAPACITY, "invalid resonance mode count");
-        return Bool::FALSE;
-    }
-    if modal_frequencies_hz.is_null() {
-        set_error(ERR_NULL_POINTER, "modal frequency pointer is null");
-        return Bool::FALSE;
-    }
-    if !finite_non_negative(excitation_frequency_hz) || !finite_non_negative(tolerance_hz) {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "invalid resonance detection parameters",
-        );
-        return Bool::FALSE;
-    }
-    let modes = unsafe { slice::from_raw_parts(modal_frequencies_hz, mode_count as usize) };
-    let damping = if damping_ratios.is_null() {
-        None
-    } else {
-        Some(unsafe { slice::from_raw_parts(damping_ratios, mode_count as usize) })
-    };
-    let mut nearest_index = 0;
-    let mut nearest_frequency_hz = 0.0;
-    let mut frequency_delta_hz = f64::INFINITY;
-    let mut amplification_estimate = 0.0;
-    for (index, &frequency) in modes.iter().enumerate() {
-        if !finite_non_negative(frequency) {
+    ffi_guard(Bool::FALSE, || {
+        if mode_count == 0 || mode_count > MAX_MODAL_DOF {
+            set_error(ERR_CAPACITY, "invalid resonance mode count");
+            return Bool::FALSE;
+        }
+        if modal_frequencies_hz.is_null() {
+            set_error(ERR_NULL_POINTER, "modal frequency pointer is null");
+            return Bool::FALSE;
+        }
+        if !finite_non_negative(excitation_frequency_hz) || !finite_non_negative(tolerance_hz) {
             set_error(
                 ERR_INVALID_ARGUMENT,
-                "modal frequency contains non-finite values",
+                "invalid resonance detection parameters",
             );
             return Bool::FALSE;
         }
-        let delta = (frequency - excitation_frequency_hz).abs();
-        if delta < frequency_delta_hz {
-            nearest_index = index as u32;
-            nearest_frequency_hz = frequency;
-            frequency_delta_hz = delta;
-            let ratio = if frequency > EPSILON {
-                excitation_frequency_hz / frequency
-            } else {
-                0.0
-            };
-            let zeta = damping
-                .map(|values| values[index])
-                .filter(|value| value.is_finite() && *value >= 0.0)
-                .unwrap_or(0.0);
-            amplification_estimate = 1.0
-                / ((1.0 - ratio * ratio).powi(2) + (2.0 * zeta * ratio).powi(2))
-                    .sqrt()
-                    .max(EPSILON);
+        let modes = unsafe { slice::from_raw_parts(modal_frequencies_hz, mode_count as usize) };
+        let damping = if damping_ratios.is_null() {
+            None
+        } else {
+            Some(unsafe { slice::from_raw_parts(damping_ratios, mode_count as usize) })
+        };
+        let mut nearest_index = 0;
+        let mut nearest_frequency_hz = 0.0;
+        let mut frequency_delta_hz = f64::INFINITY;
+        let mut amplification_estimate = 0.0;
+        for (index, &frequency) in modes.iter().enumerate() {
+            if !finite_non_negative(frequency) {
+                set_error(
+                    ERR_INVALID_ARGUMENT,
+                    "modal frequency contains non-finite values",
+                );
+                return Bool::FALSE;
+            }
+            let delta = (frequency - excitation_frequency_hz).abs();
+            if delta < frequency_delta_hz {
+                nearest_index = index as u32;
+                nearest_frequency_hz = frequency;
+                frequency_delta_hz = delta;
+                let ratio = if frequency > EPSILON {
+                    excitation_frequency_hz / frequency
+                } else {
+                    0.0
+                };
+                let zeta = damping
+                    .map(|values| values[index])
+                    .filter(|value| value.is_finite() && *value >= 0.0)
+                    .unwrap_or(0.0);
+                amplification_estimate = 1.0
+                    / ((1.0 - ratio * ratio).powi(2) + (2.0 * zeta * ratio).powi(2))
+                        .sqrt()
+                        .max(EPSILON);
+            }
         }
-    }
-    let Some(out_report) = (unsafe { out_report.as_mut() }) else {
-        set_error(ERR_NULL_POINTER, "resonance output is null");
-        return Bool::FALSE;
-    };
-    *out_report = AcousticResonanceReport {
-        resonant: Bool::from(frequency_delta_hz <= tolerance_hz),
-        nearest_mode_index: nearest_index,
-        nearest_frequency_hz,
-        frequency_delta_hz,
-        amplification_estimate,
-    };
-    clear_error();
-    Bool::TRUE
+        let Some(out_report) = (unsafe { out_report.as_mut() }) else {
+            set_error(ERR_NULL_POINTER, "resonance output is null");
+            return Bool::FALSE;
+        };
+        *out_report = AcousticResonanceReport {
+            resonant: Bool::from(frequency_delta_hz <= tolerance_hz),
+            nearest_mode_index: nearest_index,
+            nearest_frequency_hz,
+            frequency_delta_hz,
+            amplification_estimate,
+        };
+        clear_error();
+        Bool::TRUE
+    })
 }
 
 /// Estimates the acoustic excitation (impulse, brightness, amplitude) produced
@@ -596,57 +618,60 @@ pub extern "C" fn acoustic_contact_material_excitation(
     contact: AcousticContactDesc,
     out_report: *mut AcousticExcitationReport,
 ) -> Bool {
-    if !material_valid(material_a) || !material_valid(material_b) {
-        set_error(ERR_INVALID_ARGUMENT, "invalid acoustic material parameters");
-        return Bool::FALSE;
-    }
-    if !finite_non_negative(contact.normal_force)
-        || !contact.normal_velocity.is_finite()
-        || !contact.tangential_velocity.is_finite()
-        || !finite_non_negative(contact.contact_area)
-        || !finite_positive(contact.dt)
-    {
-        set_error(ERR_INVALID_ARGUMENT, "invalid acoustic contact parameters");
-        return Bool::FALSE;
-    }
-    let Some(out_report) = (unsafe { out_report.as_mut() }) else {
-        set_error(ERR_NULL_POINTER, "acoustic excitation output is null");
-        return Bool::FALSE;
-    };
+    ffi_guard(Bool::FALSE, || {
+        if !material_valid(material_a) || !material_valid(material_b) {
+            set_error(ERR_INVALID_ARGUMENT, "invalid acoustic material parameters");
+            return Bool::FALSE;
+        }
+        if !finite_non_negative(contact.normal_force)
+            || !contact.normal_velocity.is_finite()
+            || !contact.tangential_velocity.is_finite()
+            || !finite_non_negative(contact.contact_area)
+            || !finite_positive(contact.dt)
+        {
+            set_error(ERR_INVALID_ARGUMENT, "invalid acoustic contact parameters");
+            return Bool::FALSE;
+        }
+        let Some(out_report) = (unsafe { out_report.as_mut() }) else {
+            set_error(ERR_NULL_POINTER, "acoustic excitation output is null");
+            return Bool::FALSE;
+        };
 
-    let effective_hardness = 2.0 * material_a.hardness * material_b.hardness
-        / (material_a.hardness + material_b.hardness).max(EPSILON);
-    let effective_density = 0.5 * (material_a.density + material_b.density);
-    let restitution = clamp01(0.5 * (material_a.restitution + material_b.restitution));
-    let damping = clamp01(0.5 * (material_a.damping + material_b.damping));
-    let roughness = clamp01(0.5 * (material_a.roughness + material_b.roughness));
-    let acoustic_impedance =
-        effective_density * 0.5 * (material_a.sound_speed + material_b.sound_speed);
+        let effective_hardness = 2.0 * material_a.hardness * material_b.hardness
+            / (material_a.hardness + material_b.hardness).max(EPSILON);
+        let effective_density = 0.5 * (material_a.density + material_b.density);
+        let restitution = clamp01(0.5 * (material_a.restitution + material_b.restitution));
+        let damping = clamp01(0.5 * (material_a.damping + material_b.damping));
+        let roughness = clamp01(0.5 * (material_a.roughness + material_b.roughness));
+        let acoustic_impedance =
+            effective_density * 0.5 * (material_a.sound_speed + material_b.sound_speed);
 
-    let normal_speed = contact.normal_velocity.abs();
-    let tangential_speed = contact.tangential_velocity.abs();
-    let impulse = contact.normal_force * contact.dt * (1.0 + restitution);
-    let contact_scale = (contact.contact_area + 1.0e-6).sqrt();
-    let hardness_scale = (effective_hardness / (effective_hardness + acoustic_impedance)).sqrt();
-    let normal_component = impulse * normal_speed * hardness_scale / contact_scale.max(EPSILON);
-    let scrape_component = contact.normal_force * tangential_speed * roughness * contact.dt
-        / contact_scale.max(EPSILON);
-    let brightness = clamp01(
-        hardness_scale * (1.0 - 0.5 * damping)
-            + roughness * tangential_speed / (normal_speed + tangential_speed + EPSILON),
-    );
-    let amplitude = (normal_component + scrape_component) * (1.0 - 0.75 * damping).max(0.0_f64);
+        let normal_speed = contact.normal_velocity.abs();
+        let tangential_speed = contact.tangential_velocity.abs();
+        let impulse = contact.normal_force * contact.dt * (1.0 + restitution);
+        let contact_scale = (contact.contact_area + 1.0e-6).sqrt();
+        let hardness_scale =
+            (effective_hardness / (effective_hardness + acoustic_impedance)).sqrt();
+        let normal_component = impulse * normal_speed * hardness_scale / contact_scale.max(EPSILON);
+        let scrape_component = contact.normal_force * tangential_speed * roughness * contact.dt
+            / contact_scale.max(EPSILON);
+        let brightness = clamp01(
+            hardness_scale * (1.0 - 0.5 * damping)
+                + roughness * tangential_speed / (normal_speed + tangential_speed + EPSILON),
+        );
+        let amplitude = (normal_component + scrape_component) * (1.0 - 0.75 * damping).max(0.0_f64);
 
-    *out_report = AcousticExcitationReport {
-        impulse,
-        normal_component,
-        scrape_component,
-        brightness,
-        damping,
-        amplitude,
-    };
-    clear_error();
-    Bool::TRUE
+        *out_report = AcousticExcitationReport {
+            impulse,
+            normal_component,
+            scrape_component,
+            brightness,
+            damping,
+            amplitude,
+        };
+        clear_error();
+        Bool::TRUE
+    })
 }
 
 /// Advances one time step of modal synthesis: integrates each mode's damped
@@ -673,87 +698,89 @@ pub extern "C" fn acoustic_modal_synthesis_step(
     output_gain: f64,
     out_report: *mut ModalSynthesisReport,
 ) -> Bool {
-    if mode_count == 0 || mode_count > MAX_AUDIO_MODES {
-        set_error(ERR_CAPACITY, "invalid modal synthesis mode count");
-        return Bool::FALSE;
-    }
-    if modal_frequencies_hz.is_null()
-        || modal_gains.is_null()
-        || mode_displacements.is_null()
-        || mode_velocities.is_null()
-    {
-        set_error(ERR_NULL_POINTER, "modal synthesis pointers are null");
-        return Bool::FALSE;
-    }
-    if !excitation.is_finite() || !finite_positive(dt) || !output_gain.is_finite() {
-        set_error(ERR_INVALID_ARGUMENT, "invalid modal synthesis parameters");
-        return Bool::FALSE;
-    }
-
-    let count = mode_count as usize;
-    let frequencies = unsafe { slice::from_raw_parts(modal_frequencies_hz, count) };
-    let damping = if damping_ratios.is_null() {
-        None
-    } else {
-        Some(unsafe { slice::from_raw_parts(damping_ratios, count) })
-    };
-    let gains = unsafe { slice::from_raw_parts(modal_gains, count) };
-    let displacements = unsafe { slice::from_raw_parts_mut(mode_displacements, count) };
-    let velocities = unsafe { slice::from_raw_parts_mut(mode_velocities, count) };
-
-    let mut sample_acc = KahanSum::default();
-    let mut peak_modal_displacement: f64 = 0.0;
-    let mut modal_energy_acc = KahanSum::default();
-    for index in 0..count {
-        let frequency = frequencies[index];
-        let gain = gains[index];
-        let zeta = damping
-            .map(|values| values[index])
-            .filter(|value| value.is_finite())
-            .unwrap_or(0.02)
-            .max(0.0);
-        if !finite_non_negative(frequency)
-            || !gain.is_finite()
-            || !displacements[index].is_finite()
-            || !velocities[index].is_finite()
+    ffi_guard(Bool::FALSE, || {
+        if mode_count == 0 || mode_count > MAX_AUDIO_MODES {
+            set_error(ERR_CAPACITY, "invalid modal synthesis mode count");
+            return Bool::FALSE;
+        }
+        if modal_frequencies_hz.is_null()
+            || modal_gains.is_null()
+            || mode_displacements.is_null()
+            || mode_velocities.is_null()
         {
-            set_error(
-                ERR_INVALID_ARGUMENT,
-                "modal synthesis buffer contains non-finite values",
-            );
+            set_error(ERR_NULL_POINTER, "modal synthesis pointers are null");
+            return Bool::FALSE;
+        }
+        if !excitation.is_finite() || !finite_positive(dt) || !output_gain.is_finite() {
+            set_error(ERR_INVALID_ARGUMENT, "invalid modal synthesis parameters");
             return Bool::FALSE;
         }
 
-        let omega = 2.0 * std::f64::consts::PI * frequency;
-        let acceleration = gain * excitation
-            - 2.0 * zeta * omega * velocities[index]
-            - omega * omega * displacements[index];
-        velocities[index] += acceleration * dt;
-        displacements[index] += velocities[index] * dt;
-        if frequency <= EPSILON {
-            velocities[index] *= (1.0 - zeta * dt).max(0.0);
+        let count = mode_count as usize;
+        let frequencies = unsafe { slice::from_raw_parts(modal_frequencies_hz, count) };
+        let damping = if damping_ratios.is_null() {
+            None
+        } else {
+            Some(unsafe { slice::from_raw_parts(damping_ratios, count) })
+        };
+        let gains = unsafe { slice::from_raw_parts(modal_gains, count) };
+        let displacements = unsafe { slice::from_raw_parts_mut(mode_displacements, count) };
+        let velocities = unsafe { slice::from_raw_parts_mut(mode_velocities, count) };
+
+        let mut sample_acc = KahanSum::default();
+        let mut peak_modal_displacement: f64 = 0.0;
+        let mut modal_energy_acc = KahanSum::default();
+        for index in 0..count {
+            let frequency = frequencies[index];
+            let gain = gains[index];
+            let zeta = damping
+                .map(|values| values[index])
+                .filter(|value| value.is_finite())
+                .unwrap_or(0.02)
+                .max(0.0);
+            if !finite_non_negative(frequency)
+                || !gain.is_finite()
+                || !displacements[index].is_finite()
+                || !velocities[index].is_finite()
+            {
+                set_error(
+                    ERR_INVALID_ARGUMENT,
+                    "modal synthesis buffer contains non-finite values",
+                );
+                return Bool::FALSE;
+            }
+
+            let omega = 2.0 * std::f64::consts::PI * frequency;
+            let acceleration = gain * excitation
+                - 2.0 * zeta * omega * velocities[index]
+                - omega * omega * displacements[index];
+            velocities[index] += acceleration * dt;
+            displacements[index] += velocities[index] * dt;
+            if frequency <= EPSILON {
+                velocities[index] *= (1.0 - zeta * dt).max(0.0);
+            }
+
+            sample_acc.add(gain * displacements[index]);
+            peak_modal_displacement = peak_modal_displacement.max(displacements[index].abs());
+            modal_energy_acc.add(
+                0.5 * (velocities[index] * velocities[index]
+                    + omega * omega * displacements[index] * displacements[index]),
+            );
         }
 
-        sample_acc.add(gain * displacements[index]);
-        peak_modal_displacement = peak_modal_displacement.max(displacements[index].abs());
-        modal_energy_acc.add(
-            0.5 * (velocities[index] * velocities[index]
-                + omega * omega * displacements[index] * displacements[index]),
-        );
-    }
-
-    let Some(out_report) = (unsafe { out_report.as_mut() }) else {
-        set_error(ERR_NULL_POINTER, "modal synthesis output is null");
-        return Bool::FALSE;
-    };
-    *out_report = ModalSynthesisReport {
-        mode_count,
-        sample: sample_acc.value() * output_gain,
-        peak_modal_displacement,
-        modal_energy: modal_energy_acc.value(),
-    };
-    clear_error();
-    Bool::TRUE
+        let Some(out_report) = (unsafe { out_report.as_mut() }) else {
+            set_error(ERR_NULL_POINTER, "modal synthesis output is null");
+            return Bool::FALSE;
+        };
+        *out_report = ModalSynthesisReport {
+            mode_count,
+            sample: sample_acc.value() * output_gain,
+            peak_modal_displacement,
+            modal_energy: modal_energy_acc.value(),
+        };
+        clear_error();
+        Bool::TRUE
+    })
 }
 
 /// Spatialize a mono sample between listener and source positions, producing
@@ -774,39 +801,41 @@ pub extern "C" fn acoustic_spatialize_mono_sample(
     rolloff: f64,
     out_sample: *mut SpatializedSample,
 ) -> Bool {
-    if !mono_sample.is_finite()
-        || !finite_vec3(source_position)
-        || !finite_vec3(listener_position)
-        || !finite_vec3(listener_right)
-        || !finite_positive(reference_distance)
-        || !finite_non_negative(rolloff)
-    {
-        set_error(ERR_INVALID_ARGUMENT, "invalid spatialization parameters");
-        return Bool::FALSE;
-    }
-    let Some(out_sample) = (unsafe { out_sample.as_mut() }) else {
-        set_error(ERR_NULL_POINTER, "spatialized sample output is null");
-        return Bool::FALSE;
-    };
+    ffi_guard(Bool::FALSE, || {
+        if !mono_sample.is_finite()
+            || !finite_vec3(source_position)
+            || !finite_vec3(listener_position)
+            || !finite_vec3(listener_right)
+            || !finite_positive(reference_distance)
+            || !finite_non_negative(rolloff)
+        {
+            set_error(ERR_INVALID_ARGUMENT, "invalid spatialization parameters");
+            return Bool::FALSE;
+        }
+        let Some(out_sample) = (unsafe { out_sample.as_mut() }) else {
+            set_error(ERR_NULL_POINTER, "spatialized sample output is null");
+            return Bool::FALSE;
+        };
 
-    let offset = vec3_sub(source_position, listener_position);
-    let distance = vec3_norm(offset);
-    let direction = vec3_normalize(offset);
-    let right = vec3_normalize(listener_right);
-    let pan = clamp01(0.5 + 0.5 * vec3_dot(direction, right));
-    let attenuation = reference_distance
-        / (reference_distance + rolloff * (distance - reference_distance).max(0.0));
-    let equal_power_left = (pan * std::f64::consts::FRAC_PI_2).cos();
-    let equal_power_right = (pan * std::f64::consts::FRAC_PI_2).sin();
-    let scaled = mono_sample * attenuation;
+        let offset = vec3_sub(source_position, listener_position);
+        let distance = vec3_norm(offset);
+        let direction = vec3_normalize(offset);
+        let right = vec3_normalize(listener_right);
+        let pan = clamp01(0.5 + 0.5 * vec3_dot(direction, right));
+        let attenuation = reference_distance
+            / (reference_distance + rolloff * (distance - reference_distance).max(0.0));
+        let equal_power_left = (pan * std::f64::consts::FRAC_PI_2).cos();
+        let equal_power_right = (pan * std::f64::consts::FRAC_PI_2).sin();
+        let scaled = mono_sample * attenuation;
 
-    *out_sample = SpatializedSample {
-        left: scaled * equal_power_left,
-        right: scaled * equal_power_right,
-        distance,
-        attenuation,
-        pan,
-    };
-    clear_error();
-    Bool::TRUE
+        *out_sample = SpatializedSample {
+            left: scaled * equal_power_left,
+            right: scaled * equal_power_right,
+            distance,
+            attenuation,
+            pan,
+        };
+        clear_error();
+        Bool::TRUE
+    })
 }

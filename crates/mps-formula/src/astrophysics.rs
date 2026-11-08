@@ -1,7 +1,9 @@
 use crate::math::Vector3f64;
 use std::f64::consts::PI;
 
-use crate::error::{ERR_CAPACITY, ERR_INVALID_ARGUMENT, ERR_NULL_POINTER, clear_error, set_error};
+use crate::error::{
+    ERR_CAPACITY, ERR_INVALID_ARGUMENT, ERR_NULL_POINTER, clear_error, ffi_guard, set_error,
+};
 use crate::ffi::{
     Bool, NBodyForceReport, NBodyParticle, NBodySolverParams, OrbitalResonanceReport,
     RelativisticOrbitReport, RocheLimitReport, Vec3, vec3_finite, vec3_from_rapier, vec3_to_rapier,
@@ -224,81 +226,89 @@ pub extern "C" fn astro_nbody_direct_accelerations(
     capacity: u32,
     out_report: *mut NBodyForceReport,
 ) -> Bool {
-    if particle_count == 0 || particle_count > MAX_NBODY_PARTICLES || capacity < particle_count {
-        set_error(ERR_CAPACITY, "invalid N-body direct capacity");
-        return Bool::FALSE;
-    }
-    if particles.is_null() || out_accelerations.is_null() {
-        set_error(ERR_NULL_POINTER, "N-body direct pointers are null");
-        return Bool::FALSE;
-    }
-    if !params_valid(params) {
-        set_error(ERR_INVALID_ARGUMENT, "invalid N-body direct parameters");
-        return Bool::FALSE;
-    }
-    let particles = match unsafe {
-        crate::ffi::checked_input_slice(particles, particle_count as usize, "particles")
-    } {
-        Ok(v) => v,
-        Err(e) => {
-            crate::ffi::formula_result::<()>(Err(e));
+    ffi_guard(Bool::FALSE, || {
+        if particle_count == 0 || particle_count > MAX_NBODY_PARTICLES || capacity < particle_count
+        {
+            set_error(ERR_CAPACITY, "invalid N-body direct capacity");
             return Bool::FALSE;
         }
-    };
-    if particles.iter().any(|particle| !particle_valid(*particle)) {
-        set_error(ERR_INVALID_ARGUMENT, "invalid N-body particle");
-        return Bool::FALSE;
-    }
-    let out = match unsafe {
-        crate::ffi::checked_output_slice(out_accelerations, capacity as usize, "out_accelerations")
-    } {
-        Ok(v) => v,
-        Err(e) => {
-            crate::ffi::formula_result::<()>(Err(e));
+        if particles.is_null() || out_accelerations.is_null() {
+            set_error(ERR_NULL_POINTER, "N-body direct pointers are null");
             return Bool::FALSE;
         }
-    };
-    // G×m 对每个天体是常量，预计算一次
-    let gm: Vec<f64> = particles
-        .iter()
-        .map(|particle| particle.mass * params.gravitational_constant)
-        .collect();
-    let mut report = NBodyForceReport {
-        body_count: particle_count,
-        ..NBodyForceReport::default()
-    };
-    for i in 0..particles.len() {
-        let mut acceleration = Vector3f64::zeros();
-        for j in 0..particles.len() {
-            if i == j {
-                continue;
+        if !params_valid(params) {
+            set_error(ERR_INVALID_ARGUMENT, "invalid N-body direct parameters");
+            return Bool::FALSE;
+        }
+        let particles = match unsafe {
+            crate::ffi::checked_input_slice(particles, particle_count as usize, "particles")
+        } {
+            Ok(v) => v,
+            Err(e) => {
+                crate::ffi::formula_result::<()>(Err(e));
+                return Bool::FALSE;
             }
-            acceleration += acceleration_from_mass(
-                vec3_to_rapier(particles[i].position),
-                vec3_to_rapier(particles[j].position),
-                gm[j],
-                params.softening,
-            );
-            report.direct_pair_count += 1;
+        };
+        if particles.iter().any(|particle| !particle_valid(*particle)) {
+            set_error(ERR_INVALID_ARGUMENT, "invalid N-body particle");
+            return Bool::FALSE;
         }
-        report.max_acceleration = f64::max(report.max_acceleration, acceleration.length());
-        out[i] = vec3_from_rapier(acceleration);
-    }
-    for i in 0..particles.len() {
-        for j in i + 1..particles.len() {
-            let distance = (vec3_to_rapier(particles[j].position)
-                - vec3_to_rapier(particles[i].position))
-            .length()
-            .max(params.softening);
-            report.potential_energy -=
-                params.gravitational_constant * particles[i].mass * particles[j].mass / distance;
+        let out = match unsafe {
+            crate::ffi::checked_output_slice(
+                out_accelerations,
+                capacity as usize,
+                "out_accelerations",
+            )
+        } {
+            Ok(v) => v,
+            Err(e) => {
+                crate::ffi::formula_result::<()>(Err(e));
+                return Bool::FALSE;
+            }
+        };
+        // G×m 对每个天体是常量，预计算一次
+        let gm: Vec<f64> = particles
+            .iter()
+            .map(|particle| particle.mass * params.gravitational_constant)
+            .collect();
+        let mut report = NBodyForceReport {
+            body_count: particle_count,
+            ..NBodyForceReport::default()
+        };
+        for i in 0..particles.len() {
+            let mut acceleration = Vector3f64::zeros();
+            for j in 0..particles.len() {
+                if i == j {
+                    continue;
+                }
+                acceleration += acceleration_from_mass(
+                    vec3_to_rapier(particles[i].position),
+                    vec3_to_rapier(particles[j].position),
+                    gm[j],
+                    params.softening,
+                );
+                report.direct_pair_count += 1;
+            }
+            report.max_acceleration = f64::max(report.max_acceleration, acceleration.length());
+            out[i] = vec3_from_rapier(acceleration);
         }
-    }
-    if let Some(out_report) = unsafe { out_report.as_mut() } {
-        *out_report = report;
-    }
-    clear_error();
-    Bool::TRUE
+        for i in 0..particles.len() {
+            for j in i + 1..particles.len() {
+                let distance = (vec3_to_rapier(particles[j].position)
+                    - vec3_to_rapier(particles[i].position))
+                .length()
+                .max(params.softening);
+                report.potential_energy -=
+                    params.gravitational_constant * particles[i].mass * particles[j].mass
+                        / distance;
+            }
+        }
+        if let Some(out_report) = unsafe { out_report.as_mut() } {
+            *out_report = report;
+        }
+        clear_error();
+        Bool::TRUE
+    })
 }
 
 /// 裸牛顿引力快速路径：无软化、无参数校验、无逐对防护的 unsafe 版本。
@@ -317,45 +327,51 @@ pub unsafe extern "C" fn astro_nbody_direct_accelerations_bare(
     out_accelerations: *mut Vec3,
     capacity: u32,
 ) {
-    if capacity < particle_count {
-        set_error(ERR_CAPACITY, "insufficient acceleration capacity");
-        return;
-    }
-    if particle_count == 0 {
-        clear_error();
-        return;
-    }
-    let Some(particles) = crate::ffi::formula_result(unsafe {
-        crate::ffi::checked_input_slice(particles, particle_count as usize, "particles")
-    }) else {
-        return;
-    };
-    let Some(out) = crate::ffi::formula_result(unsafe {
-        crate::ffi::checked_output_slice(out_accelerations, capacity as usize, "out_accelerations")
-    }) else {
-        return;
-    };
-
-    // G×m 对每个天体是常量，预缓存一次
-    let gm: Vec<f64> = particles
-        .iter()
-        .map(|particle| particle.mass * gravitational_constant)
-        .collect();
-
-    for i in 0..particles.len() {
-        let mut acceleration = Vector3f64::zeros();
-        let pi = vec3_to_rapier(particles[i].position);
-        for j in 0..particles.len() {
-            if i == j {
-                continue;
-            }
-            let offset = vec3_to_rapier(particles[j].position) - pi;
-            let r2 = offset.length_squared();
-            let r3 = r2.sqrt() * r2;
-            acceleration += offset * (gm[j] / r3);
+    ffi_guard((), || {
+        if capacity < particle_count {
+            set_error(ERR_CAPACITY, "insufficient acceleration capacity");
+            return;
         }
-        out[i] = vec3_from_rapier(acceleration);
-    }
+        if particle_count == 0 {
+            clear_error();
+            return;
+        }
+        let Some(particles) = crate::ffi::formula_result(unsafe {
+            crate::ffi::checked_input_slice(particles, particle_count as usize, "particles")
+        }) else {
+            return;
+        };
+        let Some(out) = crate::ffi::formula_result(unsafe {
+            crate::ffi::checked_output_slice(
+                out_accelerations,
+                capacity as usize,
+                "out_accelerations",
+            )
+        }) else {
+            return;
+        };
+
+        // G×m 对每个天体是常量，预缓存一次
+        let gm: Vec<f64> = particles
+            .iter()
+            .map(|particle| particle.mass * gravitational_constant)
+            .collect();
+
+        for i in 0..particles.len() {
+            let mut acceleration = Vector3f64::zeros();
+            let pi = vec3_to_rapier(particles[i].position);
+            for j in 0..particles.len() {
+                if i == j {
+                    continue;
+                }
+                let offset = vec3_to_rapier(particles[j].position) - pi;
+                let r2 = offset.length_squared();
+                let r3 = r2.sqrt() * r2;
+                acceleration += offset * (gm[j] / r3);
+            }
+            out[i] = vec3_from_rapier(acceleration);
+        }
+    })
 }
 
 /// Computes Barnes-Hut tree-approximated gravitational accelerations for an N-body system.
@@ -377,68 +393,75 @@ pub extern "C" fn astro_nbody_barnes_hut_accelerations(
     capacity: u32,
     out_report: *mut NBodyForceReport,
 ) -> Bool {
-    if particle_count == 0 || particle_count > MAX_NBODY_PARTICLES || capacity < particle_count {
-        set_error(ERR_CAPACITY, "invalid Barnes-Hut capacity");
-        return Bool::FALSE;
-    }
-    if particles.is_null() || out_accelerations.is_null() {
-        set_error(ERR_NULL_POINTER, "Barnes-Hut pointers are null");
-        return Bool::FALSE;
-    }
-    if !params_valid(params) {
-        set_error(ERR_INVALID_ARGUMENT, "invalid Barnes-Hut parameters");
-        return Bool::FALSE;
-    }
-    let Some(particles) = crate::ffi::formula_result(unsafe {
-        crate::ffi::checked_input_slice(particles, particle_count as usize, "particles")
-    }) else {
-        return Bool::FALSE;
-    };
-    if particles.iter().any(|particle| !particle_valid(*particle)) {
-        set_error(ERR_INVALID_ARGUMENT, "invalid Barnes-Hut particle");
-        return Bool::FALSE;
-    }
-    let mut nodes = vec![QuadNode {
-        bounds: root_bounds(particles),
-        mass: 0.0,
-        center_of_mass: Vector3f64::zeros(),
-        particle: None,
-        children: [None; 4],
-    }];
-    for index in 0..particles.len() {
-        insert_particle(&mut nodes, 0, index, particles);
-    }
-    let Some(out) = crate::ffi::formula_result(unsafe {
-        crate::ffi::checked_output_slice(out_accelerations, capacity as usize, "out_accelerations")
-    }) else {
-        return Bool::FALSE;
-    };
-    let mut report = NBodyForceReport {
-        body_count: particle_count,
-        ..NBodyForceReport::default()
-    };
-    for (i, out_item) in out.iter_mut().enumerate().take(particles.len()) {
-        let mut approximate = 0;
-        let mut direct = 0;
-        let acceleration = bh_acceleration(
-            &nodes,
-            0,
-            i,
-            particles,
-            params,
-            &mut approximate,
-            &mut direct,
-        );
-        report.approximate_node_count += approximate;
-        report.direct_pair_count += direct;
-        report.max_acceleration = f64::max(report.max_acceleration, acceleration.length());
-        *out_item = vec3_from_rapier(acceleration);
-    }
-    if let Some(out_report) = unsafe { out_report.as_mut() } {
-        *out_report = report;
-    }
-    clear_error();
-    Bool::TRUE
+    ffi_guard(Bool::FALSE, || {
+        if particle_count == 0 || particle_count > MAX_NBODY_PARTICLES || capacity < particle_count
+        {
+            set_error(ERR_CAPACITY, "invalid Barnes-Hut capacity");
+            return Bool::FALSE;
+        }
+        if particles.is_null() || out_accelerations.is_null() {
+            set_error(ERR_NULL_POINTER, "Barnes-Hut pointers are null");
+            return Bool::FALSE;
+        }
+        if !params_valid(params) {
+            set_error(ERR_INVALID_ARGUMENT, "invalid Barnes-Hut parameters");
+            return Bool::FALSE;
+        }
+        let Some(particles) = crate::ffi::formula_result(unsafe {
+            crate::ffi::checked_input_slice(particles, particle_count as usize, "particles")
+        }) else {
+            return Bool::FALSE;
+        };
+        if particles.iter().any(|particle| !particle_valid(*particle)) {
+            set_error(ERR_INVALID_ARGUMENT, "invalid Barnes-Hut particle");
+            return Bool::FALSE;
+        }
+        let mut nodes = vec![QuadNode {
+            bounds: root_bounds(particles),
+            mass: 0.0,
+            center_of_mass: Vector3f64::zeros(),
+            particle: None,
+            children: [None; 4],
+        }];
+        for index in 0..particles.len() {
+            insert_particle(&mut nodes, 0, index, particles);
+        }
+        let Some(out) = crate::ffi::formula_result(unsafe {
+            crate::ffi::checked_output_slice(
+                out_accelerations,
+                capacity as usize,
+                "out_accelerations",
+            )
+        }) else {
+            return Bool::FALSE;
+        };
+        let mut report = NBodyForceReport {
+            body_count: particle_count,
+            ..NBodyForceReport::default()
+        };
+        for (i, out_item) in out.iter_mut().enumerate().take(particles.len()) {
+            let mut approximate = 0;
+            let mut direct = 0;
+            let acceleration = bh_acceleration(
+                &nodes,
+                0,
+                i,
+                particles,
+                params,
+                &mut approximate,
+                &mut direct,
+            );
+            report.approximate_node_count += approximate;
+            report.direct_pair_count += direct;
+            report.max_acceleration = f64::max(report.max_acceleration, acceleration.length());
+            *out_item = vec3_from_rapier(acceleration);
+        }
+        if let Some(out_report) = unsafe { out_report.as_mut() } {
+            *out_report = report;
+        }
+        clear_error();
+        Bool::TRUE
+    })
 }
 
 /// Computes the FMM monopole (single-cluster) gravitational acceleration at a position.
@@ -455,26 +478,28 @@ pub extern "C" fn astro_fmm_monopole_acceleration(
     params: NBodySolverParams,
     out_acceleration: *mut Vec3,
 ) -> Bool {
-    if !vec3_finite(position)
-        || !vec3_finite(cluster_center)
-        || !finite_non_negative(cluster_mass)
-        || !params_valid(params)
-    {
-        set_error(ERR_INVALID_ARGUMENT, "invalid FMM monopole parameters");
-        return Bool::FALSE;
-    }
-    let Some(out_acceleration) = (unsafe { out_acceleration.as_mut() }) else {
-        set_error(ERR_NULL_POINTER, "FMM monopole output is null");
-        return Bool::FALSE;
-    };
-    *out_acceleration = vec3_from_rapier(acceleration_from_mass(
-        vec3_to_rapier(position),
-        vec3_to_rapier(cluster_center),
-        params.gravitational_constant * cluster_mass,
-        params.softening,
-    ));
-    clear_error();
-    Bool::TRUE
+    ffi_guard(Bool::FALSE, || {
+        if !vec3_finite(position)
+            || !vec3_finite(cluster_center)
+            || !finite_non_negative(cluster_mass)
+            || !params_valid(params)
+        {
+            set_error(ERR_INVALID_ARGUMENT, "invalid FMM monopole parameters");
+            return Bool::FALSE;
+        }
+        let Some(out_acceleration) = (unsafe { out_acceleration.as_mut() }) else {
+            set_error(ERR_NULL_POINTER, "FMM monopole output is null");
+            return Bool::FALSE;
+        };
+        *out_acceleration = vec3_from_rapier(acceleration_from_mass(
+            vec3_to_rapier(position),
+            vec3_to_rapier(cluster_center),
+            params.gravitational_constant * cluster_mass,
+            params.softening,
+        ));
+        clear_error();
+        Bool::TRUE
+    })
 }
 
 /// Computes the first-order post-Newtonian relativistic correction for a two-body orbit.
@@ -492,51 +517,53 @@ pub extern "C" fn astro_relativistic_orbit_correction(
     gravitational_constant: f64,
     out_report: *mut RelativisticOrbitReport,
 ) -> Bool {
-    if !vec3_finite(position)
-        || !vec3_finite(velocity)
-        || !finite_positive(central_mass)
-        || !finite_positive(gravitational_constant)
-    {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "invalid relativistic correction parameters",
-        );
-        return Bool::FALSE;
-    }
-    let r = vec3_to_rapier(position);
-    let v = vec3_to_rapier(velocity);
-    let radius = r.length();
-    if radius <= EPSILON {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "relativistic correction radius is zero",
-        );
-        return Bool::FALSE;
-    }
-    let mu = gravitational_constant * central_mass;
-    let h = r.cross(v).length();
-    let radial_velocity = r.dot(v) / radius;
-    let c2 = SPEED_OF_LIGHT * SPEED_OF_LIGHT;
-    // Compute r² and r³ safely; prefer r² * r over powi(3)
-    let r2 = radius * radius;
-    let r3 = r2 * radius;
-    let correction = r * (mu / (c2 * r3)) * (4.0 * mu / radius - v.length_squared())
-        + v * (4.0 * mu * radial_velocity / (c2 * r2));
-    let Some(out_report) = (unsafe { out_report.as_mut() }) else {
-        set_error(ERR_NULL_POINTER, "relativistic correction output is null");
-        return Bool::FALSE;
-    };
-    *out_report = RelativisticOrbitReport {
-        schwarzschild_radius: 2.0 * mu / (SPEED_OF_LIGHT * SPEED_OF_LIGHT),
-        periapsis_precession_per_orbit: if h > EPSILON {
-            6.0 * std::f64::consts::PI * mu * mu / (SPEED_OF_LIGHT * SPEED_OF_LIGHT * h * h)
-        } else {
-            0.0
-        },
-        correction_acceleration: vec3_from_rapier(correction),
-    };
-    clear_error();
-    Bool::TRUE
+    ffi_guard(Bool::FALSE, || {
+        if !vec3_finite(position)
+            || !vec3_finite(velocity)
+            || !finite_positive(central_mass)
+            || !finite_positive(gravitational_constant)
+        {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "invalid relativistic correction parameters",
+            );
+            return Bool::FALSE;
+        }
+        let r = vec3_to_rapier(position);
+        let v = vec3_to_rapier(velocity);
+        let radius = r.length();
+        if radius <= EPSILON {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "relativistic correction radius is zero",
+            );
+            return Bool::FALSE;
+        }
+        let mu = gravitational_constant * central_mass;
+        let h = r.cross(v).length();
+        let radial_velocity = r.dot(v) / radius;
+        let c2 = SPEED_OF_LIGHT * SPEED_OF_LIGHT;
+        // Compute r² and r³ safely; prefer r² * r over powi(3)
+        let r2 = radius * radius;
+        let r3 = r2 * radius;
+        let correction = r * (mu / (c2 * r3)) * (4.0 * mu / radius - v.length_squared())
+            + v * (4.0 * mu * radial_velocity / (c2 * r2));
+        let Some(out_report) = (unsafe { out_report.as_mut() }) else {
+            set_error(ERR_NULL_POINTER, "relativistic correction output is null");
+            return Bool::FALSE;
+        };
+        *out_report = RelativisticOrbitReport {
+            schwarzschild_radius: 2.0 * mu / (SPEED_OF_LIGHT * SPEED_OF_LIGHT),
+            periapsis_precession_per_orbit: if h > EPSILON {
+                6.0 * std::f64::consts::PI * mu * mu / (SPEED_OF_LIGHT * SPEED_OF_LIGHT * h * h)
+            } else {
+                0.0
+            },
+            correction_acceleration: vec3_from_rapier(correction),
+        };
+        clear_error();
+        Bool::TRUE
+    })
 }
 
 /// Computes the fluid and rigid Roche limits of a primary body and tests an orbital
@@ -637,22 +664,24 @@ pub extern "C" fn astro_roche_limit(
     orbital_distance: f64,
     out_report: *mut RocheLimitReport,
 ) -> Bool {
-    let Some(report) = roche_limit_report(
-        primary_radius,
-        primary_density,
-        secondary_density,
-        orbital_distance,
-    ) else {
-        set_error(ERR_INVALID_ARGUMENT, "invalid Roche limit parameters");
-        return Bool::FALSE;
-    };
-    let Some(out) = (unsafe { out_report.as_mut() }) else {
-        set_error(ERR_NULL_POINTER, "Roche limit output is null");
-        return Bool::FALSE;
-    };
-    *out = report;
-    clear_error();
-    Bool::TRUE
+    ffi_guard(Bool::FALSE, || {
+        let Some(report) = roche_limit_report(
+            primary_radius,
+            primary_density,
+            secondary_density,
+            orbital_distance,
+        ) else {
+            set_error(ERR_INVALID_ARGUMENT, "invalid Roche limit parameters");
+            return Bool::FALSE;
+        };
+        let Some(out) = (unsafe { out_report.as_mut() }) else {
+            set_error(ERR_NULL_POINTER, "Roche limit output is null");
+            return Bool::FALSE;
+        };
+        *out = report;
+        clear_error();
+        Bool::TRUE
+    })
 }
 
 /// Finds the best small-integer orbital period ratio and reports whether two orbits
@@ -671,44 +700,46 @@ pub extern "C" fn astro_orbital_resonance_detect(
     tolerance: f64,
     out_report: *mut OrbitalResonanceReport,
 ) -> Bool {
-    if !finite_positive(inner_period)
-        || !finite_positive(outer_period)
-        || max_denominator == 0
-        || max_denominator > 128
-        || !finite_non_negative(tolerance)
-    {
-        set_error(ERR_INVALID_ARGUMENT, "invalid orbital resonance parameters");
-        return Bool::FALSE;
-    }
-    let actual = outer_period / inner_period;
-    let mut best_num = 1;
-    let mut best_den = 1;
-    let mut best_error = f64::INFINITY;
-    for den in 1..=max_denominator {
-        let num = (actual * den as f64).round().max(1.0) as u32;
-        let target = num as f64 / den as f64;
-        let error = ((actual - target) / target).abs();
-        if error < best_error {
-            best_error = error;
-            best_num = num;
-            best_den = den;
+    ffi_guard(Bool::FALSE, || {
+        if !finite_positive(inner_period)
+            || !finite_positive(outer_period)
+            || max_denominator == 0
+            || max_denominator > 128
+            || !finite_non_negative(tolerance)
+        {
+            set_error(ERR_INVALID_ARGUMENT, "invalid orbital resonance parameters");
+            return Bool::FALSE;
         }
-    }
-    let Some(out_report) = (unsafe { out_report.as_mut() }) else {
-        set_error(ERR_NULL_POINTER, "orbital resonance output is null");
-        return Bool::FALSE;
-    };
-    let target = best_num as f64 / best_den as f64;
-    *out_report = OrbitalResonanceReport {
-        ratio_numerator: best_num,
-        ratio_denominator: best_den,
-        actual_ratio: actual,
-        target_ratio: target,
-        relative_error: best_error,
-        resonant: Bool::from(best_error <= tolerance),
-    };
-    clear_error();
-    Bool::TRUE
+        let actual = outer_period / inner_period;
+        let mut best_num = 1;
+        let mut best_den = 1;
+        let mut best_error = f64::INFINITY;
+        for den in 1..=max_denominator {
+            let num = (actual * den as f64).round().max(1.0) as u32;
+            let target = num as f64 / den as f64;
+            let error = ((actual - target) / target).abs();
+            if error < best_error {
+                best_error = error;
+                best_num = num;
+                best_den = den;
+            }
+        }
+        let Some(out_report) = (unsafe { out_report.as_mut() }) else {
+            set_error(ERR_NULL_POINTER, "orbital resonance output is null");
+            return Bool::FALSE;
+        };
+        let target = best_num as f64 / best_den as f64;
+        *out_report = OrbitalResonanceReport {
+            ratio_numerator: best_num,
+            ratio_denominator: best_den,
+            actual_ratio: actual,
+            target_ratio: target,
+            relative_error: best_error,
+            resonant: Bool::from(best_error <= tolerance),
+        };
+        clear_error();
+        Bool::TRUE
+    })
 }
 
 /// Applies the Barnes-Hut opening-angle criterion to decide whether a tree node
@@ -724,11 +755,15 @@ pub extern "C" fn astro_barnes_hut_should_open(
     distance: f64,
     opening_angle: f64,
 ) -> Bool {
-    if !finite_positive(node_width) || !finite_positive(distance) || !finite_positive(opening_angle)
-    {
-        return Bool::FALSE;
-    }
-    Bool::from(node_width / distance >= opening_angle)
+    ffi_guard(Bool::FALSE, || {
+        if !finite_positive(node_width)
+            || !finite_positive(distance)
+            || !finite_positive(opening_angle)
+        {
+            return Bool::FALSE;
+        }
+        Bool::from(node_width / distance >= opening_angle)
+    })
 }
 
 // ---------------------------------------------------------------------------

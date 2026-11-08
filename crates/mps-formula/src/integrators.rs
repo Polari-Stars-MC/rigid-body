@@ -37,7 +37,7 @@
 //! - Forest & Ruth, *4th-order symplectic integration*, Physica D 43 (1990)
 //! - Kahan, *Pracniques: further remarks on reducing truncation errors*, CACM 8 (1965)
 
-use crate::error::{ERR_INVALID_ARGUMENT, clear_error, set_error};
+use crate::error::{ERR_INVALID_ARGUMENT, clear_error, ffi_guard, set_error};
 use crate::ffi::{Bool, Vec3, vec3_finite, vec3_from_rapier, vec3_to_rapier};
 use crate::math::KahanVec3;
 
@@ -516,33 +516,35 @@ pub extern "C" fn integrator_leapfrog_step(
     dt: f64,
     accel_next_out: *mut Vec3,
 ) -> Bool {
-    if position.is_null() || velocity.is_null() || accel_now.is_null() {
-        set_error(ERR_INVALID_ARGUMENT, "null pointer");
-        return Bool::FALSE;
-    }
+    ffi_guard(Bool::FALSE, || {
+        if position.is_null() || velocity.is_null() || accel_now.is_null() {
+            set_error(ERR_INVALID_ARGUMENT, "null pointer");
+            return Bool::FALSE;
+        }
 
-    let pos = unsafe { &mut *position };
-    let vel = unsafe { &mut *velocity };
-    let a0 = unsafe { *accel_now };
+        let pos = unsafe { &mut *position };
+        let vel = unsafe { &mut *velocity };
+        let a0 = unsafe { *accel_now };
 
-    // Half-step kick
-    vel.x += 0.5 * a0.x * dt;
-    vel.y += 0.5 * a0.y * dt;
-    vel.z += 0.5 * a0.z * dt;
+        // Half-step kick
+        vel.x += 0.5 * a0.x * dt;
+        vel.y += 0.5 * a0.y * dt;
+        vel.z += 0.5 * a0.z * dt;
 
-    // Full drift
-    pos.x += vel.x * dt;
-    pos.y += vel.y * dt;
-    pos.z += vel.z * dt;
+        // Full drift
+        pos.x += vel.x * dt;
+        pos.y += vel.y * dt;
+        pos.z += vel.z * dt;
 
-    if let Some(out) = unsafe { accel_next_out.as_mut() } {
-        // Caller must compute a1 at new position and write it
-        // We just leave the door open; actual acceleration comes from caller
-        *out = Vec3::default();
-    }
+        if let Some(out) = unsafe { accel_next_out.as_mut() } {
+            // Caller must compute a1 at new position and write it
+            // We just leave the door open; actual acceleration comes from caller
+            *out = Vec3::default();
+        }
 
-    clear_error();
-    Bool::TRUE
+        clear_error();
+        Bool::TRUE
+    })
 }
 
 /// Compute post-Newtonian relativistic acceleration correction.
@@ -559,22 +561,28 @@ pub extern "C" fn integrator_post_newtonian(
     order: u32,
     out_acceleration: *mut Vec3,
 ) -> Bool {
-    if !vec3_finite(position) || !vec3_finite(velocity) || gm <= 0.0 || out_acceleration.is_null() {
-        set_error(ERR_INVALID_ARGUMENT, "invalid parameters");
-        return Bool::FALSE;
-    }
+    ffi_guard(Bool::FALSE, || {
+        if !vec3_finite(position)
+            || !vec3_finite(velocity)
+            || gm <= 0.0
+            || out_acceleration.is_null()
+        {
+            set_error(ERR_INVALID_ARGUMENT, "invalid parameters");
+            return Bool::FALSE;
+        }
 
-    let accel = match order {
-        1 => post_newtonian_1pn(position, velocity, gm, 0.0),
-        2 => post_newtonian_2pn(position, velocity, gm),
-        _ => post_newtonian_full(position, velocity, gm),
-    };
+        let accel = match order {
+            1 => post_newtonian_1pn(position, velocity, gm, 0.0),
+            2 => post_newtonian_2pn(position, velocity, gm),
+            _ => post_newtonian_full(position, velocity, gm),
+        };
 
-    unsafe {
-        *out_acceleration = accel;
-    }
-    clear_error();
-    Bool::TRUE
+        unsafe {
+            *out_acceleration = accel;
+        }
+        clear_error();
+        Bool::TRUE
+    })
 }
 
 /// Compute specific orbital energy.
@@ -590,15 +598,17 @@ pub extern "C" fn integrator_specific_energy(
     gm: f64,
     out_energy: *mut f64,
 ) -> Bool {
-    if !vec3_finite(position) || !vec3_finite(velocity) || gm <= 0.0 || out_energy.is_null() {
-        set_error(ERR_INVALID_ARGUMENT, "invalid parameters");
-        return Bool::FALSE;
-    }
-    unsafe {
-        *out_energy = specific_energy(position, velocity, gm);
-    }
-    clear_error();
-    Bool::TRUE
+    ffi_guard(Bool::FALSE, || {
+        if !vec3_finite(position) || !vec3_finite(velocity) || gm <= 0.0 || out_energy.is_null() {
+            set_error(ERR_INVALID_ARGUMENT, "invalid parameters");
+            return Bool::FALSE;
+        }
+        unsafe {
+            *out_energy = specific_energy(position, velocity, gm);
+        }
+        clear_error();
+        Bool::TRUE
+    })
 }
 
 /// Compute Keplerian orbital elements.
@@ -615,22 +625,24 @@ pub extern "C" fn integrator_keplerian_elements(
     gm: f64,
     out_elements: *mut f64, // [a, e, i, RAAN, argp, nu] — 6 f64s
 ) -> Bool {
-    if !vec3_finite(position) || !vec3_finite(velocity) || gm <= 0.0 || out_elements.is_null() {
-        set_error(ERR_INVALID_ARGUMENT, "invalid parameters");
-        return Bool::FALSE;
-    }
+    ffi_guard(Bool::FALSE, || {
+        if !vec3_finite(position) || !vec3_finite(velocity) || gm <= 0.0 || out_elements.is_null() {
+            set_error(ERR_INVALID_ARGUMENT, "invalid parameters");
+            return Bool::FALSE;
+        }
 
-    let (a, e, i, raan, argp, nu) = keplerian_elements(position, velocity, gm);
-    let arr = unsafe { std::slice::from_raw_parts_mut(out_elements, 6) };
-    arr[0] = a;
-    arr[1] = e;
-    arr[2] = i;
-    arr[3] = raan;
-    arr[4] = argp;
-    arr[5] = nu;
+        let (a, e, i, raan, argp, nu) = keplerian_elements(position, velocity, gm);
+        let arr = unsafe { std::slice::from_raw_parts_mut(out_elements, 6) };
+        arr[0] = a;
+        arr[1] = e;
+        arr[2] = i;
+        arr[3] = raan;
+        arr[4] = argp;
+        arr[5] = nu;
 
-    clear_error();
-    Bool::TRUE
+        clear_error();
+        Bool::TRUE
+    })
 }
 
 // ---------------------------------------------------------------------------

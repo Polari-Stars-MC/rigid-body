@@ -5,7 +5,7 @@
 //! error-handling conventions of the mps_rigid_body physics engine.
 
 use crate::error::{
-    ERR_INVALID_ARGUMENT, ERR_NULL_POINTER, ERR_UNSUPPORTED, clear_error, set_error,
+    ERR_INVALID_ARGUMENT, ERR_NULL_POINTER, ERR_UNSUPPORTED, clear_error, ffi_guard, set_error,
 };
 use crate::ffi::{
     Bool, GravitationalTimeDilation, LengthContraction, LorentzBoost, LorentzTransformedFrame,
@@ -39,26 +39,28 @@ fn write_out<T: Copy>(out: *mut T, value: T) -> Bool {
 /// No ownership is transferred; a null pointer fails with `ERR_NULL_POINTER`.
 #[unsafe(no_mangle)]
 pub extern "C" fn rel_lorentz_factor(speed: f64, out_gamma: *mut f64) -> Bool {
-    if !finite_non_negative(speed) {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "speed must be finite and non-negative",
-        );
-        return Bool::FALSE;
-    }
-    if speed >= SPEED_OF_LIGHT - EPSILON {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "speed must be less than speed of light",
-        );
-        return Bool::FALSE;
-    }
-    let beta = speed / SPEED_OF_LIGHT;
-    // Use mul_add to avoid catastrophic cancellation when beta ≈ 1:
-    // 1.0 - beta*beta = -(beta*beta - 1.0), computed with single rounding.
-    let one_minus_beta_sq = -mul_add(beta, beta, -1.0);
-    let gamma = 1.0 / one_minus_beta_sq.max(0.0).sqrt();
-    write_out(out_gamma, gamma)
+    ffi_guard(Bool::FALSE, || {
+        if !finite_non_negative(speed) {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "speed must be finite and non-negative",
+            );
+            return Bool::FALSE;
+        }
+        if speed >= SPEED_OF_LIGHT - EPSILON {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "speed must be less than speed of light",
+            );
+            return Bool::FALSE;
+        }
+        let beta = speed / SPEED_OF_LIGHT;
+        // Use mul_add to avoid catastrophic cancellation when beta ≈ 1:
+        // 1.0 - beta*beta = -(beta*beta - 1.0), computed with single rounding.
+        let one_minus_beta_sq = -mul_add(beta, beta, -1.0);
+        let gamma = 1.0 / one_minus_beta_sq.max(0.0).sqrt();
+        write_out(out_gamma, gamma)
+    })
 }
 
 /// Build the full 4x4 Lorentz boost matrix for a given velocity 3-vector.
@@ -72,81 +74,83 @@ pub extern "C" fn rel_lorentz_factor(speed: f64, out_gamma: *mut f64) -> Bool {
 /// `ERR_NULL_POINTER`.
 #[unsafe(no_mangle)]
 pub extern "C" fn rel_lorentz_boost(velocity: Vec3, out_boost: *mut LorentzBoost) -> Bool {
-    if !vec3_finite(velocity) {
-        set_error(ERR_INVALID_ARGUMENT, "velocity must be finite");
-        return Bool::FALSE;
-    }
-    let v = vec3_to_rapier(velocity);
-    let v_sq = v.length_squared();
-    let c2 = SPEED_OF_LIGHT * SPEED_OF_LIGHT;
+    ffi_guard(Bool::FALSE, || {
+        if !vec3_finite(velocity) {
+            set_error(ERR_INVALID_ARGUMENT, "velocity must be finite");
+            return Bool::FALSE;
+        }
+        let v = vec3_to_rapier(velocity);
+        let v_sq = v.length_squared();
+        let c2 = SPEED_OF_LIGHT * SPEED_OF_LIGHT;
 
-    if v_sq >= c2 - EPSILON {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "velocity magnitude must be less than c",
-        );
-        return Bool::FALSE;
-    }
-    // Identity for negligible velocity
-    if v_sq < EPSILON {
-        return write_out(
+        if v_sq >= c2 - EPSILON {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "velocity magnitude must be less than c",
+            );
+            return Bool::FALSE;
+        }
+        // Identity for negligible velocity
+        if v_sq < EPSILON {
+            return write_out(
+                out_boost,
+                LorentzBoost {
+                    m00: 1.0,
+                    m11: 1.0,
+                    m22: 1.0,
+                    m33: 1.0,
+                    ..LorentzBoost::default()
+                },
+            );
+        }
+        let beta_x = velocity.x / SPEED_OF_LIGHT;
+        let beta_y = velocity.y / SPEED_OF_LIGHT;
+        let beta_z = velocity.z / SPEED_OF_LIGHT;
+        // Sum beta components with mul_add for better precision near c
+        let beta_sq = mul_add(beta_x, beta_x, mul_add(beta_y, beta_y, beta_z * beta_z));
+        let one_minus_beta_sq = -mul_add(beta_sq, 1.0_f64, -1.0_f64); // -(β² - 1) = 1 - β²
+        // β² == 1 is the light-speed asymptote: gamma diverges, so there is no
+        // finite boost matrix. The old code substituted INFINITY for every matrix
+        // entry and returned `TRUE`, which contradicted `rel_lorentz_factor` (same
+        // velocity → ERR_INVALID_ARGUMENT) and handed the caller a NaN/Inf matrix
+        // it would happily multiply by.
+        if one_minus_beta_sq <= 0.0 {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "velocity magnitude must be less than c (boost is singular at c)",
+            );
+            return Bool::FALSE;
+        }
+        let gamma = 1.0 / one_minus_beta_sq.sqrt();
+        let g = gamma;
+        let gm1_over_b2 = if beta_sq > 0.0 {
+            (gamma - 1.0) / beta_sq
+        } else {
+            0.5 // limit as beta→0: (γ-1)/β² → 0.5
+        };
+
+        write_out(
             out_boost,
             LorentzBoost {
-                m00: 1.0,
-                m11: 1.0,
-                m22: 1.0,
-                m33: 1.0,
-                ..LorentzBoost::default()
+                m00: g,
+                m01: -g * beta_x,
+                m02: -g * beta_y,
+                m03: -g * beta_z,
+                m10: -g * beta_x,
+                m11: 1.0 + gm1_over_b2 * beta_x * beta_x,
+                m12: gm1_over_b2 * beta_x * beta_y,
+                m13: gm1_over_b2 * beta_x * beta_z,
+                m20: -g * beta_y,
+                m21: gm1_over_b2 * beta_y * beta_x,
+                m22: 1.0 + gm1_over_b2 * beta_y * beta_y,
+                m23: gm1_over_b2 * beta_y * beta_z,
+                m30: -g * beta_z,
+                m31: gm1_over_b2 * beta_z * beta_x,
+                m32: gm1_over_b2 * beta_z * beta_y,
+                m33: 1.0 + gm1_over_b2 * beta_z * beta_z,
             },
-        );
-    }
-    let beta_x = velocity.x / SPEED_OF_LIGHT;
-    let beta_y = velocity.y / SPEED_OF_LIGHT;
-    let beta_z = velocity.z / SPEED_OF_LIGHT;
-    // Sum beta components with mul_add for better precision near c
-    let beta_sq = mul_add(beta_x, beta_x, mul_add(beta_y, beta_y, beta_z * beta_z));
-    let one_minus_beta_sq = -mul_add(beta_sq, 1.0_f64, -1.0_f64); // -(β² - 1) = 1 - β²
-    // β² == 1 is the light-speed asymptote: gamma diverges, so there is no
-    // finite boost matrix. The old code substituted INFINITY for every matrix
-    // entry and returned `TRUE`, which contradicted `rel_lorentz_factor` (same
-    // velocity → ERR_INVALID_ARGUMENT) and handed the caller a NaN/Inf matrix
-    // it would happily multiply by.
-    if one_minus_beta_sq <= 0.0 {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "velocity magnitude must be less than c (boost is singular at c)",
-        );
-        return Bool::FALSE;
-    }
-    let gamma = 1.0 / one_minus_beta_sq.sqrt();
-    let g = gamma;
-    let gm1_over_b2 = if beta_sq > 0.0 {
-        (gamma - 1.0) / beta_sq
-    } else {
-        0.5 // limit as beta→0: (γ-1)/β² → 0.5
-    };
-
-    write_out(
-        out_boost,
-        LorentzBoost {
-            m00: g,
-            m01: -g * beta_x,
-            m02: -g * beta_y,
-            m03: -g * beta_z,
-            m10: -g * beta_x,
-            m11: 1.0 + gm1_over_b2 * beta_x * beta_x,
-            m12: gm1_over_b2 * beta_x * beta_y,
-            m13: gm1_over_b2 * beta_x * beta_z,
-            m20: -g * beta_y,
-            m21: gm1_over_b2 * beta_y * beta_x,
-            m22: 1.0 + gm1_over_b2 * beta_y * beta_y,
-            m23: gm1_over_b2 * beta_y * beta_z,
-            m30: -g * beta_z,
-            m31: gm1_over_b2 * beta_z * beta_x,
-            m32: gm1_over_b2 * beta_z * beta_y,
-            m33: 1.0 + gm1_over_b2 * beta_z * beta_z,
-        },
-    )
+        )
+    })
 }
 
 /// Apply a Lorentz boost to a 4-vector (ct, x, y, z).
@@ -165,23 +169,25 @@ pub extern "C" fn rel_transform_four_vector(
     z: f64,
     out_transformed: *mut LorentzTransformedFrame,
 ) -> Bool {
-    if !ct.is_finite() || ct <= 0.0 {
-        set_error(ERR_INVALID_ARGUMENT, "ct must be finite and non-negative");
-        return Bool::FALSE;
-    }
-    if !x.is_finite() || !y.is_finite() || !z.is_finite() {
-        set_error(ERR_INVALID_ARGUMENT, "spatial components must be finite");
-        return Bool::FALSE;
-    }
-    write_out(
-        out_transformed,
-        LorentzTransformedFrame {
-            ct_prime: boost.m00 * ct + boost.m01 * x + boost.m02 * y + boost.m03 * z,
-            x_prime: boost.m10 * ct + boost.m11 * x + boost.m12 * y + boost.m13 * z,
-            y_prime: boost.m20 * ct + boost.m21 * x + boost.m22 * y + boost.m23 * z,
-            z_prime: boost.m30 * ct + boost.m31 * x + boost.m32 * y + boost.m33 * z,
-        },
-    )
+    ffi_guard(Bool::FALSE, || {
+        if !ct.is_finite() || ct <= 0.0 {
+            set_error(ERR_INVALID_ARGUMENT, "ct must be finite and non-negative");
+            return Bool::FALSE;
+        }
+        if !x.is_finite() || !y.is_finite() || !z.is_finite() {
+            set_error(ERR_INVALID_ARGUMENT, "spatial components must be finite");
+            return Bool::FALSE;
+        }
+        write_out(
+            out_transformed,
+            LorentzTransformedFrame {
+                ct_prime: boost.m00 * ct + boost.m01 * x + boost.m02 * y + boost.m03 * z,
+                x_prime: boost.m10 * ct + boost.m11 * x + boost.m12 * y + boost.m13 * z,
+                y_prime: boost.m20 * ct + boost.m21 * x + boost.m22 * y + boost.m23 * z,
+                z_prime: boost.m30 * ct + boost.m31 * x + boost.m32 * y + boost.m33 * z,
+            },
+        )
+    })
 }
 
 /// Relativistic velocity addition (3D general formula).
@@ -194,50 +200,52 @@ pub extern "C" fn rel_transform_four_vector(
 /// No ownership is transferred; a null pointer fails with `ERR_NULL_POINTER`.
 #[unsafe(no_mangle)]
 pub extern "C" fn rel_velocity_addition(u: Vec3, v: Vec3, out_result: *mut Vec3) -> Bool {
-    if !vec3_finite(u) || !vec3_finite(v) {
-        set_error(ERR_INVALID_ARGUMENT, "velocities must be finite");
-        return Bool::FALSE;
-    }
-    let u_vec = vec3_to_rapier(u);
-    let v_vec = vec3_to_rapier(v);
-    let u_len_sq = u_vec.length_squared();
-    let c2 = SPEED_OF_LIGHT * SPEED_OF_LIGHT;
-    if u_len_sq >= c2 - EPSILON {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "velocity u magnitude must be less than c",
-        );
-        return Bool::FALSE;
-    }
-    if v_vec.length_squared() >= c2 - EPSILON {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "velocity v magnitude must be less than c",
-        );
-        return Bool::FALSE;
-    }
-    let denom = 1.0 + u_vec.dot(v_vec) / c2;
-    if denom.abs() < EPSILON {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "velocity addition denominator is zero",
-        );
-        return Bool::FALSE;
-    }
-    // Decompose v into parallel and perpendicular components relative to u
-    let result = if u_len_sq < EPSILON {
-        // u ≈ 0 → w ≈ v
-        v_vec
-    } else {
-        let u_len = u_len_sq.sqrt();
-        let u_hat = u_vec / u_len;
-        let v_parallel = u_hat * u_hat.dot(v_vec);
-        let v_perp = v_vec - v_parallel;
-        let one_minus_u = -mul_add(u_len_sq / c2, 1.0_f64, -1.0_f64);
-        let gamma_u = 1.0 / one_minus_u.max(0.0).sqrt();
-        (u_vec + v_parallel + v_perp / gamma_u) / denom
-    };
-    write_out(out_result, vec3_from_rapier(result))
+    ffi_guard(Bool::FALSE, || {
+        if !vec3_finite(u) || !vec3_finite(v) {
+            set_error(ERR_INVALID_ARGUMENT, "velocities must be finite");
+            return Bool::FALSE;
+        }
+        let u_vec = vec3_to_rapier(u);
+        let v_vec = vec3_to_rapier(v);
+        let u_len_sq = u_vec.length_squared();
+        let c2 = SPEED_OF_LIGHT * SPEED_OF_LIGHT;
+        if u_len_sq >= c2 - EPSILON {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "velocity u magnitude must be less than c",
+            );
+            return Bool::FALSE;
+        }
+        if v_vec.length_squared() >= c2 - EPSILON {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "velocity v magnitude must be less than c",
+            );
+            return Bool::FALSE;
+        }
+        let denom = 1.0 + u_vec.dot(v_vec) / c2;
+        if denom.abs() < EPSILON {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "velocity addition denominator is zero",
+            );
+            return Bool::FALSE;
+        }
+        // Decompose v into parallel and perpendicular components relative to u
+        let result = if u_len_sq < EPSILON {
+            // u ≈ 0 → w ≈ v
+            v_vec
+        } else {
+            let u_len = u_len_sq.sqrt();
+            let u_hat = u_vec / u_len;
+            let v_parallel = u_hat * u_hat.dot(v_vec);
+            let v_perp = v_vec - v_parallel;
+            let one_minus_u = -mul_add(u_len_sq / c2, 1.0_f64, -1.0_f64);
+            let gamma_u = 1.0 / one_minus_u.max(0.0).sqrt();
+            (u_vec + v_parallel + v_perp / gamma_u) / denom
+        };
+        write_out(out_result, vec3_from_rapier(result))
+    })
 }
 
 /// Rapidity = arctanh(v/c).
@@ -247,20 +255,22 @@ pub extern "C" fn rel_velocity_addition(u: Vec3, v: Vec3, out_result: *mut Vec3)
 /// Takes only scalar values; no pointers are dereferenced.
 #[unsafe(no_mangle)]
 pub extern "C" fn rel_rapidity(speed: f64) -> f64 {
-    if !finite_non_negative(speed) {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "speed must be finite and non-negative",
-        );
-        return f64::NAN;
-    }
-    if speed >= SPEED_OF_LIGHT - EPSILON {
-        set_error(ERR_INVALID_ARGUMENT, "speed must be less than c");
-        return f64::NAN;
-    }
-    clear_error();
-    let beta = speed / SPEED_OF_LIGHT;
-    0.5 * ((1.0 + beta) / (1.0 - beta)).ln()
+    ffi_guard(f64::NAN, || {
+        if !finite_non_negative(speed) {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "speed must be finite and non-negative",
+            );
+            return f64::NAN;
+        }
+        if speed >= SPEED_OF_LIGHT - EPSILON {
+            set_error(ERR_INVALID_ARGUMENT, "speed must be less than c");
+            return f64::NAN;
+        }
+        clear_error();
+        let beta = speed / SPEED_OF_LIGHT;
+        0.5 * ((1.0 + beta) / (1.0 - beta)).ln()
+    })
 }
 
 /// Beta (v/c) from Lorentz factor: beta = sqrt(1 - 1/gamma^2).
@@ -270,12 +280,14 @@ pub extern "C" fn rel_rapidity(speed: f64) -> f64 {
 /// Takes only scalar values; no pointers are dereferenced.
 #[unsafe(no_mangle)]
 pub extern "C" fn rel_beta_from_gamma(gamma: f64) -> f64 {
-    if !gamma.is_finite() || gamma < 1.0 {
-        set_error(ERR_INVALID_ARGUMENT, "gamma must be >= 1");
-        return f64::NAN;
-    }
-    clear_error();
-    (1.0 - 1.0 / (gamma * gamma)).sqrt()
+    ffi_guard(f64::NAN, || {
+        if !gamma.is_finite() || gamma < 1.0 {
+            set_error(ERR_INVALID_ARGUMENT, "gamma must be >= 1");
+            return f64::NAN;
+        }
+        clear_error();
+        (1.0 - 1.0 / (gamma * gamma)).sqrt()
+    })
 }
 
 /// Return the speed of light constant.
@@ -285,7 +297,7 @@ pub extern "C" fn rel_beta_from_gamma(gamma: f64) -> f64 {
 /// Takes no arguments; no pointers are dereferenced.
 #[unsafe(no_mangle)]
 pub extern "C" fn rel_speed_of_light() -> f64 {
-    SPEED_OF_LIGHT
+    ffi_guard(f64::NAN, || SPEED_OF_LIGHT)
 }
 
 // ---------------------------------------------------------------------------
@@ -299,15 +311,17 @@ pub extern "C" fn rel_speed_of_light() -> f64 {
 /// Takes only scalar values; no pointers are dereferenced.
 #[unsafe(no_mangle)]
 pub extern "C" fn rel_schwarzschild_radius(mass: f64, gravitational_constant: f64) -> f64 {
-    if !finite_positive(mass) || !finite_positive(gravitational_constant) {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "mass and gravitational constant must be positive",
-        );
-        return f64::NAN;
-    }
-    clear_error();
-    2.0 * gravitational_constant * mass / (SPEED_OF_LIGHT * SPEED_OF_LIGHT)
+    ffi_guard(f64::NAN, || {
+        if !finite_positive(mass) || !finite_positive(gravitational_constant) {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "mass and gravitational constant must be positive",
+            );
+            return f64::NAN;
+        }
+        clear_error();
+        2.0 * gravitational_constant * mass / (SPEED_OF_LIGHT * SPEED_OF_LIGHT)
+    })
 }
 
 /// Compute the Schwarzschild metric coefficients at a given radius.
@@ -324,40 +338,42 @@ pub extern "C" fn rel_schwarzschild_metric(
     gravitational_constant: f64,
     out_metric: *mut SchwarzschildMetric,
 ) -> Bool {
-    if !finite_positive(radius)
-        || !finite_positive(mass)
-        || !finite_positive(gravitational_constant)
-    {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "radius, mass, and gravitational constant must be positive",
-        );
-        return Bool::FALSE;
-    }
-    let rs = rel_schwarzschild_radius(mass, gravitational_constant);
-    if !rs.is_finite() {
-        return Bool::FALSE;
-    }
-    if radius <= rs + EPSILON {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "radius must be greater than the Schwarzschild radius",
-        );
-        return Bool::FALSE;
-    }
-    // mul_add to avoid cancellation when radius ≈ rs (near horizon)
-    let factor = -mul_add(rs / radius, 1.0_f64, -1.0_f64); // -(rs/r - 1) = 1 - rs/r
-    let g_tt = -factor;
-    let g_rr = 1.0 / factor;
-    write_out(
-        out_metric,
-        SchwarzschildMetric {
-            g_tt,
-            g_rr,
-            schwarzschild_radius: rs,
-            radius_over_rs: radius / rs,
-        },
-    )
+    ffi_guard(Bool::FALSE, || {
+        if !finite_positive(radius)
+            || !finite_positive(mass)
+            || !finite_positive(gravitational_constant)
+        {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "radius, mass, and gravitational constant must be positive",
+            );
+            return Bool::FALSE;
+        }
+        let rs = rel_schwarzschild_radius(mass, gravitational_constant);
+        if !rs.is_finite() {
+            return Bool::FALSE;
+        }
+        if radius <= rs + EPSILON {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "radius must be greater than the Schwarzschild radius",
+            );
+            return Bool::FALSE;
+        }
+        // mul_add to avoid cancellation when radius ≈ rs (near horizon)
+        let factor = -mul_add(rs / radius, 1.0_f64, -1.0_f64); // -(rs/r - 1) = 1 - rs/r
+        let g_tt = -factor;
+        let g_rr = 1.0 / factor;
+        write_out(
+            out_metric,
+            SchwarzschildMetric {
+                g_tt,
+                g_rr,
+                schwarzschild_radius: rs,
+                radius_over_rs: radius / rs,
+            },
+        )
+    })
 }
 
 /// Einstein light deflection angle: delta_phi = 4GM/(b*c^2).
@@ -374,29 +390,31 @@ pub extern "C" fn rel_light_deflection_angle(
     mass: f64,
     gravitational_constant: f64,
 ) -> f64 {
-    if !finite_positive(impact_parameter)
-        || !finite_positive(mass)
-        || !finite_positive(gravitational_constant)
-    {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "impact parameter, mass, and gravitational constant must be positive",
-        );
-        return f64::NAN;
-    }
-    let rs = rel_schwarzschild_radius(mass, gravitational_constant);
-    if !rs.is_finite() {
-        return f64::NAN;
-    }
-    if impact_parameter < 2.6 * rs {
-        set_error(
-            ERR_UNSUPPORTED,
-            "impact parameter too close to photon sphere (b < 2.6*rs)",
-        );
-        return f64::NAN;
-    }
-    clear_error();
-    4.0 * gravitational_constant * mass / (impact_parameter * SPEED_OF_LIGHT * SPEED_OF_LIGHT)
+    ffi_guard(f64::NAN, || {
+        if !finite_positive(impact_parameter)
+            || !finite_positive(mass)
+            || !finite_positive(gravitational_constant)
+        {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "impact parameter, mass, and gravitational constant must be positive",
+            );
+            return f64::NAN;
+        }
+        let rs = rel_schwarzschild_radius(mass, gravitational_constant);
+        if !rs.is_finite() {
+            return f64::NAN;
+        }
+        if impact_parameter < 2.6 * rs {
+            set_error(
+                ERR_UNSUPPORTED,
+                "impact parameter too close to photon sphere (b < 2.6*rs)",
+            );
+            return f64::NAN;
+        }
+        clear_error();
+        4.0 * gravitational_constant * mass / (impact_parameter * SPEED_OF_LIGHT * SPEED_OF_LIGHT)
+    })
 }
 
 /// Effective potential for Schwarzschild orbits (per unit mass m of the orbiting body).
@@ -418,39 +436,42 @@ pub extern "C" fn rel_effective_potential(
     gravitational_constant: f64,
     out_potential: *mut f64,
 ) -> Bool {
-    if !finite_positive(radius)
-        || !finite_positive(mass)
-        || !finite_positive(gravitational_constant)
-    {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "radius, mass, and gravitational constant must be positive",
-        );
-        return Bool::FALSE;
-    }
-    if !finite_non_negative(angular_momentum) {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "angular momentum must be finite and non-negative",
-        );
-        return Bool::FALSE;
-    }
-    let rs = rel_schwarzschild_radius(mass, gravitational_constant);
-    if !rs.is_finite() {
-        return Bool::FALSE;
-    }
-    if radius <= rs + EPSILON {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "radius must be greater than the Schwarzschild radius",
-        );
-        return Bool::FALSE;
-    }
-    let gm = gravitational_constant * mass;
-    let newtonian = -gm / radius + 0.5 * angular_momentum * angular_momentum / (radius * radius);
-    let gr_correction = -gm * angular_momentum * angular_momentum
-        / (SPEED_OF_LIGHT * SPEED_OF_LIGHT * radius.powi(3));
-    write_out(out_potential, newtonian + gr_correction)
+    ffi_guard(Bool::FALSE, || {
+        if !finite_positive(radius)
+            || !finite_positive(mass)
+            || !finite_positive(gravitational_constant)
+        {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "radius, mass, and gravitational constant must be positive",
+            );
+            return Bool::FALSE;
+        }
+        if !finite_non_negative(angular_momentum) {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "angular momentum must be finite and non-negative",
+            );
+            return Bool::FALSE;
+        }
+        let rs = rel_schwarzschild_radius(mass, gravitational_constant);
+        if !rs.is_finite() {
+            return Bool::FALSE;
+        }
+        if radius <= rs + EPSILON {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "radius must be greater than the Schwarzschild radius",
+            );
+            return Bool::FALSE;
+        }
+        let gm = gravitational_constant * mass;
+        let newtonian =
+            -gm / radius + 0.5 * angular_momentum * angular_momentum / (radius * radius);
+        let gr_correction = -gm * angular_momentum * angular_momentum
+            / (SPEED_OF_LIGHT * SPEED_OF_LIGHT * radius.powi(3));
+        write_out(out_potential, newtonian + gr_correction)
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -474,55 +495,57 @@ pub extern "C" fn rel_gravitational_time_dilation(
     gravitational_constant: f64,
     out_dilation: *mut GravitationalTimeDilation,
 ) -> Bool {
-    if !finite_positive(radius)
-        || !finite_positive(mass)
-        || !finite_positive(gravitational_constant)
-    {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "radius, mass, and gravitational constant must be positive",
-        );
-        return Bool::FALSE;
-    }
-    let rs = rel_schwarzschild_radius(mass, gravitational_constant);
-    if !rs.is_finite() {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "Schwarzschild radius is not finite (mass and G overflow)",
-        );
-        return Bool::FALSE;
-    }
-    if radius <= rs + EPSILON {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "radius must be greater than the Schwarzschild radius",
-        );
-        return Bool::FALSE;
-    }
-    let stationary_factor = (1.0 - rs / radius).sqrt();
-    // Orbital factor requires r > 1.5*rs (the ISCO for Schwarzschild). Below it
-    // there is no circular orbit, so this is a domain edge, not a NaN result:
-    // reporting `orbital_factor = NaN` while returning `TRUE` violated
-    // docs/formula-numeric-domains.md ("non-finite intermediate or result must
-    // fail") and poisoned every downstream computation with a silent NaN.
-    let min_orbital_radius = 1.5 * rs;
-    if radius <= min_orbital_radius + EPSILON {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "no circular orbit inside 1.5 * Schwarzschild radius (ISCO)",
-        );
-        return Bool::FALSE;
-    }
-    let orbital_factor = (1.0 - 1.5 * rs / radius).sqrt();
-    let orbiting_velocity = (gravitational_constant * mass / radius).sqrt();
-    write_out(
-        out_dilation,
-        GravitationalTimeDilation {
-            stationary_factor,
-            orbital_factor,
-            orbiting_velocity,
-        },
-    )
+    ffi_guard(Bool::FALSE, || {
+        if !finite_positive(radius)
+            || !finite_positive(mass)
+            || !finite_positive(gravitational_constant)
+        {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "radius, mass, and gravitational constant must be positive",
+            );
+            return Bool::FALSE;
+        }
+        let rs = rel_schwarzschild_radius(mass, gravitational_constant);
+        if !rs.is_finite() {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "Schwarzschild radius is not finite (mass and G overflow)",
+            );
+            return Bool::FALSE;
+        }
+        if radius <= rs + EPSILON {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "radius must be greater than the Schwarzschild radius",
+            );
+            return Bool::FALSE;
+        }
+        let stationary_factor = (1.0 - rs / radius).sqrt();
+        // Orbital factor requires r > 1.5*rs (the ISCO for Schwarzschild). Below it
+        // there is no circular orbit, so this is a domain edge, not a NaN result:
+        // reporting `orbital_factor = NaN` while returning `TRUE` violated
+        // docs/formula-numeric-domains.md ("non-finite intermediate or result must
+        // fail") and poisoned every downstream computation with a silent NaN.
+        let min_orbital_radius = 1.5 * rs;
+        if radius <= min_orbital_radius + EPSILON {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "no circular orbit inside 1.5 * Schwarzschild radius (ISCO)",
+            );
+            return Bool::FALSE;
+        }
+        let orbital_factor = (1.0 - 1.5 * rs / radius).sqrt();
+        let orbiting_velocity = (gravitational_constant * mass / radius).sqrt();
+        write_out(
+            out_dilation,
+            GravitationalTimeDilation {
+                stationary_factor,
+                orbital_factor,
+                orbiting_velocity,
+            },
+        )
+    })
 }
 
 /// Lightweight gravitational time dilation: returns sqrt(1 - rs/r) directly.
@@ -535,22 +558,24 @@ pub extern "C" fn rel_gravitational_time_dilation_simple(
     radius: f64,
     schwarzschild_radius: f64,
 ) -> f64 {
-    if !finite_positive(radius) || !finite_non_negative(schwarzschild_radius) {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "radius and schwarzschild_radius must be positive",
-        );
-        return f64::NAN;
-    }
-    if radius <= schwarzschild_radius + EPSILON {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "radius must be greater than the Schwarzschild radius",
-        );
-        return f64::NAN;
-    }
-    clear_error();
-    (1.0 - schwarzschild_radius / radius).sqrt()
+    ffi_guard(f64::NAN, || {
+        if !finite_positive(radius) || !finite_non_negative(schwarzschild_radius) {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "radius and schwarzschild_radius must be positive",
+            );
+            return f64::NAN;
+        }
+        if radius <= schwarzschild_radius + EPSILON {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "radius must be greater than the Schwarzschild radius",
+            );
+            return f64::NAN;
+        }
+        clear_error();
+        (1.0 - schwarzschild_radius / radius).sqrt()
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -570,40 +595,42 @@ pub extern "C" fn rel_length_contraction(
     speed: f64,
     out_contraction: *mut LengthContraction,
 ) -> Bool {
-    if !finite_non_negative(proper_length) {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "proper length must be finite and non-negative",
-        );
-        return Bool::FALSE;
-    }
-    if !finite_non_negative(speed) {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "speed must be finite and non-negative",
-        );
-        return Bool::FALSE;
-    }
-    if speed >= SPEED_OF_LIGHT - EPSILON {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "speed must be less than speed of light",
-        );
-        return Bool::FALSE;
-    }
-    let beta = speed / SPEED_OF_LIGHT;
-    let one_minus_beta_sq = -mul_add(beta, beta, -1.0);
-    let gamma = 1.0 / one_minus_beta_sq.max(0.0).sqrt();
-    let contracted = proper_length / gamma;
-    write_out(
-        out_contraction,
-        LengthContraction {
-            lorentz_factor: gamma,
-            contracted_length: contracted,
-            proper_length,
-            speed_ratio: beta,
-        },
-    )
+    ffi_guard(Bool::FALSE, || {
+        if !finite_non_negative(proper_length) {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "proper length must be finite and non-negative",
+            );
+            return Bool::FALSE;
+        }
+        if !finite_non_negative(speed) {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "speed must be finite and non-negative",
+            );
+            return Bool::FALSE;
+        }
+        if speed >= SPEED_OF_LIGHT - EPSILON {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "speed must be less than speed of light",
+            );
+            return Bool::FALSE;
+        }
+        let beta = speed / SPEED_OF_LIGHT;
+        let one_minus_beta_sq = -mul_add(beta, beta, -1.0);
+        let gamma = 1.0 / one_minus_beta_sq.max(0.0).sqrt();
+        let contracted = proper_length / gamma;
+        write_out(
+            out_contraction,
+            LengthContraction {
+                lorentz_factor: gamma,
+                contracted_length: contracted,
+                proper_length,
+                speed_ratio: beta,
+            },
+        )
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -633,81 +660,83 @@ pub extern "C" fn rel_particle_properties(
     velocity: Vec3,
     out_particle: *mut RelativisticParticle,
 ) -> Bool {
-    if !finite_non_negative(mass) {
-        set_error(ERR_INVALID_ARGUMENT, "mass must be finite and non-negative");
-        return Bool::FALSE;
-    }
-    if !vec3_finite(velocity) {
-        set_error(ERR_INVALID_ARGUMENT, "velocity must be finite");
-        return Bool::FALSE;
-    }
-    let v_vec = vec3_to_rapier(velocity);
-    let speed_sq = v_vec.length_squared();
-    let c2 = SPEED_OF_LIGHT * SPEED_OF_LIGHT;
-
-    // Photon / massless particle
-    if mass < EPSILON {
-        if speed_sq >= c2 - EPSILON {
-            // Unit direction only: multiplying by INFINITY turned every
-            // axis-aligned photon into `(inf, NaN, NaN)` via `0 * inf == NaN`.
-            let dir = if speed_sq > EPSILON {
-                v_vec / speed_sq.sqrt()
-            } else {
-                v_vec
-            };
-            return write_out(
-                out_particle,
-                RelativisticParticle {
-                    lorentz_factor: f64::INFINITY,
-                    total_energy: f64::INFINITY,
-                    kinetic_energy: f64::INFINITY,
-                    momentum_magnitude: f64::INFINITY,
-                    momentum: vec3_from_rapier(dir),
-                    rapidity: f64::INFINITY,
-                },
-            );
+    ffi_guard(Bool::FALSE, || {
+        if !finite_non_negative(mass) {
+            set_error(ERR_INVALID_ARGUMENT, "mass must be finite and non-negative");
+            return Bool::FALSE;
         }
-        // Massless but below c → invalid
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "massless particles must travel at speed c",
-        );
-        return Bool::FALSE;
-    }
-    // Massive particle
-    if speed_sq >= c2 - EPSILON {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "massive particle speed must be less than c",
-        );
-        return Bool::FALSE;
-    }
-    let speed = speed_sq.sqrt();
-    let beta = speed / SPEED_OF_LIGHT;
-    let one_minus_beta_sq = -mul_add(beta, beta, -1.0);
-    let gamma = 1.0 / one_minus_beta_sq.max(0.0).sqrt();
-    let mc2 = mass * c2;
-    let total_energy = gamma * mc2;
-    let kinetic_energy = (gamma - 1.0) * mc2;
-    let momentum_mag = gamma * mass * speed;
-    let momentum = if speed_sq > EPSILON {
-        v_vec / speed * momentum_mag
-    } else {
-        crate::math::Vector3f64::zeros()
-    };
-    let rapidity = 0.5 * ((1.0 + beta) / (1.0 - beta)).ln();
+        if !vec3_finite(velocity) {
+            set_error(ERR_INVALID_ARGUMENT, "velocity must be finite");
+            return Bool::FALSE;
+        }
+        let v_vec = vec3_to_rapier(velocity);
+        let speed_sq = v_vec.length_squared();
+        let c2 = SPEED_OF_LIGHT * SPEED_OF_LIGHT;
 
-    write_out(
-        out_particle,
-        RelativisticParticle {
-            lorentz_factor: gamma,
-            total_energy,
-            kinetic_energy,
-            momentum_magnitude: momentum_mag,
-            momentum: vec3_from_rapier(momentum),
-            rapidity,
-        },
-    )
+        // Photon / massless particle
+        if mass < EPSILON {
+            if speed_sq >= c2 - EPSILON {
+                // Unit direction only: multiplying by INFINITY turned every
+                // axis-aligned photon into `(inf, NaN, NaN)` via `0 * inf == NaN`.
+                let dir = if speed_sq > EPSILON {
+                    v_vec / speed_sq.sqrt()
+                } else {
+                    v_vec
+                };
+                return write_out(
+                    out_particle,
+                    RelativisticParticle {
+                        lorentz_factor: f64::INFINITY,
+                        total_energy: f64::INFINITY,
+                        kinetic_energy: f64::INFINITY,
+                        momentum_magnitude: f64::INFINITY,
+                        momentum: vec3_from_rapier(dir),
+                        rapidity: f64::INFINITY,
+                    },
+                );
+            }
+            // Massless but below c → invalid
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "massless particles must travel at speed c",
+            );
+            return Bool::FALSE;
+        }
+        // Massive particle
+        if speed_sq >= c2 - EPSILON {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "massive particle speed must be less than c",
+            );
+            return Bool::FALSE;
+        }
+        let speed = speed_sq.sqrt();
+        let beta = speed / SPEED_OF_LIGHT;
+        let one_minus_beta_sq = -mul_add(beta, beta, -1.0);
+        let gamma = 1.0 / one_minus_beta_sq.max(0.0).sqrt();
+        let mc2 = mass * c2;
+        let total_energy = gamma * mc2;
+        let kinetic_energy = (gamma - 1.0) * mc2;
+        let momentum_mag = gamma * mass * speed;
+        let momentum = if speed_sq > EPSILON {
+            v_vec / speed * momentum_mag
+        } else {
+            crate::math::Vector3f64::zeros()
+        };
+        let rapidity = 0.5 * ((1.0 + beta) / (1.0 - beta)).ln();
+
+        write_out(
+            out_particle,
+            RelativisticParticle {
+                lorentz_factor: gamma,
+                total_energy,
+                kinetic_energy,
+                momentum_magnitude: momentum_mag,
+                momentum: vec3_from_rapier(momentum),
+                rapidity,
+            },
+        )
+    })
 }
 
 /// Compute the invariant (rest) mass from energy and momentum:
@@ -721,22 +750,28 @@ pub extern "C" fn rel_particle_properties(
 /// Takes only scalar values; no pointers are dereferenced.
 #[unsafe(no_mangle)]
 pub extern "C" fn rel_invariant_mass(energy: f64, px: f64, py: f64, pz: f64) -> f64 {
-    if !energy.is_finite() || energy < 0.0 || !px.is_finite() || !py.is_finite() || !pz.is_finite()
-    {
-        set_error(ERR_INVALID_ARGUMENT, "energy and momentum must be finite");
-        return f64::NAN;
-    }
-    let c2 = SPEED_OF_LIGHT * SPEED_OF_LIGHT;
-    let p_sq = px * px + py * py + pz * pz;
-    let e_sq_over_c4 = energy * energy / (c2 * c2);
-    let p_sq_over_c2 = p_sq / c2;
-    let mass_sq = e_sq_over_c4 - p_sq_over_c2;
-    if mass_sq < 0.0 {
-        set_error(ERR_INVALID_ARGUMENT, "tachyonic state: E^2 < p^2 * c^2");
-        return f64::NAN;
-    }
-    clear_error();
-    mass_sq.sqrt()
+    ffi_guard(f64::NAN, || {
+        if !energy.is_finite()
+            || energy < 0.0
+            || !px.is_finite()
+            || !py.is_finite()
+            || !pz.is_finite()
+        {
+            set_error(ERR_INVALID_ARGUMENT, "energy and momentum must be finite");
+            return f64::NAN;
+        }
+        let c2 = SPEED_OF_LIGHT * SPEED_OF_LIGHT;
+        let p_sq = px * px + py * py + pz * pz;
+        let e_sq_over_c4 = energy * energy / (c2 * c2);
+        let p_sq_over_c2 = p_sq / c2;
+        let mass_sq = e_sq_over_c4 - p_sq_over_c2;
+        if mass_sq < 0.0 {
+            set_error(ERR_INVALID_ARGUMENT, "tachyonic state: E^2 < p^2 * c^2");
+            return f64::NAN;
+        }
+        clear_error();
+        mass_sq.sqrt()
+    })
 }
 
 // ---------------------------------------------------------------------------

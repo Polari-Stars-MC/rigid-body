@@ -4,8 +4,6 @@
 //! 实现放在 `scientists/<id>.rs`（原域模块仅 `pub use` 重导出）。
 //! 纯数据 + 纯函数，不依赖 Rapier / `WorldHandle`。
 
-use crate::error;
-
 /// 一级学科标识类型（与 `disciplines` 模块一致）。
 pub type FieldId = &'static str;
 
@@ -312,33 +310,22 @@ pub static SCIENTISTS: &[ScientistRecord] = &[
 ];
 
 /// 按 `id` 精确查找一位科学家。空/未知返回 `None`。
+///
+/// 纯函数：不读写线程局部错误槽，失败仅由 `None` 表达（domain.rs 策略）。
 pub fn scientist_by_id(id: &str) -> Option<&'static ScientistRecord> {
     if id.is_empty() {
-        error::set_error(
-            error::ERR_INVALID_ARGUMENT,
-            "scientist id must not be empty",
-        );
         return None;
     }
-    match SCIENTISTS.iter().find(|s| s.id == id) {
-        Some(s) => {
-            error::set_error(error::ERR_OK, "ok");
-            Some(s)
-        }
-        None => {
-            error::set_error(error::ERR_NOT_FOUND, "scientist id not found");
-            None
-        }
-    }
+    SCIENTISTS.iter().find(|s| s.id == id)
 }
 
 /// 按一级 `field_id` 过滤，返回匹配科学家的切片。
+///
+/// 纯函数：不读写线程局部错误槽，空 `field_id` 返回空切片。
 pub fn scientists_by_field(field_id: &str) -> Vec<&'static ScientistRecord> {
     if field_id.is_empty() {
-        error::set_error(error::ERR_INVALID_ARGUMENT, "field_id must not be empty");
         return Vec::new();
     }
-    error::set_error(error::ERR_OK, "ok");
     SCIENTISTS
         .iter()
         .filter(|s| s.field_id == field_id)
@@ -374,12 +361,8 @@ pub fn scientists_for_module(module: &str) -> Vec<&'static str> {
         "quantum" => &["quantum_mechanics"],
         "relativity" => &["relativity"],
         "thermodynamics" => &["statistical"],
-        _ => {
-            error::set_error(error::ERR_INVALID_ARGUMENT, "unknown formula module");
-            return Vec::new();
-        }
+        _ => return Vec::new(),
     };
-    error::set_error(error::ERR_OK, "ok");
     let mut out: Vec<&str> = SCIENTISTS
         .iter()
         .filter(|s| fields.contains(&s.field_id))

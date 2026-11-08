@@ -1,4 +1,4 @@
-use crate::error::{ERR_INVALID_ARGUMENT, ERR_NULL_POINTER, clear_error, set_error};
+use crate::error::{ERR_INVALID_ARGUMENT, ERR_NULL_POINTER, clear_error, ffi_guard, set_error};
 use crate::ffi::{
     Bool, CamConstraintDesc, CamConstraintReport, GearConstraintDesc, GearConstraintReport,
     ScrewConstraintDesc, ScrewConstraintReport, SpiralConstraintDesc, SpiralConstraintReport, Vec3,
@@ -68,36 +68,38 @@ pub extern "C" fn transmission_gear_evaluate(
     desc: GearConstraintDesc,
     out_report: *mut GearConstraintReport,
 ) -> Bool {
-    if !finite(driver_angle)
-        || !finite(driven_angle)
-        || !finite(driver_angular_velocity)
-        || !finite(driven_angular_velocity)
-        || !gear_valid(desc)
-    {
-        set_error(ERR_INVALID_ARGUMENT, "invalid gear constraint parameters");
-        return Bool::FALSE;
-    }
-    let sign = if desc.opposite_direction.0 != 0 {
-        -1.0
-    } else {
-        1.0
-    };
-    let effective_ratio = sign * desc.ratio;
-    let target_angle = desc.phase + effective_ratio * driver_angle;
-    let target_angular_velocity = effective_ratio * driver_angular_velocity;
-    let Some(out_report) = (unsafe { out_report.as_mut() }) else {
-        set_error(ERR_NULL_POINTER, "gear constraint output is null");
-        return Bool::FALSE;
-    };
-    *out_report = GearConstraintReport {
-        target_angle,
-        target_angular_velocity,
-        angle_error: apply_deadband(target_angle - driven_angle, desc.backlash),
-        velocity_error: target_angular_velocity - driven_angular_velocity,
-        effective_ratio,
-    };
-    clear_error();
-    Bool::TRUE
+    ffi_guard(Bool::FALSE, || {
+        if !finite(driver_angle)
+            || !finite(driven_angle)
+            || !finite(driver_angular_velocity)
+            || !finite(driven_angular_velocity)
+            || !gear_valid(desc)
+        {
+            set_error(ERR_INVALID_ARGUMENT, "invalid gear constraint parameters");
+            return Bool::FALSE;
+        }
+        let sign = if desc.opposite_direction.0 != 0 {
+            -1.0
+        } else {
+            1.0
+        };
+        let effective_ratio = sign * desc.ratio;
+        let target_angle = desc.phase + effective_ratio * driver_angle;
+        let target_angular_velocity = effective_ratio * driver_angular_velocity;
+        let Some(out_report) = (unsafe { out_report.as_mut() }) else {
+            set_error(ERR_NULL_POINTER, "gear constraint output is null");
+            return Bool::FALSE;
+        };
+        *out_report = GearConstraintReport {
+            target_angle,
+            target_angular_velocity,
+            angle_error: apply_deadband(target_angle - driven_angle, desc.backlash),
+            velocity_error: target_angular_velocity - driven_angular_velocity,
+            effective_ratio,
+        };
+        clear_error();
+        Bool::TRUE
+    })
 }
 
 /// Computes the driven gear target angle for a given driver angle.
@@ -113,11 +115,13 @@ pub extern "C" fn transmission_gear_target_angle(
     opposite_direction: Bool,
     phase: f64,
 ) -> f64 {
-    if !finite(driver_angle) || !finite_positive(ratio) || !finite(phase) {
-        return f64::NAN;
-    }
-    let sign = if opposite_direction.0 != 0 { -1.0 } else { 1.0 };
-    phase + sign * ratio * driver_angle
+    ffi_guard(f64::NAN, || {
+        if !finite(driver_angle) || !finite_positive(ratio) || !finite(phase) {
+            return f64::NAN;
+        }
+        let sign = if opposite_direction.0 != 0 { -1.0 } else { 1.0 };
+        phase + sign * ratio * driver_angle
+    })
 }
 
 /// Evaluates a screw constraint and writes the resulting report to `out_report`.
@@ -137,32 +141,34 @@ pub extern "C" fn transmission_screw_evaluate(
     desc: ScrewConstraintDesc,
     out_report: *mut ScrewConstraintReport,
 ) -> Bool {
-    if !finite(screw_angle)
-        || !finite(nut_translation)
-        || !finite(screw_angular_velocity)
-        || !finite(nut_linear_velocity)
-        || !screw_valid(desc)
-    {
-        set_error(ERR_INVALID_ARGUMENT, "invalid screw constraint parameters");
-        return Bool::FALSE;
-    }
-    let handedness = if desc.right_handed.0 != 0 { 1.0 } else { -1.0 };
-    let meters_per_radian = handedness * desc.lead / TAU;
-    let target_translation = desc.phase + meters_per_radian * screw_angle;
-    let target_linear_velocity = meters_per_radian * screw_angular_velocity;
-    let Some(out_report) = (unsafe { out_report.as_mut() }) else {
-        set_error(ERR_NULL_POINTER, "screw constraint output is null");
-        return Bool::FALSE;
-    };
-    *out_report = ScrewConstraintReport {
-        target_translation,
-        target_linear_velocity,
-        translation_error: target_translation - nut_translation,
-        velocity_error: target_linear_velocity - nut_linear_velocity,
-        meters_per_radian,
-    };
-    clear_error();
-    Bool::TRUE
+    ffi_guard(Bool::FALSE, || {
+        if !finite(screw_angle)
+            || !finite(nut_translation)
+            || !finite(screw_angular_velocity)
+            || !finite(nut_linear_velocity)
+            || !screw_valid(desc)
+        {
+            set_error(ERR_INVALID_ARGUMENT, "invalid screw constraint parameters");
+            return Bool::FALSE;
+        }
+        let handedness = if desc.right_handed.0 != 0 { 1.0 } else { -1.0 };
+        let meters_per_radian = handedness * desc.lead / TAU;
+        let target_translation = desc.phase + meters_per_radian * screw_angle;
+        let target_linear_velocity = meters_per_radian * screw_angular_velocity;
+        let Some(out_report) = (unsafe { out_report.as_mut() }) else {
+            set_error(ERR_NULL_POINTER, "screw constraint output is null");
+            return Bool::FALSE;
+        };
+        *out_report = ScrewConstraintReport {
+            target_translation,
+            target_linear_velocity,
+            translation_error: target_translation - nut_translation,
+            velocity_error: target_linear_velocity - nut_linear_velocity,
+            meters_per_radian,
+        };
+        clear_error();
+        Bool::TRUE
+    })
 }
 
 /// Computes the nut target translation for a given screw angle.
@@ -178,11 +184,13 @@ pub extern "C" fn transmission_screw_target_translation(
     right_handed: Bool,
     phase: f64,
 ) -> f64 {
-    if !finite(screw_angle) || !finite(lead) || !finite(phase) {
-        return f64::NAN;
-    }
-    let handedness = if right_handed.0 != 0 { 1.0 } else { -1.0 };
-    phase + handedness * lead * screw_angle / TAU
+    ffi_guard(f64::NAN, || {
+        if !finite(screw_angle) || !finite(lead) || !finite(phase) {
+            return f64::NAN;
+        }
+        let handedness = if right_handed.0 != 0 { 1.0 } else { -1.0 };
+        phase + handedness * lead * screw_angle / TAU
+    })
 }
 
 /// Evaluates a cycloidal cam constraint and writes the report to `out_report`.
@@ -201,38 +209,41 @@ pub extern "C" fn transmission_cycloidal_cam_evaluate(
     desc: CamConstraintDesc,
     out_report: *mut CamConstraintReport,
 ) -> Bool {
-    if !finite(cam_angle)
-        || !finite(follower_displacement)
-        || !finite(cam_angular_velocity)
-        || !cam_valid(desc)
-    {
-        set_error(ERR_INVALID_ARGUMENT, "invalid cam constraint parameters");
-        return Bool::FALSE;
-    }
-    let angle = wrap_tau(cam_angle - desc.phase);
-    let (displacement, derivative) = if angle <= desc.rise_angle {
-        cycloidal_lift(angle, desc.rise_angle, desc.lift)
-    } else if angle <= desc.rise_angle + desc.return_angle {
-        let local = angle - desc.rise_angle;
-        let (return_drop, return_derivative) = cycloidal_lift(local, desc.return_angle, desc.lift);
-        (desc.lift - return_drop, -return_derivative)
-    } else {
-        (0.0, 0.0)
-    };
-    let Some(out_report) = (unsafe { out_report.as_mut() }) else {
-        set_error(ERR_NULL_POINTER, "cam constraint output is null");
-        return Bool::FALSE;
-    };
-    *out_report = CamConstraintReport {
-        wrapped_angle: angle,
-        radius: desc.base_radius + displacement,
-        follower_displacement: displacement,
-        displacement_derivative: derivative,
-        target_velocity: derivative * cam_angular_velocity,
-        displacement_error: displacement - follower_displacement,
-    };
-    clear_error();
-    Bool::TRUE
+    ffi_guard(Bool::FALSE, || {
+        if !finite(cam_angle)
+            || !finite(follower_displacement)
+            || !finite(cam_angular_velocity)
+            || !cam_valid(desc)
+        {
+            set_error(ERR_INVALID_ARGUMENT, "invalid cam constraint parameters");
+            return Bool::FALSE;
+        }
+        let angle = wrap_tau(cam_angle - desc.phase);
+        let (displacement, derivative) = if angle <= desc.rise_angle {
+            cycloidal_lift(angle, desc.rise_angle, desc.lift)
+        } else if angle <= desc.rise_angle + desc.return_angle {
+            let local = angle - desc.rise_angle;
+            let (return_drop, return_derivative) =
+                cycloidal_lift(local, desc.return_angle, desc.lift);
+            (desc.lift - return_drop, -return_derivative)
+        } else {
+            (0.0, 0.0)
+        };
+        let Some(out_report) = (unsafe { out_report.as_mut() }) else {
+            set_error(ERR_NULL_POINTER, "cam constraint output is null");
+            return Bool::FALSE;
+        };
+        *out_report = CamConstraintReport {
+            wrapped_angle: angle,
+            radius: desc.base_radius + displacement,
+            follower_displacement: displacement,
+            displacement_derivative: derivative,
+            target_velocity: derivative * cam_angular_velocity,
+            displacement_error: displacement - follower_displacement,
+        };
+        clear_error();
+        Bool::TRUE
+    })
 }
 
 /// Evaluates an Archimedean spiral constraint and writes the report to
@@ -252,50 +263,52 @@ pub extern "C" fn transmission_archimedean_spiral_evaluate(
     desc: SpiralConstraintDesc,
     out_report: *mut SpiralConstraintReport,
 ) -> Bool {
-    if !finite(angle)
-        || !finite(radial_position)
-        || !finite(angular_velocity)
-        || !spiral_valid(desc)
-    {
-        set_error(ERR_INVALID_ARGUMENT, "invalid spiral constraint parameters");
-        return Bool::FALSE;
-    }
-    let local_angle = angle - desc.phase;
-    let radius = desc.initial_radius + desc.radial_pitch * local_angle;
-    if radius < 0.0 {
-        set_error(ERR_INVALID_ARGUMENT, "spiral radius became negative");
-        return Bool::FALSE;
-    }
-    let cos_theta = angle.cos();
-    let sin_theta = angle.sin();
-    let dx_dtheta = desc.radial_pitch * cos_theta - radius * sin_theta;
-    let dy_dtheta = desc.radial_pitch * sin_theta + radius * cos_theta;
-    let tangent_len = (dx_dtheta * dx_dtheta + dy_dtheta * dy_dtheta).sqrt();
-    let Some(out_report) = (unsafe { out_report.as_mut() }) else {
-        set_error(ERR_NULL_POINTER, "spiral constraint output is null");
-        return Bool::FALSE;
-    };
-    *out_report = SpiralConstraintReport {
-        radius,
-        position: Vec3 {
-            x: radius * cos_theta,
-            y: radius * sin_theta,
-            z: 0.0,
-        },
-        tangent: if tangent_len > EPSILON {
-            Vec3 {
-                x: dx_dtheta / tangent_len,
-                y: dy_dtheta / tangent_len,
+    ffi_guard(Bool::FALSE, || {
+        if !finite(angle)
+            || !finite(radial_position)
+            || !finite(angular_velocity)
+            || !spiral_valid(desc)
+        {
+            set_error(ERR_INVALID_ARGUMENT, "invalid spiral constraint parameters");
+            return Bool::FALSE;
+        }
+        let local_angle = angle - desc.phase;
+        let radius = desc.initial_radius + desc.radial_pitch * local_angle;
+        if radius < 0.0 {
+            set_error(ERR_INVALID_ARGUMENT, "spiral radius became negative");
+            return Bool::FALSE;
+        }
+        let cos_theta = angle.cos();
+        let sin_theta = angle.sin();
+        let dx_dtheta = desc.radial_pitch * cos_theta - radius * sin_theta;
+        let dy_dtheta = desc.radial_pitch * sin_theta + radius * cos_theta;
+        let tangent_len = (dx_dtheta * dx_dtheta + dy_dtheta * dy_dtheta).sqrt();
+        let Some(out_report) = (unsafe { out_report.as_mut() }) else {
+            set_error(ERR_NULL_POINTER, "spiral constraint output is null");
+            return Bool::FALSE;
+        };
+        *out_report = SpiralConstraintReport {
+            radius,
+            position: Vec3 {
+                x: radius * cos_theta,
+                y: radius * sin_theta,
                 z: 0.0,
-            }
-        } else {
-            Vec3::default()
-        },
-        radial_velocity: desc.radial_pitch * angular_velocity,
-        constraint_error: radius - radial_position,
-    };
-    clear_error();
-    Bool::TRUE
+            },
+            tangent: if tangent_len > EPSILON {
+                Vec3 {
+                    x: dx_dtheta / tangent_len,
+                    y: dy_dtheta / tangent_len,
+                    z: 0.0,
+                }
+            } else {
+                Vec3::default()
+            },
+            radial_velocity: desc.radial_pitch * angular_velocity,
+            constraint_error: radius - radial_position,
+        };
+        clear_error();
+        Bool::TRUE
+    })
 }
 
 /// Computes the spiral radius for a given angle.
@@ -312,13 +325,15 @@ pub extern "C" fn transmission_archimedean_spiral_radius(
     radial_pitch: f64,
     phase: f64,
 ) -> f64 {
-    if !finite(angle)
-        || !finite_non_negative(initial_radius)
-        || !finite(radial_pitch)
-        || !finite(phase)
-    {
-        return f64::NAN;
-    }
-    let radius = initial_radius + radial_pitch * (angle - phase);
-    if radius >= 0.0 { radius } else { f64::NAN }
+    ffi_guard(f64::NAN, || {
+        if !finite(angle)
+            || !finite_non_negative(initial_radius)
+            || !finite(radial_pitch)
+            || !finite(phase)
+        {
+            return f64::NAN;
+        }
+        let radius = initial_radius + radial_pitch * (angle - phase);
+        if radius >= 0.0 { radius } else { f64::NAN }
+    })
 }

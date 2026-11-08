@@ -1,6 +1,8 @@
 use std::f64::consts::PI;
 
-use crate::error::{ERR_CAPACITY, ERR_INVALID_ARGUMENT, ERR_NULL_POINTER, clear_error, set_error};
+use crate::error::{
+    ERR_CAPACITY, ERR_INVALID_ARGUMENT, ERR_NULL_POINTER, clear_error, ffi_guard, set_error,
+};
 use crate::ffi::{
     Bool, ElectromagneticField, FaradayInductionReport, FdtdYeeReport, LorentzForceReport,
     MagneticFluxReport, MaxwellPointReport, Vec3, vec3_finite, vec3_from_rapier, vec3_to_rapier,
@@ -32,35 +34,37 @@ pub extern "C" fn em_lorentz_force(
     mass: f64,
     out_report: *mut LorentzForceReport,
 ) -> Bool {
-    if !charge.is_finite()
-        || !vec3_finite(velocity)
-        || !field_valid(field)
-        || !finite_non_negative(mass)
-    {
-        set_error(ERR_INVALID_ARGUMENT, "invalid Lorentz force parameters");
-        return Bool::FALSE;
-    }
-    let v = vec3_to_rapier(velocity);
-    let electric = vec3_to_rapier(field.electric);
-    let magnetic = vec3_to_rapier(field.magnetic);
-    let force = (electric + v.cross(magnetic)) * charge;
-    let acceleration = if mass > EPSILON {
-        force / mass
-    } else {
-        crate::math::Vector3f64::zeros()
-    };
-    let Some(out_report) = (unsafe { out_report.as_mut() }) else {
-        set_error(ERR_NULL_POINTER, "Lorentz force output is null");
-        return Bool::FALSE;
-    };
-    *out_report = LorentzForceReport {
-        electric_force: vec3_from_rapier(electric * charge),
-        magnetic_force: vec3_from_rapier(v.cross(magnetic) * charge),
-        total_force: vec3_from_rapier(force),
-        acceleration: vec3_from_rapier(acceleration),
-    };
-    clear_error();
-    Bool::TRUE
+    ffi_guard(Bool::FALSE, || {
+        if !charge.is_finite()
+            || !vec3_finite(velocity)
+            || !field_valid(field)
+            || !finite_non_negative(mass)
+        {
+            set_error(ERR_INVALID_ARGUMENT, "invalid Lorentz force parameters");
+            return Bool::FALSE;
+        }
+        let v = vec3_to_rapier(velocity);
+        let electric = vec3_to_rapier(field.electric);
+        let magnetic = vec3_to_rapier(field.magnetic);
+        let force = (electric + v.cross(magnetic)) * charge;
+        let acceleration = if mass > EPSILON {
+            force / mass
+        } else {
+            crate::math::Vector3f64::zeros()
+        };
+        let Some(out_report) = (unsafe { out_report.as_mut() }) else {
+            set_error(ERR_NULL_POINTER, "Lorentz force output is null");
+            return Bool::FALSE;
+        };
+        *out_report = LorentzForceReport {
+            electric_force: vec3_from_rapier(electric * charge),
+            magnetic_force: vec3_from_rapier(v.cross(magnetic) * charge),
+            total_force: vec3_from_rapier(force),
+            acceleration: vec3_from_rapier(acceleration),
+        };
+        clear_error();
+        Bool::TRUE
+    })
 }
 
 /// Compute the magnetic flux Phi = B . n_hat * A through a planar surface.
@@ -76,30 +80,32 @@ pub extern "C" fn em_magnetic_flux(
     area: f64,
     out_report: *mut MagneticFluxReport,
 ) -> Bool {
-    if !vec3_finite(magnetic_field) || !vec3_finite(area_normal) || !finite_non_negative(area) {
-        set_error(ERR_INVALID_ARGUMENT, "invalid magnetic flux parameters");
-        return Bool::FALSE;
-    }
-    let b = vec3_to_rapier(magnetic_field);
-    let n = vec3_to_rapier(area_normal);
-    let normal_len = n.length();
-    if normal_len <= EPSILON {
-        set_error(ERR_INVALID_ARGUMENT, "magnetic flux normal is zero");
-        return Bool::FALSE;
-    }
-    let unit_normal = n / normal_len;
-    let normal_component = b.dot(unit_normal);
-    let Some(out_report) = (unsafe { out_report.as_mut() }) else {
-        set_error(ERR_NULL_POINTER, "magnetic flux output is null");
-        return Bool::FALSE;
-    };
-    *out_report = MagneticFluxReport {
-        flux: normal_component * area,
-        normal_component,
-        area,
-    };
-    clear_error();
-    Bool::TRUE
+    ffi_guard(Bool::FALSE, || {
+        if !vec3_finite(magnetic_field) || !vec3_finite(area_normal) || !finite_non_negative(area) {
+            set_error(ERR_INVALID_ARGUMENT, "invalid magnetic flux parameters");
+            return Bool::FALSE;
+        }
+        let b = vec3_to_rapier(magnetic_field);
+        let n = vec3_to_rapier(area_normal);
+        let normal_len = n.length();
+        if normal_len <= EPSILON {
+            set_error(ERR_INVALID_ARGUMENT, "magnetic flux normal is zero");
+            return Bool::FALSE;
+        }
+        let unit_normal = n / normal_len;
+        let normal_component = b.dot(unit_normal);
+        let Some(out_report) = (unsafe { out_report.as_mut() }) else {
+            set_error(ERR_NULL_POINTER, "magnetic flux output is null");
+            return Bool::FALSE;
+        };
+        *out_report = MagneticFluxReport {
+            flux: normal_component * area,
+            normal_component,
+            area,
+        };
+        clear_error();
+        Bool::TRUE
+    })
 }
 
 /// Compute Faraday induction (flux rate, induced EMF, induced current).
@@ -117,33 +123,35 @@ pub extern "C" fn em_faraday_induction(
     resistance: f64,
     out_report: *mut FaradayInductionReport,
 ) -> Bool {
-    if !previous_flux.is_finite()
-        || !current_flux.is_finite()
-        || !finite_positive(dt)
-        || !finite_non_negative(turns)
-        || !finite_non_negative(resistance)
-    {
-        set_error(ERR_INVALID_ARGUMENT, "invalid Faraday induction parameters");
-        return Bool::FALSE;
-    }
-    let flux_rate = (current_flux - previous_flux) / dt;
-    let induced_emf = -turns * flux_rate;
-    let induced_current = if resistance > EPSILON {
-        induced_emf / resistance
-    } else {
-        0.0
-    };
-    let Some(out_report) = (unsafe { out_report.as_mut() }) else {
-        set_error(ERR_NULL_POINTER, "Faraday induction output is null");
-        return Bool::FALSE;
-    };
-    *out_report = FaradayInductionReport {
-        flux_rate,
-        induced_emf,
-        induced_current,
-    };
-    clear_error();
-    Bool::TRUE
+    ffi_guard(Bool::FALSE, || {
+        if !previous_flux.is_finite()
+            || !current_flux.is_finite()
+            || !finite_positive(dt)
+            || !finite_non_negative(turns)
+            || !finite_non_negative(resistance)
+        {
+            set_error(ERR_INVALID_ARGUMENT, "invalid Faraday induction parameters");
+            return Bool::FALSE;
+        }
+        let flux_rate = (current_flux - previous_flux) / dt;
+        let induced_emf = -turns * flux_rate;
+        let induced_current = if resistance > EPSILON {
+            induced_emf / resistance
+        } else {
+            0.0
+        };
+        let Some(out_report) = (unsafe { out_report.as_mut() }) else {
+            set_error(ERR_NULL_POINTER, "Faraday induction output is null");
+            return Bool::FALSE;
+        };
+        *out_report = FaradayInductionReport {
+            flux_rate,
+            induced_emf,
+            induced_current,
+        };
+        clear_error();
+        Bool::TRUE
+    })
 }
 
 /// Advance an electromagnetic field at a single point by `dt` via Maxwell's equations.
@@ -166,50 +174,52 @@ pub extern "C" fn em_maxwell_point_update(
     dt: f64,
     out_report: *mut MaxwellPointReport,
 ) -> Bool {
-    if !field_valid(field)
-        || !vec3_finite(curl_electric)
-        || !vec3_finite(curl_magnetic)
-        || !vec3_finite(current_density)
-        || !charge_density.is_finite()
-        || !divergence_electric.is_finite()
-        || !divergence_magnetic.is_finite()
-        || !finite_positive(permittivity)
-        || !finite_positive(permeability)
-        || !finite_non_negative(dt)
-    {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "invalid Maxwell point update parameters",
-        );
-        return Bool::FALSE;
-    }
+    ffi_guard(Bool::FALSE, || {
+        if !field_valid(field)
+            || !vec3_finite(curl_electric)
+            || !vec3_finite(curl_magnetic)
+            || !vec3_finite(current_density)
+            || !charge_density.is_finite()
+            || !divergence_electric.is_finite()
+            || !divergence_magnetic.is_finite()
+            || !finite_positive(permittivity)
+            || !finite_positive(permeability)
+            || !finite_non_negative(dt)
+        {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "invalid Maxwell point update parameters",
+            );
+            return Bool::FALSE;
+        }
 
-    let e = vec3_to_rapier(field.electric);
-    let b = vec3_to_rapier(field.magnetic);
-    let curl_e = vec3_to_rapier(curl_electric);
-    let curl_b = vec3_to_rapier(curl_magnetic);
-    let j = vec3_to_rapier(current_density);
-    let electric_derivative = curl_b / (permittivity * permeability) - j / permittivity;
-    let magnetic_derivative = -curl_e;
-    let next_electric = e + electric_derivative * dt;
-    let next_magnetic = b + magnetic_derivative * dt;
+        let e = vec3_to_rapier(field.electric);
+        let b = vec3_to_rapier(field.magnetic);
+        let curl_e = vec3_to_rapier(curl_electric);
+        let curl_b = vec3_to_rapier(curl_magnetic);
+        let j = vec3_to_rapier(current_density);
+        let electric_derivative = curl_b / (permittivity * permeability) - j / permittivity;
+        let magnetic_derivative = -curl_e;
+        let next_electric = e + electric_derivative * dt;
+        let next_magnetic = b + magnetic_derivative * dt;
 
-    let Some(out_report) = (unsafe { out_report.as_mut() }) else {
-        set_error(ERR_NULL_POINTER, "Maxwell point output is null");
-        return Bool::FALSE;
-    };
-    *out_report = MaxwellPointReport {
-        next_field: ElectromagneticField {
-            electric: vec3_from_rapier(next_electric),
-            magnetic: vec3_from_rapier(next_magnetic),
-        },
-        electric_derivative: vec3_from_rapier(electric_derivative),
-        magnetic_derivative: vec3_from_rapier(magnetic_derivative),
-        gauss_electric_residual: divergence_electric - charge_density / permittivity,
-        gauss_magnetic_residual: divergence_magnetic,
-    };
-    clear_error();
-    Bool::TRUE
+        let Some(out_report) = (unsafe { out_report.as_mut() }) else {
+            set_error(ERR_NULL_POINTER, "Maxwell point output is null");
+            return Bool::FALSE;
+        };
+        *out_report = MaxwellPointReport {
+            next_field: ElectromagneticField {
+                electric: vec3_from_rapier(next_electric),
+                magnetic: vec3_from_rapier(next_magnetic),
+            },
+            electric_derivative: vec3_from_rapier(electric_derivative),
+            magnetic_derivative: vec3_from_rapier(magnetic_derivative),
+            gauss_electric_residual: divergence_electric - charge_density / permittivity,
+            gauss_magnetic_residual: divergence_magnetic,
+        };
+        clear_error();
+        Bool::TRUE
+    })
 }
 
 /// Advance an FDTD Yee grid of `cell_count` cells by `dt`.
@@ -240,112 +250,114 @@ pub extern "C" fn em_fdtd_yee_update(
     capacity: u32,
     out_report: *mut FdtdYeeReport,
 ) -> Bool {
-    if cell_count == 0 || cell_count > MAX_FIELD_CELLS || capacity < cell_count {
-        set_error(ERR_CAPACITY, "invalid FDTD Yee grid capacity");
-        return Bool::FALSE;
-    }
-    if electric_fields.is_null()
-        || magnetic_fields.is_null()
-        || curl_electric.is_null()
-        || curl_magnetic.is_null()
-        || out_electric_fields.is_null()
-        || out_magnetic_fields.is_null()
-    {
-        set_error(ERR_NULL_POINTER, "FDTD Yee grid pointers are null");
-        return Bool::FALSE;
-    }
-    if !finite_positive(permittivity)
-        || !finite_positive(permeability)
-        || !finite_non_negative(conductivity)
-        || !finite_non_negative(dt)
-    {
-        set_error(ERR_INVALID_ARGUMENT, "invalid FDTD Yee grid parameters");
-        return Bool::FALSE;
-    }
+    ffi_guard(Bool::FALSE, || {
+        if cell_count == 0 || cell_count > MAX_FIELD_CELLS || capacity < cell_count {
+            set_error(ERR_CAPACITY, "invalid FDTD Yee grid capacity");
+            return Bool::FALSE;
+        }
+        if electric_fields.is_null()
+            || magnetic_fields.is_null()
+            || curl_electric.is_null()
+            || curl_magnetic.is_null()
+            || out_electric_fields.is_null()
+            || out_magnetic_fields.is_null()
+        {
+            set_error(ERR_NULL_POINTER, "FDTD Yee grid pointers are null");
+            return Bool::FALSE;
+        }
+        if !finite_positive(permittivity)
+            || !finite_positive(permeability)
+            || !finite_non_negative(conductivity)
+            || !finite_non_negative(dt)
+        {
+            set_error(ERR_INVALID_ARGUMENT, "invalid FDTD Yee grid parameters");
+            return Bool::FALSE;
+        }
 
-    macro_rules! input {
-        ($p:expr, $name:expr) => {
-            match unsafe { crate::ffi::checked_input_slice($p, cell_count as usize, $name) } {
-                Ok(v) => v,
-                Err(e) => {
-                    crate::ffi::formula_result::<()>(Err(e));
-                    return Bool::FALSE;
+        macro_rules! input {
+            ($p:expr, $name:expr) => {
+                match unsafe { crate::ffi::checked_input_slice($p, cell_count as usize, $name) } {
+                    Ok(v) => v,
+                    Err(e) => {
+                        crate::ffi::formula_result::<()>(Err(e));
+                        return Bool::FALSE;
+                    }
                 }
+            };
+        }
+        let electric_fields = input!(electric_fields, "electric_fields");
+        let magnetic_fields = input!(magnetic_fields, "magnetic_fields");
+        let curl_electric = input!(curl_electric, "curl_electric");
+        let curl_magnetic = input!(curl_magnetic, "curl_magnetic");
+        let out_electric = match unsafe {
+            crate::ffi::checked_output_slice(
+                out_electric_fields,
+                capacity as usize,
+                "out_electric_fields",
+            )
+        } {
+            Ok(v) => v,
+            Err(e) => {
+                crate::ffi::formula_result::<()>(Err(e));
+                return Bool::FALSE;
             }
         };
-    }
-    let electric_fields = input!(electric_fields, "electric_fields");
-    let magnetic_fields = input!(magnetic_fields, "magnetic_fields");
-    let curl_electric = input!(curl_electric, "curl_electric");
-    let curl_magnetic = input!(curl_magnetic, "curl_magnetic");
-    let out_electric = match unsafe {
-        crate::ffi::checked_output_slice(
-            out_electric_fields,
-            capacity as usize,
-            "out_electric_fields",
-        )
-    } {
-        Ok(v) => v,
-        Err(e) => {
-            crate::ffi::formula_result::<()>(Err(e));
-            return Bool::FALSE;
-        }
-    };
-    let out_magnetic = match unsafe {
-        crate::ffi::checked_output_slice(
-            out_magnetic_fields,
-            capacity as usize,
-            "out_magnetic_fields",
-        )
-    } {
-        Ok(v) => v,
-        Err(e) => {
-            crate::ffi::formula_result::<()>(Err(e));
-            return Bool::FALSE;
-        }
-    };
-
-    let mut max_electric_delta = 0.0;
-    let mut max_magnetic_delta = 0.0;
-    let mut total_energy_acc = KahanSum::default();
-    for index in 0..cell_count as usize {
-        if !vec3_finite(electric_fields[index])
-            || !vec3_finite(magnetic_fields[index])
-            || !vec3_finite(curl_electric[index])
-            || !vec3_finite(curl_magnetic[index])
-        {
-            set_error(ERR_INVALID_ARGUMENT, "invalid FDTD Yee grid cell");
-            return Bool::FALSE;
-        }
-        let e = vec3_to_rapier(electric_fields[index]);
-        let b = vec3_to_rapier(magnetic_fields[index]);
-        let e_delta = (vec3_to_rapier(curl_magnetic[index]) / (permittivity * permeability)
-            - e * (conductivity / permittivity))
-            * dt;
-        let b_delta = -vec3_to_rapier(curl_electric[index]) * dt;
-        let next_e = e + e_delta;
-        let next_b = b + b_delta;
-        out_electric[index] = vec3_from_rapier(next_e);
-        out_magnetic[index] = vec3_from_rapier(next_b);
-        max_electric_delta = f64::max(max_electric_delta, e_delta.length());
-        max_magnetic_delta = f64::max(max_magnetic_delta, b_delta.length());
-        total_energy_acc.add(
-            0.5 * permittivity * next_e.length_squared()
-                + 0.5 * next_b.length_squared() / permeability,
-        );
-    }
-
-    if let Some(out_report) = unsafe { out_report.as_mut() } {
-        *out_report = FdtdYeeReport {
-            cell_count,
-            max_electric_delta,
-            max_magnetic_delta,
-            total_energy_density: total_energy_acc.value(),
-            courant_number: dt / (permittivity * permeability).sqrt(),
+        let out_magnetic = match unsafe {
+            crate::ffi::checked_output_slice(
+                out_magnetic_fields,
+                capacity as usize,
+                "out_magnetic_fields",
+            )
+        } {
+            Ok(v) => v,
+            Err(e) => {
+                crate::ffi::formula_result::<()>(Err(e));
+                return Bool::FALSE;
+            }
         };
-    }
-    clear_error();
-    Bool::TRUE
+
+        let mut max_electric_delta = 0.0;
+        let mut max_magnetic_delta = 0.0;
+        let mut total_energy_acc = KahanSum::default();
+        for index in 0..cell_count as usize {
+            if !vec3_finite(electric_fields[index])
+                || !vec3_finite(magnetic_fields[index])
+                || !vec3_finite(curl_electric[index])
+                || !vec3_finite(curl_magnetic[index])
+            {
+                set_error(ERR_INVALID_ARGUMENT, "invalid FDTD Yee grid cell");
+                return Bool::FALSE;
+            }
+            let e = vec3_to_rapier(electric_fields[index]);
+            let b = vec3_to_rapier(magnetic_fields[index]);
+            let e_delta = (vec3_to_rapier(curl_magnetic[index]) / (permittivity * permeability)
+                - e * (conductivity / permittivity))
+                * dt;
+            let b_delta = -vec3_to_rapier(curl_electric[index]) * dt;
+            let next_e = e + e_delta;
+            let next_b = b + b_delta;
+            out_electric[index] = vec3_from_rapier(next_e);
+            out_magnetic[index] = vec3_from_rapier(next_b);
+            max_electric_delta = f64::max(max_electric_delta, e_delta.length());
+            max_magnetic_delta = f64::max(max_magnetic_delta, b_delta.length());
+            total_energy_acc.add(
+                0.5 * permittivity * next_e.length_squared()
+                    + 0.5 * next_b.length_squared() / permeability,
+            );
+        }
+
+        if let Some(out_report) = unsafe { out_report.as_mut() } {
+            *out_report = FdtdYeeReport {
+                cell_count,
+                max_electric_delta,
+                max_magnetic_delta,
+                total_energy_density: total_energy_acc.value(),
+                courant_number: dt / (permittivity * permeability).sqrt(),
+            };
+        }
+        clear_error();
+        Bool::TRUE
+    })
 }
 
 /// Return the vacuum permittivity epsilon0 (F/m).
@@ -355,7 +367,7 @@ pub extern "C" fn em_fdtd_yee_update(
 /// This function takes no pointers and has no safety preconditions.
 #[unsafe(no_mangle)]
 pub extern "C" fn em_vacuum_permittivity() -> f64 {
-    VACUUM_PERMITTIVITY
+    ffi_guard(f64::NAN, || VACUUM_PERMITTIVITY)
 }
 
 /// Return the vacuum permeability mu0 (H/m).
@@ -365,7 +377,7 @@ pub extern "C" fn em_vacuum_permittivity() -> f64 {
 /// This function takes no pointers and has no safety preconditions.
 #[unsafe(no_mangle)]
 pub extern "C" fn em_vacuum_permeability() -> f64 {
-    VACUUM_PERMEABILITY
+    ffi_guard(f64::NAN, || VACUUM_PERMEABILITY)
 }
 
 // ---------------------------------------------------------------------------

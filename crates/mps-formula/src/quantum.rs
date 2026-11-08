@@ -1,4 +1,4 @@
-use crate::error::{ERR_INVALID_ARGUMENT, ERR_NULL_POINTER, clear_error, set_error};
+use crate::error::{ERR_INVALID_ARGUMENT, ERR_NULL_POINTER, clear_error, ffi_guard, set_error};
 use crate::ffi::{
     Bool, QuantumBarrier, QuantumOscillatorReport, QuantumTunnelingReport, QuantumWaveFunction,
 };
@@ -70,7 +70,7 @@ fn compute_tunneling(barrier: QuantumBarrier) -> Option<QuantumTunnelingReport> 
 /// Takes no arguments and dereferences no pointers.
 #[unsafe(no_mangle)]
 pub extern "C" fn quantum_reduced_planck_constant() -> f64 {
-    REDUCED_PLANCK
+    ffi_guard(f64::NAN, || REDUCED_PLANCK)
 }
 
 /// Returns the probability density |ψ|² of a quantum wave function.
@@ -81,10 +81,12 @@ pub extern "C" fn quantum_reduced_planck_constant() -> f64 {
 /// amplitudes return `f64::NAN`.
 #[unsafe(no_mangle)]
 pub extern "C" fn quantum_wave_probability_density(wave: QuantumWaveFunction) -> f64 {
-    if !wave_function_valid(wave) {
-        return f64::NAN;
-    }
-    wave.amplitude_real * wave.amplitude_real + wave.amplitude_imag * wave.amplitude_imag
+    ffi_guard(f64::NAN, || {
+        if !wave_function_valid(wave) {
+            return f64::NAN;
+        }
+        wave.amplitude_real * wave.amplitude_real + wave.amplitude_imag * wave.amplitude_imag
+    })
 }
 
 /// Normalizes a quantum wave function to unit norm and writes it to `out_wave`.
@@ -100,26 +102,28 @@ pub extern "C" fn quantum_wave_normalize(
     wave: QuantumWaveFunction,
     out_wave: *mut QuantumWaveFunction,
 ) -> Bool {
-    if !wave_function_valid(wave) {
-        set_error(ERR_INVALID_ARGUMENT, "invalid quantum wave function");
-        return Bool::FALSE;
-    }
-    let density = quantum_wave_probability_density(wave);
-    if density <= EPSILON {
-        set_error(ERR_INVALID_ARGUMENT, "quantum wave function has zero norm");
-        return Bool::FALSE;
-    }
-    let Some(out_wave) = (unsafe { out_wave.as_mut() }) else {
-        set_error(ERR_NULL_POINTER, "quantum wave output is null");
-        return Bool::FALSE;
-    };
-    let norm = density.sqrt();
-    *out_wave = QuantumWaveFunction {
-        amplitude_real: wave.amplitude_real / norm,
-        amplitude_imag: wave.amplitude_imag / norm,
-    };
-    clear_error();
-    Bool::TRUE
+    ffi_guard(Bool::FALSE, || {
+        if !wave_function_valid(wave) {
+            set_error(ERR_INVALID_ARGUMENT, "invalid quantum wave function");
+            return Bool::FALSE;
+        }
+        let density = quantum_wave_probability_density(wave);
+        if density <= EPSILON {
+            set_error(ERR_INVALID_ARGUMENT, "quantum wave function has zero norm");
+            return Bool::FALSE;
+        }
+        let Some(out_wave) = (unsafe { out_wave.as_mut() }) else {
+            set_error(ERR_NULL_POINTER, "quantum wave output is null");
+            return Bool::FALSE;
+        };
+        let norm = density.sqrt();
+        *out_wave = QuantumWaveFunction {
+            amplitude_real: wave.amplitude_real / norm,
+            amplitude_imag: wave.amplitude_imag / norm,
+        };
+        clear_error();
+        Bool::TRUE
+    })
 }
 
 /// Returns the WKB tunneling transmission coefficient exp(-2·S/ħ).
@@ -131,11 +135,13 @@ pub extern "C" fn quantum_wave_normalize(
 /// default ħ) or finite and positive. Invalid inputs return `f64::NAN`.
 #[unsafe(no_mangle)]
 pub extern "C" fn quantum_wkb_transmission(action_integral: f64, reduced_planck: f64) -> f64 {
-    let hbar = effective_hbar(reduced_planck);
-    if !finite_non_negative(action_integral) || !finite_positive(hbar) {
-        return f64::NAN;
-    }
-    (-2.0 * action_integral / hbar).exp().clamp(0.0, 1.0)
+    ffi_guard(f64::NAN, || {
+        let hbar = effective_hbar(reduced_planck);
+        if !finite_non_negative(action_integral) || !finite_positive(hbar) {
+            return f64::NAN;
+        }
+        (-2.0 * action_integral / hbar).exp().clamp(0.0, 1.0)
+    })
 }
 
 /// Computes tunneling through a rectangular barrier and writes the report to `out_report`.
@@ -151,17 +157,19 @@ pub extern "C" fn quantum_rectangular_barrier_tunneling(
     barrier: QuantumBarrier,
     out_report: *mut QuantumTunnelingReport,
 ) -> Bool {
-    let Some(report) = compute_tunneling(barrier) else {
-        set_error(ERR_INVALID_ARGUMENT, "invalid quantum tunneling barrier");
-        return Bool::FALSE;
-    };
-    let Some(out_report) = (unsafe { out_report.as_mut() }) else {
-        set_error(ERR_NULL_POINTER, "quantum tunneling output is null");
-        return Bool::FALSE;
-    };
-    *out_report = report;
-    clear_error();
-    Bool::TRUE
+    ffi_guard(Bool::FALSE, || {
+        let Some(report) = compute_tunneling(barrier) else {
+            set_error(ERR_INVALID_ARGUMENT, "invalid quantum tunneling barrier");
+            return Bool::FALSE;
+        };
+        let Some(out_report) = (unsafe { out_report.as_mut() }) else {
+            set_error(ERR_NULL_POINTER, "quantum tunneling output is null");
+            return Bool::FALSE;
+        };
+        *out_report = report;
+        clear_error();
+        Bool::TRUE
+    })
 }
 
 /// Returns the transmission probability for a rectangular potential barrier.
@@ -172,9 +180,11 @@ pub extern "C" fn quantum_rectangular_barrier_tunneling(
 /// barrier fields return `f64::NAN`.
 #[unsafe(no_mangle)]
 pub extern "C" fn quantum_rectangular_barrier_probability(barrier: QuantumBarrier) -> f64 {
-    compute_tunneling(barrier)
-        .map(|report| report.transmission_coefficient)
-        .unwrap_or(f64::NAN)
+    ffi_guard(f64::NAN, || {
+        compute_tunneling(barrier)
+            .map(|report| report.transmission_coefficient)
+            .unwrap_or(f64::NAN)
+    })
 }
 
 /// Returns the zero-point energy ½ħω of a quantum harmonic oscillator.
@@ -186,11 +196,13 @@ pub extern "C" fn quantum_rectangular_barrier_probability(barrier: QuantumBarrie
 /// default ħ) or finite and positive. Invalid inputs return `f64::NAN`.
 #[unsafe(no_mangle)]
 pub extern "C" fn quantum_zero_point_energy(angular_frequency: f64, reduced_planck: f64) -> f64 {
-    let hbar = effective_hbar(reduced_planck);
-    if !finite_non_negative(angular_frequency) || !finite_positive(hbar) {
-        return f64::NAN;
-    }
-    0.5 * hbar * angular_frequency
+    ffi_guard(f64::NAN, || {
+        let hbar = effective_hbar(reduced_planck);
+        if !finite_non_negative(angular_frequency) || !finite_positive(hbar) {
+            return f64::NAN;
+        }
+        0.5 * hbar * angular_frequency
+    })
 }
 
 /// Computes quantum harmonic-oscillator energy levels and writes the report
@@ -209,27 +221,29 @@ pub extern "C" fn quantum_harmonic_oscillator_report(
     reduced_planck: f64,
     out_report: *mut QuantumOscillatorReport,
 ) -> Bool {
-    let hbar = effective_hbar(reduced_planck);
-    if !finite_non_negative(angular_frequency) || !finite_positive(hbar) {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "invalid quantum oscillator parameters",
-        );
-        return Bool::FALSE;
-    }
-    let Some(out_report) = (unsafe { out_report.as_mut() }) else {
-        set_error(ERR_NULL_POINTER, "quantum oscillator output is null");
-        return Bool::FALSE;
-    };
-    let level_spacing = hbar * angular_frequency;
-    *out_report = QuantumOscillatorReport {
-        angular_frequency,
-        zero_point_energy: 0.5 * level_spacing,
-        first_excited_energy: 1.5 * level_spacing,
-        level_spacing,
-    };
-    clear_error();
-    Bool::TRUE
+    ffi_guard(Bool::FALSE, || {
+        let hbar = effective_hbar(reduced_planck);
+        if !finite_non_negative(angular_frequency) || !finite_positive(hbar) {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "invalid quantum oscillator parameters",
+            );
+            return Bool::FALSE;
+        }
+        let Some(out_report) = (unsafe { out_report.as_mut() }) else {
+            set_error(ERR_NULL_POINTER, "quantum oscillator output is null");
+            return Bool::FALSE;
+        };
+        let level_spacing = hbar * angular_frequency;
+        *out_report = QuantumOscillatorReport {
+            angular_frequency,
+            zero_point_energy: 0.5 * level_spacing,
+            first_excited_energy: 1.5 * level_spacing,
+            level_spacing,
+        };
+        clear_error();
+        Bool::TRUE
+    })
 }
 
 // ---------------------------------------------------------------------------

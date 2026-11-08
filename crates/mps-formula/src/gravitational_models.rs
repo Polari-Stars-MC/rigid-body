@@ -26,7 +26,7 @@
 //! - Carlson, *Elliptic Integrals*, Num. Math. 33 (1979)
 
 use crate::celestial_data::CelestialBody;
-use crate::error::{ERR_INVALID_ARGUMENT, clear_error, set_error};
+use crate::error::{ERR_INVALID_ARGUMENT, clear_error, ffi_guard, set_error};
 use crate::ffi::{Bool, Vec3, vec3_finite, vec3_from_rapier, vec3_to_rapier};
 use crate::math::KahanSum;
 
@@ -537,25 +537,27 @@ pub extern "C" fn gravity_spherical_harmonics(
     max_degree: u32,
     out_acceleration: *mut Vec3,
 ) -> Bool {
-    if !vec3_finite(position) || out_acceleration.is_null() {
-        set_error(ERR_INVALID_ARGUMENT, "invalid position or null output");
-        return Bool::FALSE;
-    }
-    let id = match crate::celestial_data::celestial_body_id_from_u32(body_id) {
-        Some(id) => id,
-        None => {
-            set_error(ERR_INVALID_ARGUMENT, "invalid celestial body ID");
+    ffi_guard(Bool::FALSE, || {
+        if !vec3_finite(position) || out_acceleration.is_null() {
+            set_error(ERR_INVALID_ARGUMENT, "invalid position or null output");
             return Bool::FALSE;
         }
-    };
-    let body = crate::celestial_data::get_celestial_body(id);
-    let accel = spherical_harmonics_acceleration(position, body, max_degree);
+        let id = match crate::celestial_data::celestial_body_id_from_u32(body_id) {
+            Some(id) => id,
+            None => {
+                set_error(ERR_INVALID_ARGUMENT, "invalid celestial body ID");
+                return Bool::FALSE;
+            }
+        };
+        let body = crate::celestial_data::get_celestial_body(id);
+        let accel = spherical_harmonics_acceleration(position, body, max_degree);
 
-    unsafe {
-        *out_acceleration = accel;
-    }
-    clear_error();
-    Bool::TRUE
+        unsafe {
+            *out_acceleration = accel;
+        }
+        clear_error();
+        Bool::TRUE
+    })
 }
 
 /// Compute ellipsoid gravitational acceleration.
@@ -571,25 +573,27 @@ pub extern "C" fn gravity_ellipsoid(
     body_id: u32,
     out_acceleration: *mut Vec3,
 ) -> Bool {
-    if !vec3_finite(position) || out_acceleration.is_null() {
-        set_error(ERR_INVALID_ARGUMENT, "invalid position or null output");
-        return Bool::FALSE;
-    }
-    let id = match crate::celestial_data::celestial_body_id_from_u32(body_id) {
-        Some(id) => id,
-        None => {
-            set_error(ERR_INVALID_ARGUMENT, "invalid celestial body ID");
+    ffi_guard(Bool::FALSE, || {
+        if !vec3_finite(position) || out_acceleration.is_null() {
+            set_error(ERR_INVALID_ARGUMENT, "invalid position or null output");
             return Bool::FALSE;
         }
-    };
-    let body = crate::celestial_data::get_celestial_body(id);
-    let accel = ellipsoid_gravity(position, body);
+        let id = match crate::celestial_data::celestial_body_id_from_u32(body_id) {
+            Some(id) => id,
+            None => {
+                set_error(ERR_INVALID_ARGUMENT, "invalid celestial body ID");
+                return Bool::FALSE;
+            }
+        };
+        let body = crate::celestial_data::get_celestial_body(id);
+        let accel = ellipsoid_gravity(position, body);
 
-    unsafe {
-        *out_acceleration = accel;
-    }
-    clear_error();
-    Bool::TRUE
+        unsafe {
+            *out_acceleration = accel;
+        }
+        clear_error();
+        Bool::TRUE
+    })
 }
 
 /// Compute zonal-harmonic (J2–J6) acceleration.
@@ -612,30 +616,33 @@ pub extern "C" fn gravity_zonal_harmonics(
     jn_count: u32,
     out_acceleration: *mut Vec3,
 ) -> Bool {
-    if !vec3_finite(position)
-        || jn.is_null()
-        || jn_count == 0
-        || out_acceleration.is_null()
-        || gm <= 0.0
-        || equatorial_radius <= 0.0
-    {
-        set_error(ERR_INVALID_ARGUMENT, "invalid parameters");
-        return Bool::FALSE;
-    }
-    let jn_slice = match unsafe { crate::ffi::checked_input_slice(jn, jn_count as usize, "jn") } {
-        Ok(v) => v,
-        Err(e) => {
-            crate::ffi::formula_result::<()>(Err(e));
+    ffi_guard(Bool::FALSE, || {
+        if !vec3_finite(position)
+            || jn.is_null()
+            || jn_count == 0
+            || out_acceleration.is_null()
+            || gm <= 0.0
+            || equatorial_radius <= 0.0
+        {
+            set_error(ERR_INVALID_ARGUMENT, "invalid parameters");
             return Bool::FALSE;
         }
-    };
-    let accel = zonal_harmonics_acceleration(position, gm, equatorial_radius, jn_slice);
+        let jn_slice = match unsafe { crate::ffi::checked_input_slice(jn, jn_count as usize, "jn") }
+        {
+            Ok(v) => v,
+            Err(e) => {
+                crate::ffi::formula_result::<()>(Err(e));
+                return Bool::FALSE;
+            }
+        };
+        let accel = zonal_harmonics_acceleration(position, gm, equatorial_radius, jn_slice);
 
-    unsafe {
-        *out_acceleration = accel;
-    }
-    clear_error();
-    Bool::TRUE
+        unsafe {
+            *out_acceleration = accel;
+        }
+        clear_error();
+        Bool::TRUE
+    })
 }
 
 /// Compute quadrupole tensor acceleration.
@@ -654,26 +661,29 @@ pub extern "C" fn gravity_quadrupole_tensor(
     quadrupole: *const f64,
     out_acceleration: *mut Vec3,
 ) -> Bool {
-    if !vec3_finite(position) || quadrupole.is_null() || out_acceleration.is_null() || gm <= 0.0 {
-        set_error(ERR_INVALID_ARGUMENT, "invalid parameters");
-        return Bool::FALSE;
-    }
-    let q = match unsafe { crate::ffi::checked_input_slice(quadrupole, 9, "quadrupole") } {
-        Ok(v) => v,
-        Err(e) => {
-            crate::ffi::formula_result::<()>(Err(e));
+    ffi_guard(Bool::FALSE, || {
+        if !vec3_finite(position) || quadrupole.is_null() || out_acceleration.is_null() || gm <= 0.0
+        {
+            set_error(ERR_INVALID_ARGUMENT, "invalid parameters");
             return Bool::FALSE;
         }
-    };
-    let mut q_arr = [0.0f64; 9];
-    q_arr.copy_from_slice(q);
-    let accel = quadrupole_tensor_acceleration(position, gm, &q_arr);
+        let q = match unsafe { crate::ffi::checked_input_slice(quadrupole, 9, "quadrupole") } {
+            Ok(v) => v,
+            Err(e) => {
+                crate::ffi::formula_result::<()>(Err(e));
+                return Bool::FALSE;
+            }
+        };
+        let mut q_arr = [0.0f64; 9];
+        q_arr.copy_from_slice(q);
+        let accel = quadrupole_tensor_acceleration(position, gm, &q_arr);
 
-    unsafe {
-        *out_acceleration = accel;
-    }
-    clear_error();
-    Bool::TRUE
+        unsafe {
+            *out_acceleration = accel;
+        }
+        clear_error();
+        Bool::TRUE
+    })
 }
 
 // ---------------------------------------------------------------------------

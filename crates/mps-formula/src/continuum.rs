@@ -3,7 +3,9 @@ use std::slice;
 
 use crate::math::{Matrix3f64, Vector3f64};
 
-use crate::error::{ERR_CAPACITY, ERR_INVALID_ARGUMENT, ERR_NULL_POINTER, clear_error, set_error};
+use crate::error::{
+    ERR_CAPACITY, ERR_INVALID_ARGUMENT, ERR_NULL_POINTER, clear_error, ffi_guard, set_error,
+};
 use crate::ffi::{
     Bool, FemConstitutiveReport, FemShapeFunctionReport, FemTetrahedron, MaterialProperties,
     NewmarkBetaParameters, NewmarkBetaReport, Vec3, vec3_finite, vec3_from_rapier, vec3_to_rapier,
@@ -138,14 +140,16 @@ fn solve_dense_system_in_place(
 /// (non-finite) vertex coordinates return `f64::NAN` instead of an error code.
 #[unsafe(no_mangle)]
 pub extern "C" fn continuum_tetra_volume(tetra: FemTetrahedron) -> f64 {
-    if !tetra_valid(tetra) {
-        return f64::NAN;
-    }
-    let a = vec3_to_rapier(tetra.a);
-    let b = vec3_to_rapier(tetra.b);
-    let c = vec3_to_rapier(tetra.c);
-    let d = vec3_to_rapier(tetra.d);
-    signed_tetra_volume(a, b, c, d).abs()
+    ffi_guard(f64::NAN, || {
+        if !tetra_valid(tetra) {
+            return f64::NAN;
+        }
+        let a = vec3_to_rapier(tetra.a);
+        let b = vec3_to_rapier(tetra.b);
+        let c = vec3_to_rapier(tetra.c);
+        let d = vec3_to_rapier(tetra.d);
+        signed_tetra_volume(a, b, c, d).abs()
+    })
 }
 
 /// Evaluates the barycentric shape functions (and their gradients) of a tetrahedron
@@ -162,32 +166,34 @@ pub extern "C" fn continuum_tetra_shape_functions(
     point: Vec3,
     out_report: *mut FemShapeFunctionReport,
 ) -> Bool {
-    let Some((weights, volume)) = barycentric_weights(tetra, point) else {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "invalid tetrahedral shape function input",
-        );
-        return Bool::FALSE;
-    };
-    let Some((gradients, _)) = tetra_gradients(tetra) else {
-        set_error(ERR_INVALID_ARGUMENT, "invalid tetrahedral gradient input");
-        return Bool::FALSE;
-    };
-    let Some(out_report) = (unsafe { out_report.as_mut() }) else {
-        set_error(ERR_NULL_POINTER, "shape function output is null");
-        return Bool::FALSE;
-    };
-    let inside = weights
-        .iter()
-        .all(|weight| *weight >= -1.0e-9 && *weight <= 1.0 + 1.0e-9);
-    *out_report = FemShapeFunctionReport {
-        weights,
-        gradients: gradients.map(vec3_from_rapier),
-        volume,
-        inside: Bool::from(inside),
-    };
-    clear_error();
-    Bool::TRUE
+    ffi_guard(Bool::FALSE, || {
+        let Some((weights, volume)) = barycentric_weights(tetra, point) else {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "invalid tetrahedral shape function input",
+            );
+            return Bool::FALSE;
+        };
+        let Some((gradients, _)) = tetra_gradients(tetra) else {
+            set_error(ERR_INVALID_ARGUMENT, "invalid tetrahedral gradient input");
+            return Bool::FALSE;
+        };
+        let Some(out_report) = (unsafe { out_report.as_mut() }) else {
+            set_error(ERR_NULL_POINTER, "shape function output is null");
+            return Bool::FALSE;
+        };
+        let inside = weights
+            .iter()
+            .all(|weight| *weight >= -1.0e-9 && *weight <= 1.0 + 1.0e-9);
+        *out_report = FemShapeFunctionReport {
+            weights,
+            gradients: gradients.map(vec3_from_rapier),
+            volume,
+            inside: Bool::from(inside),
+        };
+        clear_error();
+        Bool::TRUE
+    })
 }
 
 /// Fills the 6x6 linear-elastic constitutive matrix (row-major) for a material.
@@ -206,41 +212,44 @@ pub extern "C" fn continuum_linear_elastic_constitutive_matrix(
     capacity: u32,
     out_report: *mut FemConstitutiveReport,
 ) -> Bool {
-    if capacity < 36 || out_matrix.is_null() {
-        set_error(
-            ERR_CAPACITY,
-            "constitutive matrix capacity must be at least 36",
-        );
-        return Bool::FALSE;
-    }
-    if !material_valid(material) {
-        set_error(ERR_INVALID_ARGUMENT, "invalid linear elastic material");
-        return Bool::FALSE;
-    }
-    let lambda = material.youngs_modulus * material.poisson_ratio
-        / ((1.0 + material.poisson_ratio) * (1.0 - 2.0 * material.poisson_ratio));
-    let shear = material.youngs_modulus / (2.0 * (1.0 + material.poisson_ratio));
-    let matrix = unsafe { slice::from_raw_parts_mut(out_matrix, capacity as usize) };
-    matrix[..36].fill(0.0);
-    for row in 0..3 {
-        for col in 0..3 {
-            matrix[row * 6 + col] = lambda;
+    ffi_guard(Bool::FALSE, || {
+        if capacity < 36 || out_matrix.is_null() {
+            set_error(
+                ERR_CAPACITY,
+                "constitutive matrix capacity must be at least 36",
+            );
+            return Bool::FALSE;
         }
-        matrix[row * 6 + row] += 2.0 * shear;
-    }
-    matrix[3 * 6 + 3] = shear;
-    matrix[4 * 6 + 4] = shear;
-    matrix[5 * 6 + 5] = shear;
-    if let Some(out_report) = unsafe { out_report.as_mut() } {
-        *out_report = FemConstitutiveReport {
-            lambda,
-            shear_modulus: shear,
-            bulk_modulus: material.youngs_modulus / (3.0 * (1.0 - 2.0 * material.poisson_ratio)),
-            matrix_size: 6,
-        };
-    }
-    clear_error();
-    Bool::TRUE
+        if !material_valid(material) {
+            set_error(ERR_INVALID_ARGUMENT, "invalid linear elastic material");
+            return Bool::FALSE;
+        }
+        let lambda = material.youngs_modulus * material.poisson_ratio
+            / ((1.0 + material.poisson_ratio) * (1.0 - 2.0 * material.poisson_ratio));
+        let shear = material.youngs_modulus / (2.0 * (1.0 + material.poisson_ratio));
+        let matrix = unsafe { slice::from_raw_parts_mut(out_matrix, capacity as usize) };
+        matrix[..36].fill(0.0);
+        for row in 0..3 {
+            for col in 0..3 {
+                matrix[row * 6 + col] = lambda;
+            }
+            matrix[row * 6 + row] += 2.0 * shear;
+        }
+        matrix[3 * 6 + 3] = shear;
+        matrix[4 * 6 + 4] = shear;
+        matrix[5 * 6 + 5] = shear;
+        if let Some(out_report) = unsafe { out_report.as_mut() } {
+            *out_report = FemConstitutiveReport {
+                lambda,
+                shear_modulus: shear,
+                bulk_modulus: material.youngs_modulus
+                    / (3.0 * (1.0 - 2.0 * material.poisson_ratio)),
+                matrix_size: 6,
+            };
+        }
+        clear_error();
+        Bool::TRUE
+    })
 }
 
 /// Fills the 6x12 strain-displacement (B) matrix of a linear tetrahedral element.
@@ -258,42 +267,44 @@ pub extern "C" fn continuum_tetra_strain_displacement_matrix(
     capacity: u32,
     out_volume: *mut f64,
 ) -> Bool {
-    if capacity < 72 || out_matrix.is_null() {
-        set_error(
-            ERR_CAPACITY,
-            "strain-displacement matrix capacity must be at least 72",
-        );
-        return Bool::FALSE;
-    }
-    let Some((gradients, volume)) = tetra_gradients(tetra) else {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "invalid tetrahedral strain matrix input",
-        );
-        return Bool::FALSE;
-    };
-    let matrix = unsafe { slice::from_raw_parts_mut(out_matrix, capacity as usize) };
-    matrix[..72].fill(0.0);
-    for (node, gradient) in gradients.iter().enumerate() {
-        let col = node * 3;
-        let gx = gradient.x;
-        let gy = gradient.y;
-        let gz = gradient.z;
-        matrix[col] = gx;
-        matrix[6 + col + 1] = gy;
-        matrix[12 + col + 2] = gz;
-        matrix[18 + col] = gy;
-        matrix[18 + col + 1] = gx;
-        matrix[24 + col + 1] = gz;
-        matrix[24 + col + 2] = gy;
-        matrix[30 + col] = gz;
-        matrix[30 + col + 2] = gx;
-    }
-    if let Some(out_volume) = unsafe { out_volume.as_mut() } {
-        *out_volume = volume;
-    }
-    clear_error();
-    Bool::TRUE
+    ffi_guard(Bool::FALSE, || {
+        if capacity < 72 || out_matrix.is_null() {
+            set_error(
+                ERR_CAPACITY,
+                "strain-displacement matrix capacity must be at least 72",
+            );
+            return Bool::FALSE;
+        }
+        let Some((gradients, volume)) = tetra_gradients(tetra) else {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "invalid tetrahedral strain matrix input",
+            );
+            return Bool::FALSE;
+        };
+        let matrix = unsafe { slice::from_raw_parts_mut(out_matrix, capacity as usize) };
+        matrix[..72].fill(0.0);
+        for (node, gradient) in gradients.iter().enumerate() {
+            let col = node * 3;
+            let gx = gradient.x;
+            let gy = gradient.y;
+            let gz = gradient.z;
+            matrix[col] = gx;
+            matrix[6 + col + 1] = gy;
+            matrix[12 + col + 2] = gz;
+            matrix[18 + col] = gy;
+            matrix[18 + col + 1] = gx;
+            matrix[24 + col + 1] = gz;
+            matrix[24 + col + 2] = gy;
+            matrix[30 + col] = gz;
+            matrix[30 + col + 2] = gx;
+        }
+        if let Some(out_volume) = unsafe { out_volume.as_mut() } {
+            *out_volume = volume;
+        }
+        clear_error();
+        Bool::TRUE
+    })
 }
 
 /// Advances one time step of a structural dynamics system with the Newmark-beta method.
@@ -327,153 +338,157 @@ pub extern "C" fn continuum_newmark_beta_solve(
     capacity: u32,
     out_report: *mut NewmarkBetaReport,
 ) -> Bool {
-    if dof == 0 || dof > MAX_DOF || capacity < dof {
-        set_error(ERR_CAPACITY, "invalid Newmark-beta system size");
-        return Bool::FALSE;
-    }
-    if mass_matrix.is_null()
-        || damping_matrix.is_null()
-        || stiffness_matrix.is_null()
-        || displacement.is_null()
-        || velocity.is_null()
-        || acceleration.is_null()
-        || external_force.is_null()
-        || out_delta_displacement.is_null()
-        || out_next_displacement.is_null()
-        || out_next_velocity.is_null()
-        || out_next_acceleration.is_null()
-    {
-        set_error(ERR_NULL_POINTER, "Newmark-beta pointers are null");
-        return Bool::FALSE;
-    }
-    if !finite_positive(params.dt) || !finite_positive(params.beta) || !params.gamma.is_finite() {
-        set_error(ERR_INVALID_ARGUMENT, "invalid Newmark-beta parameters");
-        return Bool::FALSE;
-    }
+    ffi_guard(Bool::FALSE, || {
+        if dof == 0 || dof > MAX_DOF || capacity < dof {
+            set_error(ERR_CAPACITY, "invalid Newmark-beta system size");
+            return Bool::FALSE;
+        }
+        if mass_matrix.is_null()
+            || damping_matrix.is_null()
+            || stiffness_matrix.is_null()
+            || displacement.is_null()
+            || velocity.is_null()
+            || acceleration.is_null()
+            || external_force.is_null()
+            || out_delta_displacement.is_null()
+            || out_next_displacement.is_null()
+            || out_next_velocity.is_null()
+            || out_next_acceleration.is_null()
+        {
+            set_error(ERR_NULL_POINTER, "Newmark-beta pointers are null");
+            return Bool::FALSE;
+        }
+        if !finite_positive(params.dt) || !finite_positive(params.beta) || !params.gamma.is_finite()
+        {
+            set_error(ERR_INVALID_ARGUMENT, "invalid Newmark-beta parameters");
+            return Bool::FALSE;
+        }
 
-    let n = dof as usize;
-    let nn = n * n;
-    macro_rules! input {
-        ($p:expr, $l:expr, $name:expr) => {
-            match unsafe { crate::ffi::checked_input_slice($p, $l, $name) } {
-                Ok(v) => v,
-                Err(e) => {
-                    crate::ffi::formula_result::<()>(Err(e));
-                    return Bool::FALSE;
+        let n = dof as usize;
+        let nn = n * n;
+        macro_rules! input {
+            ($p:expr, $l:expr, $name:expr) => {
+                match unsafe { crate::ffi::checked_input_slice($p, $l, $name) } {
+                    Ok(v) => v,
+                    Err(e) => {
+                        crate::ffi::formula_result::<()>(Err(e));
+                        return Bool::FALSE;
+                    }
                 }
-            }
+            };
+        }
+        let mass = input!(mass_matrix, nn, "mass_matrix");
+        let damping = input!(damping_matrix, nn, "damping_matrix");
+        let stiffness = input!(stiffness_matrix, nn, "stiffness_matrix");
+        let u = input!(displacement, n, "displacement");
+        let v = input!(velocity, n, "velocity");
+        let a = input!(acceleration, n, "acceleration");
+        let force = input!(external_force, n, "external_force");
+        if mass
+            .iter()
+            .chain(damping)
+            .chain(stiffness)
+            .chain(u)
+            .chain(v)
+            .chain(a)
+            .chain(force)
+            .any(|value| !value.is_finite())
+        {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "Newmark-beta inputs contain non-finite values",
+            );
+            return Bool::FALSE;
+        }
+
+        let a0 = 1.0 / (params.beta * params.dt * params.dt);
+        let a1 = params.gamma / (params.beta * params.dt);
+        let mut effective_stiffness = vec![0.0; nn];
+        for index in 0..nn {
+            effective_stiffness[index] = stiffness[index] + a0 * mass[index] + a1 * damping[index];
+        }
+
+        let mut u_pred = vec![0.0; n];
+        let mut v_pred = vec![0.0; n];
+        for i in 0..n {
+            u_pred[i] =
+                u[i] + params.dt * v[i] + params.dt * params.dt * (0.5 - params.beta) * a[i];
+            v_pred[i] = v[i] + params.dt * (1.0 - params.gamma) * a[i];
+        }
+        // Compute k_u_pred and c_v_pred into reusable buffers,
+        // then fold into effective_force in-place.
+        let mut effective_force = vec![0.0; n];
+        dense_mat_vec_out(stiffness, &u_pred, n, &mut effective_force);
+        dense_mat_vec_out(damping, &v_pred, n, &mut u_pred);
+        for i in 0..n {
+            effective_force[i] = force[i] - effective_force[i] - u_pred[i];
+        }
+
+        // Solve in-place to avoid the clone() / second allocation for `delta`.
+        // effective_stiffness is consumed (modified in-place), effective_force too.
+        let mut delta = vec![0.0; n];
+        if !solve_dense_system_in_place(
+            &mut effective_stiffness,
+            &mut effective_force,
+            &mut delta,
+            n,
+        ) {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "Newmark-beta effective stiffness is singular",
+            );
+            return Bool::FALSE;
         };
-    }
-    let mass = input!(mass_matrix, nn, "mass_matrix");
-    let damping = input!(damping_matrix, nn, "damping_matrix");
-    let stiffness = input!(stiffness_matrix, nn, "stiffness_matrix");
-    let u = input!(displacement, n, "displacement");
-    let v = input!(velocity, n, "velocity");
-    let a = input!(acceleration, n, "acceleration");
-    let force = input!(external_force, n, "external_force");
-    if mass
-        .iter()
-        .chain(damping)
-        .chain(stiffness)
-        .chain(u)
-        .chain(v)
-        .chain(a)
-        .chain(force)
-        .any(|value| !value.is_finite())
-    {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "Newmark-beta inputs contain non-finite values",
-        );
-        return Bool::FALSE;
-    }
 
-    let a0 = 1.0 / (params.beta * params.dt * params.dt);
-    let a1 = params.gamma / (params.beta * params.dt);
-    let mut effective_stiffness = vec![0.0; nn];
-    for index in 0..nn {
-        effective_stiffness[index] = stiffness[index] + a0 * mass[index] + a1 * damping[index];
-    }
-
-    let mut u_pred = vec![0.0; n];
-    let mut v_pred = vec![0.0; n];
-    for i in 0..n {
-        u_pred[i] = u[i] + params.dt * v[i] + params.dt * params.dt * (0.5 - params.beta) * a[i];
-        v_pred[i] = v[i] + params.dt * (1.0 - params.gamma) * a[i];
-    }
-    // Compute k_u_pred and c_v_pred into reusable buffers,
-    // then fold into effective_force in-place.
-    let mut effective_force = vec![0.0; n];
-    dense_mat_vec_out(stiffness, &u_pred, n, &mut effective_force);
-    dense_mat_vec_out(damping, &v_pred, n, &mut u_pred);
-    for i in 0..n {
-        effective_force[i] = force[i] - effective_force[i] - u_pred[i];
-    }
-
-    // Solve in-place to avoid the clone() / second allocation for `delta`.
-    // effective_stiffness is consumed (modified in-place), effective_force too.
-    let mut delta = vec![0.0; n];
-    if !solve_dense_system_in_place(
-        &mut effective_stiffness,
-        &mut effective_force,
-        &mut delta,
-        n,
-    ) {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "Newmark-beta effective stiffness is singular",
-        );
-        return Bool::FALSE;
-    };
-
-    macro_rules! output {
-        ($p:expr, $name:expr) => {
-            match unsafe { crate::ffi::checked_output_slice($p, capacity as usize, $name) } {
-                Ok(v) => v,
-                Err(e) => {
-                    crate::ffi::formula_result::<()>(Err(e));
-                    return Bool::FALSE;
+        macro_rules! output {
+            ($p:expr, $name:expr) => {
+                match unsafe { crate::ffi::checked_output_slice($p, capacity as usize, $name) } {
+                    Ok(v) => v,
+                    Err(e) => {
+                        crate::ffi::formula_result::<()>(Err(e));
+                        return Bool::FALSE;
+                    }
                 }
-            }
-        };
-    }
-    let out_delta = output!(out_delta_displacement, "out_delta_displacement");
-    let out_u = output!(out_next_displacement, "out_next_displacement");
-    let out_v = output!(out_next_velocity, "out_next_velocity");
-    let out_a = output!(out_next_acceleration, "out_next_acceleration");
-    let mut max_delta = 0.0;
-    for i in 0..n {
-        let next_acceleration = a0 * delta[i];
-        out_delta[i] = delta[i];
-        out_u[i] = u_pred[i] + delta[i];
-        out_v[i] = v_pred[i] + params.gamma * params.dt * next_acceleration;
-        out_a[i] = next_acceleration;
-        max_delta = f64::max(max_delta, delta[i].abs());
-    }
+            };
+        }
+        let out_delta = output!(out_delta_displacement, "out_delta_displacement");
+        let out_u = output!(out_next_displacement, "out_next_displacement");
+        let out_v = output!(out_next_velocity, "out_next_velocity");
+        let out_a = output!(out_next_acceleration, "out_next_acceleration");
+        let mut max_delta = 0.0;
+        for i in 0..n {
+            let next_acceleration = a0 * delta[i];
+            out_delta[i] = delta[i];
+            out_u[i] = u_pred[i] + delta[i];
+            out_v[i] = v_pred[i] + params.gamma * params.dt * next_acceleration;
+            out_a[i] = next_acceleration;
+            max_delta = f64::max(max_delta, delta[i].abs());
+        }
 
-    // Reuse u_pred as scratch for residual computation
-    let mut solved_force = u_pred; // was u_pred, now reused
-    dense_mat_vec_out(&effective_stiffness, &delta, n, &mut solved_force);
-    let residual_norm = solved_force
-        .iter()
-        .zip(effective_force.iter())
-        .map(|(lhs, rhs)| (lhs - rhs) * (lhs - rhs))
-        .sum::<f64>()
-        .sqrt();
-    if let Some(out_report) = unsafe { out_report.as_mut() } {
-        *out_report = NewmarkBetaReport {
-            dof,
-            beta: params.beta,
-            gamma: params.gamma,
-            dt: params.dt,
-            effective_stiffness_scale: a0,
-            effective_damping_scale: a1,
-            max_delta_displacement: max_delta,
-            residual_norm,
-        };
-    }
-    clear_error();
-    Bool::TRUE
+        // Reuse u_pred as scratch for residual computation
+        let mut solved_force = u_pred; // was u_pred, now reused
+        dense_mat_vec_out(&effective_stiffness, &delta, n, &mut solved_force);
+        let residual_norm = solved_force
+            .iter()
+            .zip(effective_force.iter())
+            .map(|(lhs, rhs)| (lhs - rhs) * (lhs - rhs))
+            .sum::<f64>()
+            .sqrt();
+        if let Some(out_report) = unsafe { out_report.as_mut() } {
+            *out_report = NewmarkBetaReport {
+                dof,
+                beta: params.beta,
+                gamma: params.gamma,
+                dt: params.dt,
+                effective_stiffness_scale: a0,
+                effective_damping_scale: a1,
+                max_delta_displacement: max_delta,
+                residual_norm,
+            };
+        }
+        clear_error();
+        Bool::TRUE
+    })
 }
 
 /// Fills the 12x12 element stiffness matrix of a linear tetrahedral element.
@@ -492,59 +507,61 @@ pub extern "C" fn continuum_linear_tetra_element_stiffness(
     capacity: u32,
     out_volume: *mut f64,
 ) -> Bool {
-    if capacity < 144 || out_stiffness.is_null() {
-        set_error(
-            ERR_CAPACITY,
-            "tetra stiffness capacity must be at least 144",
-        );
-        return Bool::FALSE;
-    }
-    if !material_valid(material) {
-        set_error(ERR_INVALID_ARGUMENT, "invalid tetra stiffness material");
-        return Bool::FALSE;
-    }
-    let mut b_matrix = [0.0; 72];
-    let mut volume = 0.0;
-    if continuum_tetra_strain_displacement_matrix(
-        tetra,
-        b_matrix.as_mut_ptr(),
-        b_matrix.len() as u32,
-        &mut volume,
-    ) != Bool::TRUE
-    {
-        return Bool::FALSE;
-    }
-    let mut d_matrix = [0.0; 36];
-    if continuum_linear_elastic_constitutive_matrix(
-        material,
-        d_matrix.as_mut_ptr(),
-        d_matrix.len() as u32,
-        std::ptr::null_mut(),
-    ) != Bool::TRUE
-    {
-        return Bool::FALSE;
-    }
-
-    let stiffness = unsafe { slice::from_raw_parts_mut(out_stiffness, capacity as usize) };
-    stiffness[..144].fill(0.0);
-    for i in 0..12 {
-        for j in 0..12 {
-            let mut sum = 0.0;
-            for alpha in 0..6 {
-                for beta in 0..6 {
-                    sum += b_matrix[alpha * 12 + i]
-                        * d_matrix[alpha * 6 + beta]
-                        * b_matrix[beta * 12 + j];
-                }
-            }
-            stiffness[i * 12 + j] = sum * volume;
+    ffi_guard(Bool::FALSE, || {
+        if capacity < 144 || out_stiffness.is_null() {
+            set_error(
+                ERR_CAPACITY,
+                "tetra stiffness capacity must be at least 144",
+            );
+            return Bool::FALSE;
         }
-    }
-    if let Some(out_volume) = unsafe { out_volume.as_mut() } {
-        *out_volume = volume;
-    }
-    clear_error();
-    Bool::TRUE
+        if !material_valid(material) {
+            set_error(ERR_INVALID_ARGUMENT, "invalid tetra stiffness material");
+            return Bool::FALSE;
+        }
+        let mut b_matrix = [0.0; 72];
+        let mut volume = 0.0;
+        if continuum_tetra_strain_displacement_matrix(
+            tetra,
+            b_matrix.as_mut_ptr(),
+            b_matrix.len() as u32,
+            &mut volume,
+        ) != Bool::TRUE
+        {
+            return Bool::FALSE;
+        }
+        let mut d_matrix = [0.0; 36];
+        if continuum_linear_elastic_constitutive_matrix(
+            material,
+            d_matrix.as_mut_ptr(),
+            d_matrix.len() as u32,
+            std::ptr::null_mut(),
+        ) != Bool::TRUE
+        {
+            return Bool::FALSE;
+        }
+
+        let stiffness = unsafe { slice::from_raw_parts_mut(out_stiffness, capacity as usize) };
+        stiffness[..144].fill(0.0);
+        for i in 0..12 {
+            for j in 0..12 {
+                let mut sum = 0.0;
+                for alpha in 0..6 {
+                    for beta in 0..6 {
+                        sum += b_matrix[alpha * 12 + i]
+                            * d_matrix[alpha * 6 + beta]
+                            * b_matrix[beta * 12 + j];
+                    }
+                }
+                stiffness[i * 12 + j] = sum * volume;
+            }
+        }
+        if let Some(out_volume) = unsafe { out_volume.as_mut() } {
+            *out_volume = volume;
+        }
+        clear_error();
+        Bool::TRUE
+    })
 }
 
 /// Computes the 3x3 deformation gradient (row-major) mapping a reference
@@ -562,46 +579,48 @@ pub extern "C" fn continuum_deformation_gradient(
     out_matrix: *mut f64,
     capacity: u32,
 ) -> Bool {
-    if capacity < 9 || out_matrix.is_null() {
-        set_error(
-            ERR_CAPACITY,
-            "deformation gradient capacity must be at least 9",
-        );
-        return Bool::FALSE;
-    }
-    if !tetra_valid(reference_tetra) || !tetra_valid(deformed_tetra) {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "invalid deformation gradient tetrahedron",
-        );
-        return Bool::FALSE;
-    }
-    let x0 = vec3_to_rapier(reference_tetra.a);
-    let x1 = vec3_to_rapier(reference_tetra.b);
-    let x2 = vec3_to_rapier(reference_tetra.c);
-    let x3 = vec3_to_rapier(reference_tetra.d);
-    let y0 = vec3_to_rapier(deformed_tetra.a);
-    let y1 = vec3_to_rapier(deformed_tetra.b);
-    let y2 = vec3_to_rapier(deformed_tetra.c);
-    let y3 = vec3_to_rapier(deformed_tetra.d);
-    let dm = Matrix3f64::from_cols(x1 - x0, x2 - x0, x3 - x0);
-    let Some(dm_inv) = dm.try_inverse() else {
-        set_error(ERR_INVALID_ARGUMENT, "reference tetrahedron is degenerate");
-        return Bool::FALSE;
-    };
-    let ds = Matrix3f64::from_cols(y1 - y0, y2 - y0, y3 - y0);
-    let f = ds * dm_inv;
-    let out = unsafe { slice::from_raw_parts_mut(out_matrix, capacity as usize) };
-    let cols = f.to_cols_array();
-    out[0] = cols[0];
-    out[1] = cols[3];
-    out[2] = cols[6];
-    out[3] = cols[1];
-    out[4] = cols[4];
-    out[5] = cols[7];
-    out[6] = cols[2];
-    out[7] = cols[5];
-    out[8] = cols[8];
-    clear_error();
-    Bool::TRUE
+    ffi_guard(Bool::FALSE, || {
+        if capacity < 9 || out_matrix.is_null() {
+            set_error(
+                ERR_CAPACITY,
+                "deformation gradient capacity must be at least 9",
+            );
+            return Bool::FALSE;
+        }
+        if !tetra_valid(reference_tetra) || !tetra_valid(deformed_tetra) {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "invalid deformation gradient tetrahedron",
+            );
+            return Bool::FALSE;
+        }
+        let x0 = vec3_to_rapier(reference_tetra.a);
+        let x1 = vec3_to_rapier(reference_tetra.b);
+        let x2 = vec3_to_rapier(reference_tetra.c);
+        let x3 = vec3_to_rapier(reference_tetra.d);
+        let y0 = vec3_to_rapier(deformed_tetra.a);
+        let y1 = vec3_to_rapier(deformed_tetra.b);
+        let y2 = vec3_to_rapier(deformed_tetra.c);
+        let y3 = vec3_to_rapier(deformed_tetra.d);
+        let dm = Matrix3f64::from_cols(x1 - x0, x2 - x0, x3 - x0);
+        let Some(dm_inv) = dm.try_inverse() else {
+            set_error(ERR_INVALID_ARGUMENT, "reference tetrahedron is degenerate");
+            return Bool::FALSE;
+        };
+        let ds = Matrix3f64::from_cols(y1 - y0, y2 - y0, y3 - y0);
+        let f = ds * dm_inv;
+        let out = unsafe { slice::from_raw_parts_mut(out_matrix, capacity as usize) };
+        let cols = f.to_cols_array();
+        out[0] = cols[0];
+        out[1] = cols[3];
+        out[2] = cols[6];
+        out[3] = cols[1];
+        out[4] = cols[4];
+        out[5] = cols[7];
+        out[6] = cols[2];
+        out[7] = cols[5];
+        out[8] = cols[8];
+        clear_error();
+        Bool::TRUE
+    })
 }

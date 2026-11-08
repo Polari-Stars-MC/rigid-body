@@ -6,8 +6,6 @@
 //! 访问函数，不依赖 Rapier 或 `WorldHandle`，并经 `mps-core` 重导出供
 //! Java/JNI 调用。
 
-use crate::error;
-
 /// 一级学科记录。
 #[derive(Clone, Copy, Debug)]
 pub struct Discipline {
@@ -84,19 +82,11 @@ pub fn discipline_count() -> usize {
 }
 
 /// 按 `field_id` 精确查找一个学科。返回 `None` 当 `field_id` 为空或不存在。
+///
+/// 纯函数：不读写线程局部错误槽，失败仅由 `None` 表达（domain.rs 策略）。
 pub fn discipline_by_id(field_id: &str) -> Option<&'static Discipline> {
     if field_id.is_empty() {
-        error::set_error(error::ERR_INVALID_ARGUMENT, "field_id must not be empty");
         return None;
     }
-    match DISCIPLINES.iter().find(|d| d.field_id == field_id) {
-        Some(d) => {
-            error::set_error(error::ERR_OK, "ok");
-            Some(d)
-        }
-        None => {
-            error::set_error(error::ERR_NOT_FOUND, "field_id not found");
-            None
-        }
-    }
+    DISCIPLINES.iter().find(|d| d.field_id == field_id)
 }

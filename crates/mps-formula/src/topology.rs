@@ -1,4 +1,6 @@
-use crate::error::{ERR_CAPACITY, ERR_INVALID_ARGUMENT, ERR_NULL_POINTER, clear_error, set_error};
+use crate::error::{
+    ERR_CAPACITY, ERR_INVALID_ARGUMENT, ERR_NULL_POINTER, clear_error, ffi_guard, set_error,
+};
 use crate::ffi::{
     Bool, DensityFieldStats, SimpMaterialReport, TopologyOptimizationParams,
     TopologyOptimizationReport,
@@ -89,28 +91,30 @@ pub extern "C" fn topology_simp_material(
     params: TopologyOptimizationParams,
     out_report: *mut SimpMaterialReport,
 ) -> Bool {
-    if !density_valid(density) || !params_valid(params) {
-        set_error(ERR_INVALID_ARGUMENT, "invalid SIMP material parameters");
-        return Bool::FALSE;
-    }
-    let physical_density = density.max(params.min_density);
-    let stiffness = params.stiffness_min
-        + physical_density.powf(params.penalization)
+    ffi_guard(Bool::FALSE, || {
+        if !density_valid(density) || !params_valid(params) {
+            set_error(ERR_INVALID_ARGUMENT, "invalid SIMP material parameters");
+            return Bool::FALSE;
+        }
+        let physical_density = density.max(params.min_density);
+        let stiffness = params.stiffness_min
+            + physical_density.powf(params.penalization)
+                * (params.stiffness_solid - params.stiffness_min);
+        let derivative = params.penalization
+            * physical_density.powf(params.penalization - 1.0)
             * (params.stiffness_solid - params.stiffness_min);
-    let derivative = params.penalization
-        * physical_density.powf(params.penalization - 1.0)
-        * (params.stiffness_solid - params.stiffness_min);
-    let Some(out_report) = (unsafe { out_report.as_mut() }) else {
-        set_error(ERR_NULL_POINTER, "SIMP material output is null");
-        return Bool::FALSE;
-    };
-    *out_report = SimpMaterialReport {
-        density: physical_density,
-        stiffness,
-        stiffness_derivative: derivative,
-    };
-    clear_error();
-    Bool::TRUE
+        let Some(out_report) = (unsafe { out_report.as_mut() }) else {
+            set_error(ERR_NULL_POINTER, "SIMP material output is null");
+            return Bool::FALSE;
+        };
+        *out_report = SimpMaterialReport {
+            density: physical_density,
+            stiffness,
+            stiffness_derivative: derivative,
+        };
+        clear_error();
+        Bool::TRUE
+    })
 }
 
 /// Returns the SIMP-interpolated stiffness for a single density value.
@@ -126,15 +130,17 @@ pub extern "C" fn topology_simp_stiffness(
     stiffness_min: f64,
     stiffness_solid: f64,
 ) -> f64 {
-    if !density_valid(density)
-        || !finite_positive(penalization)
-        || !finite_non_negative(stiffness_min)
-        || !finite_positive(stiffness_solid)
-        || stiffness_solid < stiffness_min
-    {
-        return f64::NAN;
-    }
-    stiffness_min + density.powf(penalization) * (stiffness_solid - stiffness_min)
+    ffi_guard(f64::NAN, || {
+        if !density_valid(density)
+            || !finite_positive(penalization)
+            || !finite_non_negative(stiffness_min)
+            || !finite_positive(stiffness_solid)
+            || stiffness_solid < stiffness_min
+        {
+            return f64::NAN;
+        }
+        stiffness_min + density.powf(penalization) * (stiffness_solid - stiffness_min)
+    })
 }
 
 /// Returns the compliance sensitivity of one element for the OC update.
@@ -149,14 +155,17 @@ pub extern "C" fn topology_compliance_sensitivity(
     element_energy: f64,
     params: TopologyOptimizationParams,
 ) -> f64 {
-    if !density_valid(density) || !finite_non_negative(element_energy) || !params_valid(params) {
-        return f64::NAN;
-    }
-    let physical_density = density.max(params.min_density);
-    -params.penalization
-        * physical_density.powf(params.penalization - 1.0)
-        * (params.stiffness_solid - params.stiffness_min)
-        * element_energy
+    ffi_guard(f64::NAN, || {
+        if !density_valid(density) || !finite_non_negative(element_energy) || !params_valid(params)
+        {
+            return f64::NAN;
+        }
+        let physical_density = density.max(params.min_density);
+        -params.penalization
+            * physical_density.powf(params.penalization - 1.0)
+            * (params.stiffness_solid - params.stiffness_min)
+            * element_energy
+    })
 }
 
 /// Performs one optimality-criteria (OC) density update over a density field.
@@ -180,87 +189,89 @@ pub extern "C" fn topology_oc_update(
     capacity: u32,
     out_report: *mut TopologyOptimizationReport,
 ) -> Bool {
-    if cell_count == 0 || cell_count > MAX_DENSITY_CELLS || capacity < cell_count {
-        set_error(ERR_CAPACITY, "invalid topology OC capacity");
-        return Bool::FALSE;
-    }
-    if densities.is_null() || sensitivities.is_null() || out_densities.is_null() {
-        set_error(ERR_NULL_POINTER, "topology OC pointers are null");
-        return Bool::FALSE;
-    }
-    if !params_valid(params) {
-        set_error(ERR_INVALID_ARGUMENT, "invalid topology OC parameters");
-        return Bool::FALSE;
-    }
-    let densities = match unsafe {
-        crate::ffi::checked_input_slice(densities, cell_count as usize, "densities")
-    } {
-        Ok(v) => v,
-        Err(e) => {
-            crate::ffi::formula_result::<()>(Err(e));
+    ffi_guard(Bool::FALSE, || {
+        if cell_count == 0 || cell_count > MAX_DENSITY_CELLS || capacity < cell_count {
+            set_error(ERR_CAPACITY, "invalid topology OC capacity");
             return Bool::FALSE;
         }
-    };
-    let sensitivities = match unsafe {
-        crate::ffi::checked_input_slice(sensitivities, cell_count as usize, "sensitivities")
-    } {
-        Ok(v) => v,
-        Err(e) => {
-            crate::ffi::formula_result::<()>(Err(e));
+        if densities.is_null() || sensitivities.is_null() || out_densities.is_null() {
+            set_error(ERR_NULL_POINTER, "topology OC pointers are null");
             return Bool::FALSE;
         }
-    };
-    let out = match unsafe {
-        crate::ffi::checked_output_slice(out_densities, capacity as usize, "out_densities")
-    } {
-        Ok(v) => v,
-        Err(e) => {
-            crate::ffi::formula_result::<()>(Err(e));
+        if !params_valid(params) {
+            set_error(ERR_INVALID_ARGUMENT, "invalid topology OC parameters");
             return Bool::FALSE;
         }
-    };
-    if densities.iter().any(|density| !density_valid(*density))
-        || sensitivities
-            .iter()
-            .any(|sensitivity| !sensitivity.is_finite())
-    {
-        set_error(ERR_INVALID_ARGUMENT, "invalid topology OC field values");
-        return Bool::FALSE;
-    }
+        let densities = match unsafe {
+            crate::ffi::checked_input_slice(densities, cell_count as usize, "densities")
+        } {
+            Ok(v) => v,
+            Err(e) => {
+                crate::ffi::formula_result::<()>(Err(e));
+                return Bool::FALSE;
+            }
+        };
+        let sensitivities = match unsafe {
+            crate::ffi::checked_input_slice(sensitivities, cell_count as usize, "sensitivities")
+        } {
+            Ok(v) => v,
+            Err(e) => {
+                crate::ffi::formula_result::<()>(Err(e));
+                return Bool::FALSE;
+            }
+        };
+        let out = match unsafe {
+            crate::ffi::checked_output_slice(out_densities, capacity as usize, "out_densities")
+        } {
+            Ok(v) => v,
+            Err(e) => {
+                crate::ffi::formula_result::<()>(Err(e));
+                return Bool::FALSE;
+            }
+        };
+        if densities.iter().any(|density| !density_valid(*density))
+            || sensitivities
+                .iter()
+                .any(|sensitivity| !sensitivity.is_finite())
+        {
+            set_error(ERR_INVALID_ARGUMENT, "invalid topology OC field values");
+            return Bool::FALSE;
+        }
 
-    let mut lower = EPSILON;
-    let mut upper = 1.0e12;
-    for _ in 0..80 {
-        let mid = 0.5 * (lower + upper);
-        let average = average_after_oc(densities, sensitivities, mid, params);
-        if average > params.volume_fraction {
-            lower = mid;
-        } else {
-            upper = mid;
+        let mut lower = EPSILON;
+        let mut upper = 1.0e12;
+        for _ in 0..80 {
+            let mid = 0.5 * (lower + upper);
+            let average = average_after_oc(densities, sensitivities, mid, params);
+            if average > params.volume_fraction {
+                lower = mid;
+            } else {
+                upper = mid;
+            }
         }
-    }
 
-    let lambda = 0.5 * (lower + upper);
-    let mut report = TopologyOptimizationReport {
-        cell_count,
-        min_density: f64::INFINITY,
-        ..TopologyOptimizationReport::default()
-    };
-    let mut avg_acc = KahanSum::default();
-    for (index, (density, sensitivity)) in densities.iter().zip(sensitivities).enumerate() {
-        let next = apply_oc_update(*density, *sensitivity, lambda, params);
-        out[index] = next;
-        avg_acc.add(next);
-        report.min_density = f64::min(report.min_density, next);
-        report.max_density = f64::max(report.max_density, next);
-        report.max_density_change = f64::max(report.max_density_change, (next - density).abs());
-    }
-    report.average_density = avg_acc.value() / cell_count as f64;
-    if let Some(out_report) = unsafe { out_report.as_mut() } {
-        *out_report = report;
-    }
-    clear_error();
-    Bool::TRUE
+        let lambda = 0.5 * (lower + upper);
+        let mut report = TopologyOptimizationReport {
+            cell_count,
+            min_density: f64::INFINITY,
+            ..TopologyOptimizationReport::default()
+        };
+        let mut avg_acc = KahanSum::default();
+        for (index, (density, sensitivity)) in densities.iter().zip(sensitivities).enumerate() {
+            let next = apply_oc_update(*density, *sensitivity, lambda, params);
+            out[index] = next;
+            avg_acc.add(next);
+            report.min_density = f64::min(report.min_density, next);
+            report.max_density = f64::max(report.max_density, next);
+            report.max_density_change = f64::max(report.max_density_change, (next - density).abs());
+        }
+        report.average_density = avg_acc.value() / cell_count as f64;
+        if let Some(out_report) = unsafe { out_report.as_mut() } {
+            *out_report = report;
+        }
+        clear_error();
+        Bool::TRUE
+    })
 }
 
 /// Applies a radial weighted-average density filter to a 2D density grid.
@@ -281,85 +292,87 @@ pub extern "C" fn topology_density_filter_2d(
     out_densities: *mut f64,
     capacity: u32,
 ) -> Bool {
-    let Some(cell_count) = width.checked_mul(height) else {
-        set_error(ERR_CAPACITY, "density filter size overflow");
-        return Bool::FALSE;
-    };
-    if width == 0 || height == 0 || cell_count > MAX_DENSITY_CELLS || capacity < cell_count {
-        set_error(ERR_CAPACITY, "invalid density filter capacity");
-        return Bool::FALSE;
-    }
-    if densities.is_null() || out_densities.is_null() {
-        set_error(ERR_NULL_POINTER, "density filter pointers are null");
-        return Bool::FALSE;
-    }
-    if !finite_non_negative(filter_radius) {
-        set_error(ERR_INVALID_ARGUMENT, "invalid density filter radius");
-        return Bool::FALSE;
-    }
-    let width = width as usize;
-    let height = height as usize;
-    let densities = match unsafe {
-        crate::ffi::checked_input_slice(densities, cell_count as usize, "densities")
-    } {
-        Ok(v) => v,
-        Err(e) => {
-            crate::ffi::formula_result::<()>(Err(e));
+    ffi_guard(Bool::FALSE, || {
+        let Some(cell_count) = width.checked_mul(height) else {
+            set_error(ERR_CAPACITY, "density filter size overflow");
+            return Bool::FALSE;
+        };
+        if width == 0 || height == 0 || cell_count > MAX_DENSITY_CELLS || capacity < cell_count {
+            set_error(ERR_CAPACITY, "invalid density filter capacity");
             return Bool::FALSE;
         }
-    };
-    let out = match unsafe {
-        crate::ffi::checked_output_slice(out_densities, capacity as usize, "out_densities")
-    } {
-        Ok(v) => v,
-        Err(e) => {
-            crate::ffi::formula_result::<()>(Err(e));
+        if densities.is_null() || out_densities.is_null() {
+            set_error(ERR_NULL_POINTER, "density filter pointers are null");
             return Bool::FALSE;
         }
-    };
-    if densities.iter().any(|density| !density_valid(*density)) {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "density filter contains invalid values",
-        );
-        return Bool::FALSE;
-    }
-    let radius = filter_radius.ceil() as isize;
-    for y in 0..height {
-        for x in 0..width {
-            let mut weighted_sum = 0.0;
-            let mut weight_total = 0.0;
-            for oy in -radius..=radius {
-                for ox in -radius..=radius {
-                    let nx = x as isize + ox;
-                    let ny = y as isize + oy;
-                    if nx < 0 || ny < 0 || nx >= width as isize || ny >= height as isize {
-                        continue;
-                    }
-                    let distance = ((ox * ox + oy * oy) as f64).sqrt();
-                    let weight = if filter_radius > 0.0 {
-                        (filter_radius - distance).max(0.0)
-                    } else if ox == 0 && oy == 0 {
-                        1.0
-                    } else {
-                        0.0
-                    };
-                    if weight <= 0.0 {
-                        continue;
-                    }
-                    weighted_sum += weight * densities[ny as usize * width + nx as usize];
-                    weight_total += weight;
-                }
+        if !finite_non_negative(filter_radius) {
+            set_error(ERR_INVALID_ARGUMENT, "invalid density filter radius");
+            return Bool::FALSE;
+        }
+        let width = width as usize;
+        let height = height as usize;
+        let densities = match unsafe {
+            crate::ffi::checked_input_slice(densities, cell_count as usize, "densities")
+        } {
+            Ok(v) => v,
+            Err(e) => {
+                crate::ffi::formula_result::<()>(Err(e));
+                return Bool::FALSE;
             }
-            out[y * width + x] = if weight_total > 0.0 {
-                weighted_sum / weight_total
-            } else {
-                densities[y * width + x]
-            };
+        };
+        let out = match unsafe {
+            crate::ffi::checked_output_slice(out_densities, capacity as usize, "out_densities")
+        } {
+            Ok(v) => v,
+            Err(e) => {
+                crate::ffi::formula_result::<()>(Err(e));
+                return Bool::FALSE;
+            }
+        };
+        if densities.iter().any(|density| !density_valid(*density)) {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "density filter contains invalid values",
+            );
+            return Bool::FALSE;
         }
-    }
-    clear_error();
-    Bool::TRUE
+        let radius = filter_radius.ceil() as isize;
+        for y in 0..height {
+            for x in 0..width {
+                let mut weighted_sum = 0.0;
+                let mut weight_total = 0.0;
+                for oy in -radius..=radius {
+                    for ox in -radius..=radius {
+                        let nx = x as isize + ox;
+                        let ny = y as isize + oy;
+                        if nx < 0 || ny < 0 || nx >= width as isize || ny >= height as isize {
+                            continue;
+                        }
+                        let distance = ((ox * ox + oy * oy) as f64).sqrt();
+                        let weight = if filter_radius > 0.0 {
+                            (filter_radius - distance).max(0.0)
+                        } else if ox == 0 && oy == 0 {
+                            1.0
+                        } else {
+                            0.0
+                        };
+                        if weight <= 0.0 {
+                            continue;
+                        }
+                        weighted_sum += weight * densities[ny as usize * width + nx as usize];
+                        weight_total += weight;
+                    }
+                }
+                out[y * width + x] = if weight_total > 0.0 {
+                    weighted_sum / weight_total
+                } else {
+                    densities[y * width + x]
+                };
+            }
+        }
+        clear_error();
+        Bool::TRUE
+    })
 }
 
 /// Thresholds a density field into a binary (0/1) voxel grid.
@@ -381,51 +394,53 @@ pub extern "C" fn topology_density_to_voxels(
     capacity: u32,
     out_stats: *mut DensityFieldStats,
 ) -> Bool {
-    if cell_count == 0 || cell_count > MAX_DENSITY_CELLS || capacity < cell_count {
-        set_error(ERR_CAPACITY, "invalid density voxel capacity");
-        return Bool::FALSE;
-    }
-    if densities.is_null() || out_voxels.is_null() {
-        set_error(ERR_NULL_POINTER, "density voxel pointers are null");
-        return Bool::FALSE;
-    }
-    if !density_valid(threshold) {
-        set_error(ERR_INVALID_ARGUMENT, "invalid density voxel threshold");
-        return Bool::FALSE;
-    }
-    let densities = match unsafe {
-        crate::ffi::checked_input_slice(densities, cell_count as usize, "densities")
-    } {
-        Ok(v) => v,
-        Err(e) => {
-            crate::ffi::formula_result::<()>(Err(e));
+    ffi_guard(Bool::FALSE, || {
+        if cell_count == 0 || cell_count > MAX_DENSITY_CELLS || capacity < cell_count {
+            set_error(ERR_CAPACITY, "invalid density voxel capacity");
             return Bool::FALSE;
         }
-    };
-    let voxels = match unsafe {
-        crate::ffi::checked_output_slice(out_voxels, capacity as usize, "out_voxels")
-    } {
-        Ok(v) => v,
-        Err(e) => {
-            crate::ffi::formula_result::<()>(Err(e));
+        if densities.is_null() || out_voxels.is_null() {
+            set_error(ERR_NULL_POINTER, "density voxel pointers are null");
             return Bool::FALSE;
         }
-    };
-    if densities.iter().any(|density| !density_valid(*density)) {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "density voxel field contains invalid values",
-        );
-        return Bool::FALSE;
-    }
-    for (index, density) in densities.iter().enumerate() {
-        voxels[index] = u8::from(*density >= threshold);
-    }
-    if let Some(out_stats) = unsafe { out_stats.as_mut() } {
-        *out_stats = density_stats(densities, threshold);
-    }
-    clear_error();
-    Bool::TRUE
+        if !density_valid(threshold) {
+            set_error(ERR_INVALID_ARGUMENT, "invalid density voxel threshold");
+            return Bool::FALSE;
+        }
+        let densities = match unsafe {
+            crate::ffi::checked_input_slice(densities, cell_count as usize, "densities")
+        } {
+            Ok(v) => v,
+            Err(e) => {
+                crate::ffi::formula_result::<()>(Err(e));
+                return Bool::FALSE;
+            }
+        };
+        let voxels = match unsafe {
+            crate::ffi::checked_output_slice(out_voxels, capacity as usize, "out_voxels")
+        } {
+            Ok(v) => v,
+            Err(e) => {
+                crate::ffi::formula_result::<()>(Err(e));
+                return Bool::FALSE;
+            }
+        };
+        if densities.iter().any(|density| !density_valid(*density)) {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "density voxel field contains invalid values",
+            );
+            return Bool::FALSE;
+        }
+        for (index, density) in densities.iter().enumerate() {
+            voxels[index] = u8::from(*density >= threshold);
+        }
+        if let Some(out_stats) = unsafe { out_stats.as_mut() } {
+            *out_stats = density_stats(densities, threshold);
+        }
+        clear_error();
+        Bool::TRUE
+    })
 }
 
 /// Runs one runtime topology step: derives sensitivities from element
@@ -450,74 +465,80 @@ pub extern "C" fn topology_runtime_shape_density_step(
     capacity: u32,
     out_report: *mut TopologyOptimizationReport,
 ) -> Bool {
-    if cell_count == 0 || cell_count > MAX_DENSITY_CELLS || capacity < cell_count {
-        set_error(ERR_CAPACITY, "invalid runtime topology capacity");
-        return Bool::FALSE;
-    }
-    if densities.is_null() || element_energies.is_null() {
-        set_error(ERR_NULL_POINTER, "runtime topology pointers are null");
-        return Bool::FALSE;
-    }
-    if !params_valid(params) {
-        set_error(ERR_INVALID_ARGUMENT, "invalid runtime topology parameters");
-        return Bool::FALSE;
-    }
-    let densities_slice = match unsafe {
-        crate::ffi::checked_input_slice(densities, cell_count as usize, "densities")
-    } {
-        Ok(v) => v,
-        Err(e) => {
-            crate::ffi::formula_result::<()>(Err(e));
+    ffi_guard(Bool::FALSE, || {
+        if cell_count == 0 || cell_count > MAX_DENSITY_CELLS || capacity < cell_count {
+            set_error(ERR_CAPACITY, "invalid runtime topology capacity");
             return Bool::FALSE;
         }
-    };
-    let energies = match unsafe {
-        crate::ffi::checked_input_slice(element_energies, cell_count as usize, "element_energies")
-    } {
-        Ok(v) => v,
-        Err(e) => {
-            crate::ffi::formula_result::<()>(Err(e));
+        if densities.is_null() || element_energies.is_null() {
+            set_error(ERR_NULL_POINTER, "runtime topology pointers are null");
             return Bool::FALSE;
         }
-    };
-    if energies.iter().any(|energy| !finite_non_negative(*energy)) {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "runtime topology energies are invalid",
-        );
-        return Bool::FALSE;
-    }
-    let sensitivities = densities_slice
-        .iter()
-        .zip(energies)
-        .map(|(density, energy)| topology_compliance_sensitivity(*density, *energy, params))
-        .collect::<Vec<_>>();
-    if topology_oc_update(
-        densities,
-        sensitivities.as_ptr(),
-        cell_count,
-        params,
-        out_densities,
-        capacity,
-        out_report,
-    ) != Bool::TRUE
-    {
-        return Bool::FALSE;
-    }
-    if let Some(report) = unsafe { out_report.as_mut() } {
-        let mut compliance_acc = KahanSum::default();
-        for (density, energy) in densities_slice.iter().zip(energies) {
-            compliance_acc.add(
-                topology_simp_stiffness(
-                    density.max(params.min_density),
-                    params.penalization,
-                    params.stiffness_min,
-                    params.stiffness_solid,
-                ) * *energy,
+        if !params_valid(params) {
+            set_error(ERR_INVALID_ARGUMENT, "invalid runtime topology parameters");
+            return Bool::FALSE;
+        }
+        let densities_slice = match unsafe {
+            crate::ffi::checked_input_slice(densities, cell_count as usize, "densities")
+        } {
+            Ok(v) => v,
+            Err(e) => {
+                crate::ffi::formula_result::<()>(Err(e));
+                return Bool::FALSE;
+            }
+        };
+        let energies = match unsafe {
+            crate::ffi::checked_input_slice(
+                element_energies,
+                cell_count as usize,
+                "element_energies",
+            )
+        } {
+            Ok(v) => v,
+            Err(e) => {
+                crate::ffi::formula_result::<()>(Err(e));
+                return Bool::FALSE;
+            }
+        };
+        if energies.iter().any(|energy| !finite_non_negative(*energy)) {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "runtime topology energies are invalid",
             );
+            return Bool::FALSE;
         }
-        report.total_compliance = compliance_acc.value();
-    }
-    clear_error();
-    Bool::TRUE
+        let sensitivities = densities_slice
+            .iter()
+            .zip(energies)
+            .map(|(density, energy)| topology_compliance_sensitivity(*density, *energy, params))
+            .collect::<Vec<_>>();
+        if topology_oc_update(
+            densities,
+            sensitivities.as_ptr(),
+            cell_count,
+            params,
+            out_densities,
+            capacity,
+            out_report,
+        ) != Bool::TRUE
+        {
+            return Bool::FALSE;
+        }
+        if let Some(report) = unsafe { out_report.as_mut() } {
+            let mut compliance_acc = KahanSum::default();
+            for (density, energy) in densities_slice.iter().zip(energies) {
+                compliance_acc.add(
+                    topology_simp_stiffness(
+                        density.max(params.min_density),
+                        params.penalization,
+                        params.stiffness_min,
+                        params.stiffness_solid,
+                    ) * *energy,
+                );
+            }
+            report.total_compliance = compliance_acc.value();
+        }
+        clear_error();
+        Bool::TRUE
+    })
 }

@@ -8,7 +8,7 @@
 //!
 //! All functions are FFI-exported with C-compatible types.
 
-use crate::error::{ERR_INVALID_ARGUMENT, ERR_NULL_POINTER, clear_error, set_error};
+use crate::error::{ERR_INVALID_ARGUMENT, ERR_NULL_POINTER, clear_error, ffi_guard, set_error};
 use crate::ffi::{
     BiotSavartVelocity, Bool, GpEnergyDensity, GpGridPoint, GpOrderParameter,
     GpTimeEvolutionParams, QuantisedCirculation, Vec3, VortexReconnectionReport, VortexRing,
@@ -129,100 +129,102 @@ pub extern "C" fn sf_biot_savart_velocity(
     field_point: Vec3,
     out_velocity: *mut BiotSavartVelocity,
 ) -> Bool {
-    if !segment_valid(&segment) || !vec3_finite(field_point) {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "segment and field_point must be finite",
-        );
-        return Bool::FALSE;
-    }
-
-    let s1 = segment.start;
-    let s2 = segment.end;
-    let kappa = (segment.circulation_quantum as f64) * circulation_quantum_const();
-
-    // Vectors from field point to endpoints
-    let r1 = vec3_sub(s1, field_point);
-    let r2 = vec3_sub(s2, field_point);
-    let seg_vec = vec3_sub(s2, s1);
-
-    let r1_len = vec3_length(r1);
-    let r2_len = vec3_length(r2);
-    let seg_len = vec3_length(seg_vec);
-
-    if r1_len < EPSILON || r2_len < EPSILON {
-        // Field point coincides with an endpoint → near-singular
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "field point coincides with segment endpoint",
-        );
-        return Bool::FALSE;
-    }
-    if seg_len < EPSILON {
-        return write_out(
-            out_velocity,
-            BiotSavartVelocity {
-                velocity: Vec3::default(),
-                magnitude: 0.0,
-                distance: (r1_len + r2_len) * 0.5,
-            },
-        );
-    }
-
-    let cross_prod = vec3_cross(r1, r2);
-    let cross_len_sq = vec3_length_sq(cross_prod);
-
-    if cross_len_sq < EPSILON {
-        // Field point is collinear with the segment → zero induced velocity
-        let dist = vec3_length(vec3_cross(seg_vec, r1)) / seg_len;
-        // Also check if point lies between endpoints (on the segment body)
-        let dot1 = vec3_dot(r1, seg_vec);
-        let dot2 = vec3_dot(r2, seg_vec);
-        let on_segment = (dot1 >= 0.0) != (dot2 >= 0.0);
-        if on_segment {
+    ffi_guard(Bool::FALSE, || {
+        if !segment_valid(&segment) || !vec3_finite(field_point) {
             set_error(
                 ERR_INVALID_ARGUMENT,
-                "field point lies on the vortex segment",
+                "segment and field_point must be finite",
             );
             return Bool::FALSE;
         }
-        return write_out(
+
+        let s1 = segment.start;
+        let s2 = segment.end;
+        let kappa = (segment.circulation_quantum as f64) * circulation_quantum_const();
+
+        // Vectors from field point to endpoints
+        let r1 = vec3_sub(s1, field_point);
+        let r2 = vec3_sub(s2, field_point);
+        let seg_vec = vec3_sub(s2, s1);
+
+        let r1_len = vec3_length(r1);
+        let r2_len = vec3_length(r2);
+        let seg_len = vec3_length(seg_vec);
+
+        if r1_len < EPSILON || r2_len < EPSILON {
+            // Field point coincides with an endpoint → near-singular
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "field point coincides with segment endpoint",
+            );
+            return Bool::FALSE;
+        }
+        if seg_len < EPSILON {
+            return write_out(
+                out_velocity,
+                BiotSavartVelocity {
+                    velocity: Vec3::default(),
+                    magnitude: 0.0,
+                    distance: (r1_len + r2_len) * 0.5,
+                },
+            );
+        }
+
+        let cross_prod = vec3_cross(r1, r2);
+        let cross_len_sq = vec3_length_sq(cross_prod);
+
+        if cross_len_sq < EPSILON {
+            // Field point is collinear with the segment → zero induced velocity
+            let dist = vec3_length(vec3_cross(seg_vec, r1)) / seg_len;
+            // Also check if point lies between endpoints (on the segment body)
+            let dot1 = vec3_dot(r1, seg_vec);
+            let dot2 = vec3_dot(r2, seg_vec);
+            let on_segment = (dot1 >= 0.0) != (dot2 >= 0.0);
+            if on_segment {
+                set_error(
+                    ERR_INVALID_ARGUMENT,
+                    "field point lies on the vortex segment",
+                );
+                return Bool::FALSE;
+            }
+            return write_out(
+                out_velocity,
+                BiotSavartVelocity {
+                    velocity: Vec3::default(),
+                    magnitude: 0.0,
+                    distance: dist,
+                },
+            );
+        }
+
+        let cross_len = cross_len_sq.sqrt();
+
+        // Prefactor: (s₁-p)/|s₁-p| + (s₂-p)/|s₂-p|
+        let r1_hat = vec3_scale(r1, 1.0 / r1_len);
+        let r2_hat = vec3_scale(r2, 1.0 / r2_len);
+        let sum_hats = vec3_add(r1_hat, r2_hat);
+
+        // Dot with segment direction
+        let seg_dir = vec3_scale(seg_vec, 1.0 / seg_len);
+        let dot = vec3_dot(sum_hats, seg_dir);
+
+        // Induced velocity magnitude and direction
+        let prefactor = kappa / FOUR_PI;
+        let vel_mag = prefactor * dot / cross_len;
+        let vel_dir = vec3_normalize(cross_prod);
+
+        // For a straight segment, the velocity is in the direction of r1×r2
+        let distance = vec3_length(vec3_cross(seg_vec, r1)) / seg_len;
+
+        write_out(
             out_velocity,
             BiotSavartVelocity {
-                velocity: Vec3::default(),
-                magnitude: 0.0,
-                distance: dist,
+                velocity: vec3_scale(vel_dir, vel_mag),
+                magnitude: vel_mag.abs(),
+                distance,
             },
-        );
-    }
-
-    let cross_len = cross_len_sq.sqrt();
-
-    // Prefactor: (s₁-p)/|s₁-p| + (s₂-p)/|s₂-p|
-    let r1_hat = vec3_scale(r1, 1.0 / r1_len);
-    let r2_hat = vec3_scale(r2, 1.0 / r2_len);
-    let sum_hats = vec3_add(r1_hat, r2_hat);
-
-    // Dot with segment direction
-    let seg_dir = vec3_scale(seg_vec, 1.0 / seg_len);
-    let dot = vec3_dot(sum_hats, seg_dir);
-
-    // Induced velocity magnitude and direction
-    let prefactor = kappa / FOUR_PI;
-    let vel_mag = prefactor * dot / cross_len;
-    let vel_dir = vec3_normalize(cross_prod);
-
-    // For a straight segment, the velocity is in the direction of r1×r2
-    let distance = vec3_length(vec3_cross(seg_vec, r1)) / seg_len;
-
-    write_out(
-        out_velocity,
-        BiotSavartVelocity {
-            velocity: vec3_scale(vel_dir, vel_mag),
-            magnitude: vel_mag.abs(),
-            distance,
-        },
-    )
+        )
+    })
 }
 
 /// Compute the self-induced velocity of a vortex ring.
@@ -239,30 +241,32 @@ pub extern "C" fn sf_biot_savart_velocity(
 /// pointer fails with `ERR_NULL_POINTER`. No ownership is transferred.
 #[unsafe(no_mangle)]
 pub extern "C" fn sf_vortex_ring_velocity(ring: VortexRing, out_velocity: *mut Vec3) -> Bool {
-    if !ring_valid(&ring) {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "ring parameters must be finite and positive",
-        );
-        return Bool::FALSE;
-    }
+    ffi_guard(Bool::FALSE, || {
+        if !ring_valid(&ring) {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "ring parameters must be finite and positive",
+            );
+            return Bool::FALSE;
+        }
 
-    let kappa = (ring.circulation_quantum as f64) * circulation_quantum_const();
-    let r = ring.radius;
-    let xi = 1.0e-10; // default healing length ~ 0.1 nm for ⁴He
+        let kappa = (ring.circulation_quantum as f64) * circulation_quantum_const();
+        let r = ring.radius;
+        let xi = 1.0e-10; // default healing length ~ 0.1 nm for ⁴He
 
-    if r <= xi {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "ring radius must exceed healing length",
-        );
-        return Bool::FALSE;
-    }
+        if r <= xi {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "ring radius must exceed healing length",
+            );
+            return Bool::FALSE;
+        }
 
-    let speed = (kappa / (FOUR_PI * r)) * ((8.0 * r / xi).ln() - 0.5);
-    let axis_dir = vec3_normalize(ring.axis);
+        let speed = (kappa / (FOUR_PI * r)) * ((8.0 * r / xi).ln() - 0.5);
+        let axis_dir = vec3_normalize(ring.axis);
 
-    write_out(out_velocity, vec3_scale(axis_dir, speed))
+        write_out(out_velocity, vec3_scale(axis_dir, speed))
+    })
 }
 
 /// Return the circulation quantum constant κ₀ = h/m for ⁴He.
@@ -272,7 +276,7 @@ pub extern "C" fn sf_vortex_ring_velocity(ring: VortexRing, out_velocity: *mut V
 /// Takes no arguments and dereferences no pointers; always safe to call.
 #[unsafe(no_mangle)]
 pub extern "C" fn sf_circulation_quantum() -> f64 {
-    PLANCK / HELIUM_MASS
+    ffi_guard(f64::NAN, || PLANCK / HELIUM_MASS)
 }
 
 pub fn circulation_quantum_const() -> f64 {
@@ -304,59 +308,61 @@ pub extern "C" fn sf_circulation_around_loop(
     sample_point: Vec3,
     out_circulation: *mut QuantisedCirculation,
 ) -> Bool {
-    if segments.is_null() {
-        set_error(ERR_NULL_POINTER, "segments pointer is null");
-        return Bool::FALSE;
-    }
-    if segment_count == 0 {
-        set_error(ERR_INVALID_ARGUMENT, "segment_count must be > 0");
-        return Bool::FALSE;
-    }
-    if !vec3_finite(sample_point) {
-        set_error(ERR_INVALID_ARGUMENT, "sample_point must be finite");
-        return Bool::FALSE;
-    }
-
-    let segs = unsafe { std::slice::from_raw_parts(segments, segment_count as usize) };
-    let kappa_0 = circulation_quantum_const();
-
-    // Compute circulation by summing the tangential component of velocity
-    // around the loop, approximated as sum over segments of v_segment · dℓ
-    let mut circulation_acc = KahanSum::default();
-
-    for seg in segs {
-        if !segment_valid(seg) {
-            continue;
+    ffi_guard(Bool::FALSE, || {
+        if segments.is_null() {
+            set_error(ERR_NULL_POINTER, "segments pointer is null");
+            return Bool::FALSE;
         }
-        let mut biot = BiotSavartVelocity::default();
-        let result = sf_biot_savart_velocity(*seg, sample_point, &mut biot);
-        if result == Bool::FALSE {
-            continue;
+        if segment_count == 0 {
+            set_error(ERR_INVALID_ARGUMENT, "segment_count must be > 0");
+            return Bool::FALSE;
         }
-        // dL along segment direction
-        let seg_len = vec3_sub(seg.end, seg.start);
-        circulation_acc.add(vec3_dot(biot.velocity, seg_len));
-    }
+        if !vec3_finite(sample_point) {
+            set_error(ERR_INVALID_ARGUMENT, "sample_point must be finite");
+            return Bool::FALSE;
+        }
 
-    let circulation = circulation_acc.value();
+        let segs = unsafe { std::slice::from_raw_parts(segments, segment_count as usize) };
+        let kappa_0 = circulation_quantum_const();
 
-    let kappa_0 = if kappa_0.abs() > EPSILON {
-        kappa_0
-    } else {
-        circulation_quantum_const()
-    };
-    let n = (circulation / kappa_0).round() as i32;
-    let quantised = (circulation / kappa_0 - n as f64).abs() < 0.5;
+        // Compute circulation by summing the tangential component of velocity
+        // around the loop, approximated as sum over segments of v_segment · dℓ
+        let mut circulation_acc = KahanSum::default();
 
-    write_out(
-        out_circulation,
-        QuantisedCirculation {
-            circulation,
-            quantum_number: n,
-            circulation_quantum: kappa_0,
-            quantised: Bool::from(quantised),
-        },
-    )
+        for seg in segs {
+            if !segment_valid(seg) {
+                continue;
+            }
+            let mut biot = BiotSavartVelocity::default();
+            let result = sf_biot_savart_velocity(*seg, sample_point, &mut biot);
+            if result == Bool::FALSE {
+                continue;
+            }
+            // dL along segment direction
+            let seg_len = vec3_sub(seg.end, seg.start);
+            circulation_acc.add(vec3_dot(biot.velocity, seg_len));
+        }
+
+        let circulation = circulation_acc.value();
+
+        let kappa_0 = if kappa_0.abs() > EPSILON {
+            kappa_0
+        } else {
+            circulation_quantum_const()
+        };
+        let n = (circulation / kappa_0).round() as i32;
+        let quantised = (circulation / kappa_0 - n as f64).abs() < 0.5;
+
+        write_out(
+            out_circulation,
+            QuantisedCirculation {
+                circulation,
+                quantum_number: n,
+                circulation_quantum: kappa_0,
+                quantised: Bool::from(quantised),
+            },
+        )
+    })
 }
 
 /// Estimate the quantum number n = ∮v·dℓ / (h/m) given a velocity field
@@ -380,31 +386,34 @@ pub extern "C" fn sf_quantum_number_estimate(
     sample_count: u32,
     out_quantum: *mut i32,
 ) -> Bool {
-    if tangent_velocities.is_null() {
-        set_error(ERR_NULL_POINTER, "tangent_velocities pointer is null");
-        return Bool::FALSE;
-    }
-    if !finite_positive(loop_radius) {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "loop_radius must be positive and finite",
-        );
-        return Bool::FALSE;
-    }
-    if sample_count < 3 {
-        set_error(ERR_INVALID_ARGUMENT, "sample_count must be >= 3");
-        return Bool::FALSE;
-    }
+    ffi_guard(Bool::FALSE, || {
+        if tangent_velocities.is_null() {
+            set_error(ERR_NULL_POINTER, "tangent_velocities pointer is null");
+            return Bool::FALSE;
+        }
+        if !finite_positive(loop_radius) {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "loop_radius must be positive and finite",
+            );
+            return Bool::FALSE;
+        }
+        if sample_count < 3 {
+            set_error(ERR_INVALID_ARGUMENT, "sample_count must be >= 3");
+            return Bool::FALSE;
+        }
 
-    let kappa_0 = circulation_quantum_const();
-    let samples = unsafe { std::slice::from_raw_parts(tangent_velocities, sample_count as usize) };
+        let kappa_0 = circulation_quantum_const();
+        let samples =
+            unsafe { std::slice::from_raw_parts(tangent_velocities, sample_count as usize) };
 
-    // Circulation: sum v_t · ds around loop, using midpoint rule
-    let ds = 2.0 * std::f64::consts::PI * loop_radius / (sample_count as f64);
-    let circulation: f64 = samples.iter().map(|&v| v * ds).sum();
+        // Circulation: sum v_t · ds around loop, using midpoint rule
+        let ds = 2.0 * std::f64::consts::PI * loop_radius / (sample_count as f64);
+        let circulation: f64 = samples.iter().map(|&v| v * ds).sum();
 
-    let n = (circulation / kappa_0).round() as i32;
-    write_out(out_quantum, n)
+        let n = (circulation / kappa_0).round() as i32;
+        write_out(out_quantum, n)
+    })
 }
 
 // ===========================================================================
@@ -433,81 +442,83 @@ pub extern "C" fn sf_gp_order_parameter(
     background_density: f64,
     out_param: *mut GpOrderParameter,
 ) -> Bool {
-    if !vec3_finite(vortex_center) || !vec3_finite(vortex_axis) {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "vortex_center and vortex_axis must be finite",
-        );
-        return Bool::FALSE;
-    }
-    if !finite_positive(healing_length) {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "healing_length must be positive and finite",
-        );
-        return Bool::FALSE;
-    }
-    if !finite_positive(background_density) {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "background_density must be positive and finite",
-        );
-        return Bool::FALSE;
-    }
+    ffi_guard(Bool::FALSE, || {
+        if !vec3_finite(vortex_center) || !vec3_finite(vortex_axis) {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "vortex_center and vortex_axis must be finite",
+            );
+            return Bool::FALSE;
+        }
+        if !finite_positive(healing_length) {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "healing_length must be positive and finite",
+            );
+            return Bool::FALSE;
+        }
+        if !finite_positive(background_density) {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "background_density must be positive and finite",
+            );
+            return Bool::FALSE;
+        }
 
-    let point = Vec3 { x, y, z };
-    let rel = vec3_sub(point, vortex_center);
-    let axis = vec3_normalize(vortex_axis);
+        let point = Vec3 { x, y, z };
+        let rel = vec3_sub(point, vortex_center);
+        let axis = vec3_normalize(vortex_axis);
 
-    // Distance from the point to the vortex axis
-    let cross = vec3_cross(axis, rel);
-    let dist = vec3_length(cross);
+        // Distance from the point to the vortex axis
+        let cross = vec3_cross(axis, rel);
+        let dist = vec3_length(cross);
 
-    // Amplitude: density depletion near core
-    // n(r) = n₀ * r² / (r² + 2ξ²)  (Pade approximation to GP vortex profile)
-    let xi = healing_length;
-    let amplitude = if dist < EPSILON {
-        0.0
-    } else {
-        let r2 = dist * dist;
-        (background_density * r2 / (r2 + 2.0 * xi * xi)).sqrt()
-    };
+        // Amplitude: density depletion near core
+        // n(r) = n₀ * r² / (r² + 2ξ²)  (Pade approximation to GP vortex profile)
+        let xi = healing_length;
+        let amplitude = if dist < EPSILON {
+            0.0
+        } else {
+            let r2 = dist * dist;
+            (background_density * r2 / (r2 + 2.0 * xi * xi)).sqrt()
+        };
 
-    // Phase: φ = n * arctan2(y', x') where (x', y') are in the plane orthogonal to axis
-    // Build a local 2D coordinate system in the plane perpendicular to the axis
-    let ref_dir = if axis.x.abs() < 0.9 {
-        vec3_normalize(vec3_cross(
-            axis,
-            Vec3 {
-                x: 1.0,
-                y: 0.0,
-                z: 0.0,
+        // Phase: φ = n * arctan2(y', x') where (x', y') are in the plane orthogonal to axis
+        // Build a local 2D coordinate system in the plane perpendicular to the axis
+        let ref_dir = if axis.x.abs() < 0.9 {
+            vec3_normalize(vec3_cross(
+                axis,
+                Vec3 {
+                    x: 1.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+            ))
+        } else {
+            vec3_normalize(vec3_cross(
+                axis,
+                Vec3 {
+                    x: 0.0,
+                    y: 1.0,
+                    z: 0.0,
+                },
+            ))
+        };
+        let ref_dir2 = vec3_cross(axis, ref_dir);
+
+        let xp = vec3_dot(rel, ref_dir);
+        let yp = vec3_dot(rel, ref_dir2);
+        let phase = (circulation_quantum as f64) * yp.atan2(xp);
+
+        write_out(
+            out_param,
+            GpOrderParameter {
+                amplitude,
+                phase,
+                density: amplitude * amplitude,
             },
-        ))
-    } else {
-        vec3_normalize(vec3_cross(
-            axis,
-            Vec3 {
-                x: 0.0,
-                y: 1.0,
-                z: 0.0,
-            },
-        ))
-    };
-    let ref_dir2 = vec3_cross(axis, ref_dir);
-
-    let xp = vec3_dot(rel, ref_dir);
-    let yp = vec3_dot(rel, ref_dir2);
-    let phase = (circulation_quantum as f64) * yp.atan2(xp);
-
-    write_out(
-        out_param,
-        GpOrderParameter {
-            amplitude,
-            phase,
-            density: amplitude * amplitude,
-        },
-    )
+        )
+    })
 }
 
 /// Compute the Gross–Pitaevskii energy density (per unit volume) terms:
@@ -532,88 +543,90 @@ pub extern "C" fn sf_gp_energy_density(
     radius_from_center: f64,
     out_energy: *mut GpEnergyDensity,
 ) -> Bool {
-    if !finite_non_negative(density) {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "density must be finite and non-negative",
-        );
-        return Bool::FALSE;
-    }
-    if !finite_non_negative(trapping_frequency) {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "trapping_frequency must be finite and non-negative",
-        );
-        return Bool::FALSE;
-    }
-    if !finite_positive(mass) {
-        set_error(ERR_INVALID_ARGUMENT, "mass must be positive and finite");
-        return Bool::FALSE;
-    }
-    if !finite_positive(coupling_constant) {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "coupling_constant must be positive and finite",
-        );
-        return Bool::FALSE;
-    }
-    if !finite_non_negative(radius_from_center) {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "radius_from_center must be finite and non-negative",
-        );
-        return Bool::FALSE;
-    }
+    ffi_guard(Bool::FALSE, || {
+        if !finite_non_negative(density) {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "density must be finite and non-negative",
+            );
+            return Bool::FALSE;
+        }
+        if !finite_non_negative(trapping_frequency) {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "trapping_frequency must be finite and non-negative",
+            );
+            return Bool::FALSE;
+        }
+        if !finite_positive(mass) {
+            set_error(ERR_INVALID_ARGUMENT, "mass must be positive and finite");
+            return Bool::FALSE;
+        }
+        if !finite_positive(coupling_constant) {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "coupling_constant must be positive and finite",
+            );
+            return Bool::FALSE;
+        }
+        if !finite_non_negative(radius_from_center) {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "radius_from_center must be finite and non-negative",
+            );
+            return Bool::FALSE;
+        }
 
-    let hbar = HBAR;
+        let hbar = HBAR;
 
-    // Kinetic energy density (gradient term): approximate as ħ²n/(2mξ²)
-    // using the healing length relation ξ² = ħ²/(2mgn)
-    let kinetic_density = if density > EPSILON && coupling_constant > EPSILON {
-        let g_n = coupling_constant * density;
-        // ∇ψ ~ √n / ξ where ξ = ħ/√(2mgn)
-        let xi = hbar / (2.0 * mass * g_n).sqrt();
-        (hbar * hbar / (2.0 * mass)) * density / (xi * xi)
-    } else {
-        0.0
-    };
+        // Kinetic energy density (gradient term): approximate as ħ²n/(2mξ²)
+        // using the healing length relation ξ² = ħ²/(2mgn)
+        let kinetic_density = if density > EPSILON && coupling_constant > EPSILON {
+            let g_n = coupling_constant * density;
+            // ∇ψ ~ √n / ξ where ξ = ħ/√(2mgn)
+            let xi = hbar / (2.0 * mass * g_n).sqrt();
+            (hbar * hbar / (2.0 * mass)) * density / (xi * xi)
+        } else {
+            0.0
+        };
 
-    // Interaction energy density: (g/2) n²
-    let interaction_density = 0.5 * coupling_constant * density * density;
+        // Interaction energy density: (g/2) n²
+        let interaction_density = 0.5 * coupling_constant * density * density;
 
-    // Trapping potential energy density: V(r) n, V(r) = ½ m ω² r²
-    let trapping_density = if trapping_frequency > EPSILON {
-        0.5 * mass
-            * trapping_frequency
-            * trapping_frequency
-            * radius_from_center
-            * radius_from_center
-            * density
-    } else {
-        0.0
-    };
+        // Trapping potential energy density: V(r) n, V(r) = ½ m ω² r²
+        let trapping_density = if trapping_frequency > EPSILON {
+            0.5 * mass
+                * trapping_frequency
+                * trapping_frequency
+                * radius_from_center
+                * radius_from_center
+                * density
+        } else {
+            0.0
+        };
 
-    let total_density = kinetic_density + interaction_density + trapping_density;
+        let total_density = kinetic_density + interaction_density + trapping_density;
 
-    // Chemical potential: μ = gn + V_trap (local density approximation)
-    let chemical_potential = coupling_constant * density
-        + 0.5
-            * mass
-            * trapping_frequency
-            * trapping_frequency
-            * radius_from_center
-            * radius_from_center;
+        // Chemical potential: μ = gn + V_trap (local density approximation)
+        let chemical_potential = coupling_constant * density
+            + 0.5
+                * mass
+                * trapping_frequency
+                * trapping_frequency
+                * radius_from_center
+                * radius_from_center;
 
-    write_out(
-        out_energy,
-        GpEnergyDensity {
-            kinetic_density,
-            interaction_density,
-            trapping_density,
-            total_density,
-            chemical_potential,
-        },
-    )
+        write_out(
+            out_energy,
+            GpEnergyDensity {
+                kinetic_density,
+                interaction_density,
+                trapping_density,
+                total_density,
+                chemical_potential,
+            },
+        )
+    })
 }
 
 /// Time-evolve the Gross–Pitaevskii order parameter at a single spatial point
@@ -638,48 +651,50 @@ pub extern "C" fn sf_gp_amplitude_evolution(
     params: GpTimeEvolutionParams,
     out_next_amplitude: *mut f64,
 ) -> Bool {
-    if !finite_non_negative(amplitude) {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "amplitude must be finite and non-negative",
-        );
-        return Bool::FALSE;
-    }
-    if !finite_non_negative(density) {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "density must be finite and non-negative",
-        );
-        return Bool::FALSE;
-    }
-    if !finite_positive(params.healing_length)
-        || !finite_positive(params.sound_speed)
-        || !finite_positive(params.chemical_potential)
-        || !finite_positive(params.coupling_constant)
-        || !finite_positive(params.dt)
-    {
-        set_error(ERR_INVALID_ARGUMENT, "all GP params must be positive");
-        return Bool::FALSE;
-    }
+    ffi_guard(Bool::FALSE, || {
+        if !finite_non_negative(amplitude) {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "amplitude must be finite and non-negative",
+            );
+            return Bool::FALSE;
+        }
+        if !finite_non_negative(density) {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "density must be finite and non-negative",
+            );
+            return Bool::FALSE;
+        }
+        if !finite_positive(params.healing_length)
+            || !finite_positive(params.sound_speed)
+            || !finite_positive(params.chemical_potential)
+            || !finite_positive(params.coupling_constant)
+            || !finite_positive(params.dt)
+        {
+            set_error(ERR_INVALID_ARGUMENT, "all GP params must be positive");
+            return Bool::FALSE;
+        }
 
-    let a = amplitude;
-    let g = params.coupling_constant;
-    let mu = params.chemical_potential;
-    let hbar = HBAR;
-    // n0 = μ / g
-    let n0 = mu / g;
+        let a = amplitude;
+        let g = params.coupling_constant;
+        let mu = params.chemical_potential;
+        let hbar = HBAR;
+        // n0 = μ / g
+        let n0 = mu / g;
 
-    // Imaginary time evolution: ∂a/∂τ = -(1/ħ) · (g a² - μ) · a
-    let da_dt = -(1.0 / hbar) * (g * a * a - mu) * a;
+        // Imaginary time evolution: ∂a/∂τ = -(1/ħ) · (g a² - μ) · a
+        let da_dt = -(1.0 / hbar) * (g * a * a - mu) * a;
 
-    // Use a small enough step so amplitude doesn't overshoot
-    let dt_eff = params.dt.min(hbar / mu);
-    let next_amplitude = a + dt_eff * da_dt;
+        // Use a small enough step so amplitude doesn't overshoot
+        let dt_eff = params.dt.min(hbar / mu);
+        let next_amplitude = a + dt_eff * da_dt;
 
-    // Clamp to [0, √n₀] — the ground state is the fixed point
-    let next_amplitude = next_amplitude.max(0.0).min(n0.sqrt() * 2.0);
+        // Clamp to [0, √n₀] — the ground state is the fixed point
+        let next_amplitude = next_amplitude.max(0.0).min(n0.sqrt() * 2.0);
 
-    write_out(out_next_amplitude, next_amplitude)
+        write_out(out_next_amplitude, next_amplitude)
+    })
 }
 
 // ===========================================================================
@@ -708,106 +723,108 @@ pub extern "C" fn sf_vortex_reconnection(
     healing_length: f64,
     out_report: *mut VortexReconnectionReport,
 ) -> Bool {
-    if !segment_valid(&seg1) || !segment_valid(&seg2) {
-        set_error(ERR_INVALID_ARGUMENT, "segments must be valid");
-        return Bool::FALSE;
-    }
-    if !finite_positive(reconnection_distance) {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "reconnection_distance must be positive and finite",
-        );
-        return Bool::FALSE;
-    }
-    if !finite_positive(healing_length) {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "healing_length must be positive and finite",
-        );
-        return Bool::FALSE;
-    }
+    ffi_guard(Bool::FALSE, || {
+        if !segment_valid(&seg1) || !segment_valid(&seg2) {
+            set_error(ERR_INVALID_ARGUMENT, "segments must be valid");
+            return Bool::FALSE;
+        }
+        if !finite_positive(reconnection_distance) {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "reconnection_distance must be positive and finite",
+            );
+            return Bool::FALSE;
+        }
+        if !finite_positive(healing_length) {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "healing_length must be positive and finite",
+            );
+            return Bool::FALSE;
+        }
 
-    // Find closest points between two line segments
-    let d1 = vec3_sub(seg1.end, seg1.start);
-    let d2 = vec3_sub(seg2.end, seg2.start);
-    let r = vec3_sub(seg1.start, seg2.start);
+        // Find closest points between two line segments
+        let d1 = vec3_sub(seg1.end, seg1.start);
+        let d2 = vec3_sub(seg2.end, seg2.start);
+        let r = vec3_sub(seg1.start, seg2.start);
 
-    let d1_len_sq = vec3_length_sq(d1);
-    let d2_len_sq = vec3_length_sq(d2);
+        let d1_len_sq = vec3_length_sq(d1);
+        let d2_len_sq = vec3_length_sq(d2);
 
-    let closest_approach = if d1_len_sq < EPSILON || d2_len_sq < EPSILON {
-        // Degenerate segments
-        let c1 = seg1.start;
-        let c2 = seg2.start;
-        vec3_length(vec3_sub(c1, c2))
-    } else {
-        let a = vec3_dot(d1, d1);
-        let b = vec3_dot(d1, d2);
-        let c = vec3_dot(d2, d2);
-        let d = vec3_dot(d1, r);
-        let e = vec3_dot(d2, r);
-
-        let det = a * c - b * b;
-        let (s, t) = if det.abs() > EPSILON {
-            let s = (b * e - c * d) / det;
-            let t = (a * e - b * d) / det;
-            let s = s.clamp(0.0, 1.0);
-            let t = t.clamp(0.0, 1.0);
-            (s, t)
+        let closest_approach = if d1_len_sq < EPSILON || d2_len_sq < EPSILON {
+            // Degenerate segments
+            let c1 = seg1.start;
+            let c2 = seg2.start;
+            vec3_length(vec3_sub(c1, c2))
         } else {
-            (0.0, 0.0)
+            let a = vec3_dot(d1, d1);
+            let b = vec3_dot(d1, d2);
+            let c = vec3_dot(d2, d2);
+            let d = vec3_dot(d1, r);
+            let e = vec3_dot(d2, r);
+
+            let det = a * c - b * b;
+            let (s, t) = if det.abs() > EPSILON {
+                let s = (b * e - c * d) / det;
+                let t = (a * e - b * d) / det;
+                let s = s.clamp(0.0, 1.0);
+                let t = t.clamp(0.0, 1.0);
+                (s, t)
+            } else {
+                (0.0, 0.0)
+            };
+
+            let p1 = vec3_add(seg1.start, vec3_scale(d1, s));
+            let p2 = vec3_add(seg2.start, vec3_scale(d2, t));
+            vec3_length(vec3_sub(p1, p2))
         };
 
-        let p1 = vec3_add(seg1.start, vec3_scale(d1, s));
-        let p2 = vec3_add(seg2.start, vec3_scale(d2, t));
-        vec3_length(vec3_sub(p1, p2))
-    };
+        let reconnected = closest_approach < reconnection_distance;
 
-    let reconnected = closest_approach < reconnection_distance;
+        // Energy dissipation: estimate as E_diss = κ² / (4πξ) * (reconnection_distance - d_min)
+        let kappa = circulation_quantum_const();
+        let dissipated = if reconnected {
+            let xi = healing_length;
+            let delta = reconnection_distance - closest_approach;
+            let energy = (kappa * kappa / (FOUR_PI * xi)) * delta * 0.5;
+            energy.max(0.0)
+        } else {
+            0.0
+        };
 
-    // Energy dissipation: estimate as E_diss = κ² / (4πξ) * (reconnection_distance - d_min)
-    let kappa = circulation_quantum_const();
-    let dissipated = if reconnected {
-        let xi = healing_length;
-        let delta = reconnection_distance - closest_approach;
-        let energy = (kappa * kappa / (FOUR_PI * xi)) * delta * 0.5;
-        energy.max(0.0)
-    } else {
-        0.0
-    };
-
-    // Output segments: after reconnection, the topology changes
-    // Simple X-reconnection model: swap endpoints
-    if reconnected {
-        write_out(
-            out_report,
-            VortexReconnectionReport {
-                closest_approach,
-                reconnected: Bool::TRUE,
-                // New seg1: start of seg1 → start of seg2
-                seg1_start: seg1.start,
-                seg1_end: seg2.start,
-                // New seg2: end of seg1 → end of seg2
-                seg2_start: seg1.end,
-                seg2_end: seg2.end,
-                energy_dissipated: dissipated,
-            },
-        )
-    } else {
-        // No reconnection — return original segments
-        write_out(
-            out_report,
-            VortexReconnectionReport {
-                closest_approach,
-                reconnected: Bool::FALSE,
-                seg1_start: seg1.start,
-                seg1_end: seg1.end,
-                seg2_start: seg2.start,
-                seg2_end: seg2.end,
-                energy_dissipated: 0.0,
-            },
-        )
-    }
+        // Output segments: after reconnection, the topology changes
+        // Simple X-reconnection model: swap endpoints
+        if reconnected {
+            write_out(
+                out_report,
+                VortexReconnectionReport {
+                    closest_approach,
+                    reconnected: Bool::TRUE,
+                    // New seg1: start of seg1 → start of seg2
+                    seg1_start: seg1.start,
+                    seg1_end: seg2.start,
+                    // New seg2: end of seg1 → end of seg2
+                    seg2_start: seg1.end,
+                    seg2_end: seg2.end,
+                    energy_dissipated: dissipated,
+                },
+            )
+        } else {
+            // No reconnection — return original segments
+            write_out(
+                out_report,
+                VortexReconnectionReport {
+                    closest_approach,
+                    reconnected: Bool::FALSE,
+                    seg1_start: seg1.start,
+                    seg1_end: seg1.end,
+                    seg2_start: seg2.start,
+                    seg2_end: seg2.end,
+                    energy_dissipated: 0.0,
+                },
+            )
+        }
+    })
 }
 
 // ===========================================================================
@@ -834,98 +851,100 @@ pub extern "C" fn sf_vortex_tangle_stats(
     box_volume: f64,
     out_stats: *mut VortexTangleStats,
 ) -> Bool {
-    if segments.is_null() || segment_count == 0 {
-        return write_out(out_stats, VortexTangleStats::default());
-    }
-    if !finite_non_negative(box_volume) {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "box_volume must be finite and non-negative",
-        );
-        return Bool::FALSE;
-    }
-
-    let segs = unsafe { std::slice::from_raw_parts(segments, segment_count as usize) };
-
-    let mut total_length_acc = KahanSum::default();
-    let mut total_curvature_acc = KahanSum::default();
-    let mut curvature_count = 0u32;
-
-    // To compute curvature, we need triplets of consecutive segments.
-    // We assume the segments are connected in order (polynomial chain).
-    for (i, seg) in segs.iter().enumerate() {
-        if !segment_valid(seg) {
-            continue;
+    ffi_guard(Bool::FALSE, || {
+        if segments.is_null() || segment_count == 0 {
+            return write_out(out_stats, VortexTangleStats::default());
         }
-        let seg_vec = vec3_sub(seg.end, seg.start);
-        total_length_acc.add(vec3_length(seg_vec));
+        if !finite_non_negative(box_volume) {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "box_volume must be finite and non-negative",
+            );
+            return Bool::FALSE;
+        }
 
-        // Approximate curvature from angle between consecutive segments
-        if i > 0 {
-            let prev = &segs[i - 1];
-            if segment_valid(prev) {
-                let prev_vec = vec3_sub(prev.end, prev.start);
-                let pv_len = vec3_length(prev_vec);
-                let sv_len = vec3_length(seg_vec);
-                if pv_len > EPSILON && sv_len > EPSILON {
-                    let cos_theta = vec3_dot(
-                        vec3_scale(prev_vec, 1.0 / pv_len),
-                        vec3_scale(seg_vec, 1.0 / sv_len),
-                    )
-                    .clamp(-1.0, 1.0);
-                    let angle = cos_theta.acos();
-                    total_curvature_acc.add(angle / ((pv_len + sv_len) * 0.5));
-                    curvature_count += 1;
+        let segs = unsafe { std::slice::from_raw_parts(segments, segment_count as usize) };
+
+        let mut total_length_acc = KahanSum::default();
+        let mut total_curvature_acc = KahanSum::default();
+        let mut curvature_count = 0u32;
+
+        // To compute curvature, we need triplets of consecutive segments.
+        // We assume the segments are connected in order (polynomial chain).
+        for (i, seg) in segs.iter().enumerate() {
+            if !segment_valid(seg) {
+                continue;
+            }
+            let seg_vec = vec3_sub(seg.end, seg.start);
+            total_length_acc.add(vec3_length(seg_vec));
+
+            // Approximate curvature from angle between consecutive segments
+            if i > 0 {
+                let prev = &segs[i - 1];
+                if segment_valid(prev) {
+                    let prev_vec = vec3_sub(prev.end, prev.start);
+                    let pv_len = vec3_length(prev_vec);
+                    let sv_len = vec3_length(seg_vec);
+                    if pv_len > EPSILON && sv_len > EPSILON {
+                        let cos_theta = vec3_dot(
+                            vec3_scale(prev_vec, 1.0 / pv_len),
+                            vec3_scale(seg_vec, 1.0 / sv_len),
+                        )
+                        .clamp(-1.0, 1.0);
+                        let angle = cos_theta.acos();
+                        total_curvature_acc.add(angle / ((pv_len + sv_len) * 0.5));
+                        curvature_count += 1;
+                    }
                 }
             }
         }
-    }
 
-    let kappa = circulation_quantum_const();
-    // Kinetic energy per unit length: E/L ≈ (κ²/4π) * ln(R/ξ)
-    // Use a simplified form per segment
-    let mut total_ke_acc = KahanSum::default();
-    for seg in segs {
-        if segment_valid(seg) {
-            let seg_len = vec3_length(vec3_sub(seg.end, seg.start));
-            let xi = seg.core_radius;
-            let r_cutoff = seg_len.max(xi * 10.0);
-            // Energy per unit length: (κ²/4π) * ln(R/ξ)
-            let energy_per_length = if r_cutoff > xi {
-                (kappa * kappa / FOUR_PI) * (r_cutoff / xi).ln()
-            } else {
-                0.0
-            };
-            total_ke_acc.add(energy_per_length * seg_len);
+        let kappa = circulation_quantum_const();
+        // Kinetic energy per unit length: E/L ≈ (κ²/4π) * ln(R/ξ)
+        // Use a simplified form per segment
+        let mut total_ke_acc = KahanSum::default();
+        for seg in segs {
+            if segment_valid(seg) {
+                let seg_len = vec3_length(vec3_sub(seg.end, seg.start));
+                let xi = seg.core_radius;
+                let r_cutoff = seg_len.max(xi * 10.0);
+                // Energy per unit length: (κ²/4π) * ln(R/ξ)
+                let energy_per_length = if r_cutoff > xi {
+                    (kappa * kappa / FOUR_PI) * (r_cutoff / xi).ln()
+                } else {
+                    0.0
+                };
+                total_ke_acc.add(energy_per_length * seg_len);
+            }
         }
-    }
 
-    let total_length = total_length_acc.value();
-    let total_curvature = total_curvature_acc.value();
-    let total_ke = total_ke_acc.value();
+        let total_length = total_length_acc.value();
+        let total_curvature = total_curvature_acc.value();
+        let total_ke = total_ke_acc.value();
 
-    let avg_curvature = if curvature_count > 0 {
-        total_curvature / curvature_count as f64
-    } else {
-        0.0
-    };
+        let avg_curvature = if curvature_count > 0 {
+            total_curvature / curvature_count as f64
+        } else {
+            0.0
+        };
 
-    let line_density = if box_volume > EPSILON {
-        total_length / box_volume
-    } else {
-        0.0
-    };
+        let line_density = if box_volume > EPSILON {
+            total_length / box_volume
+        } else {
+            0.0
+        };
 
-    write_out(
-        out_stats,
-        VortexTangleStats {
-            segment_count,
-            total_length,
-            average_curvature: avg_curvature,
-            total_kinetic_energy: total_ke,
-            vortex_line_density: line_density,
-        },
-    )
+        write_out(
+            out_stats,
+            VortexTangleStats {
+                segment_count,
+                total_length,
+                average_curvature: avg_curvature,
+                total_kinetic_energy: total_ke,
+                vortex_line_density: line_density,
+            },
+        )
+    })
 }
 
 // ===========================================================================
@@ -961,93 +980,95 @@ pub extern "C" fn sf_gp_grid_sample(
     out_grid: *mut GpGridPoint,
     out_len: u32,
 ) -> u32 {
-    if !vec3_finite(plane_center) || !vec3_finite(plane_axis) {
-        return 0;
-    }
-    if !vec3_finite(vortex_center) || !vec3_finite(vortex_axis) {
-        return 0;
-    }
-    if nx == 0 || ny == 0 {
-        clear_error();
-        return 0;
-    }
-    if !finite_positive(extent_x) || !finite_positive(extent_y) {
-        return 0;
-    }
-    if !finite_positive(healing_length) || !finite_positive(background_density) {
-        return 0;
-    }
-    if out_grid.is_null() {
-        set_error(ERR_NULL_POINTER, "output pointer is null");
-        return 0;
-    }
-
-    let total = (nx as usize).saturating_mul(ny as usize);
-    let cap = out_len as usize;
-    let count = total.min(cap);
-    let buf = unsafe { std::slice::from_raw_parts_mut(out_grid, count) };
-
-    // Build local frame in the plane
-    let axis = vec3_normalize(plane_axis);
-    let ref_dir = if axis.x.abs() < 0.9 {
-        vec3_normalize(vec3_cross(
-            axis,
-            Vec3 {
-                x: 1.0,
-                y: 0.0,
-                z: 0.0,
-            },
-        ))
-    } else {
-        vec3_normalize(vec3_cross(
-            axis,
-            Vec3 {
-                x: 0.0,
-                y: 1.0,
-                z: 0.0,
-            },
-        ))
-    };
-    let ref_dir2 = vec3_cross(axis, ref_dir);
-
-    let mut idx = 0usize;
-    for iy in 0..ny {
-        let fy = (iy as f64) / ((ny - 1).max(1) as f64) - 0.5;
-        for ix in 0..nx {
-            if idx >= count {
-                break;
-            }
-            let fx = (ix as f64) / ((nx - 1).max(1) as f64) - 0.5;
-            let px = plane_center.x + fx * extent_x * ref_dir.x + fy * extent_y * ref_dir2.x;
-            let py = plane_center.y + fx * extent_x * ref_dir.y + fy * extent_y * ref_dir2.y;
-            let pz = plane_center.z + fx * extent_x * ref_dir.z + fy * extent_y * ref_dir2.z;
-
-            let mut param = GpOrderParameter::default();
-            let _ = sf_gp_order_parameter(
-                px,
-                py,
-                pz,
-                vortex_center,
-                vortex_axis,
-                circulation_quantum,
-                healing_length,
-                background_density,
-                &mut param,
-            );
-
-            buf[idx] = GpGridPoint {
-                x: fx * extent_x,
-                y: fy * extent_y,
-                amplitude: param.amplitude,
-                phase: param.phase,
-                density: param.density,
-            };
-            idx += 1;
+    ffi_guard(0, || {
+        if !vec3_finite(plane_center) || !vec3_finite(plane_axis) {
+            return 0;
         }
-    }
+        if !vec3_finite(vortex_center) || !vec3_finite(vortex_axis) {
+            return 0;
+        }
+        if nx == 0 || ny == 0 {
+            clear_error();
+            return 0;
+        }
+        if !finite_positive(extent_x) || !finite_positive(extent_y) {
+            return 0;
+        }
+        if !finite_positive(healing_length) || !finite_positive(background_density) {
+            return 0;
+        }
+        if out_grid.is_null() {
+            set_error(ERR_NULL_POINTER, "output pointer is null");
+            return 0;
+        }
 
-    clear_error();
-    idx as u32
+        let total = (nx as usize).saturating_mul(ny as usize);
+        let cap = out_len as usize;
+        let count = total.min(cap);
+        let buf = unsafe { std::slice::from_raw_parts_mut(out_grid, count) };
+
+        // Build local frame in the plane
+        let axis = vec3_normalize(plane_axis);
+        let ref_dir = if axis.x.abs() < 0.9 {
+            vec3_normalize(vec3_cross(
+                axis,
+                Vec3 {
+                    x: 1.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+            ))
+        } else {
+            vec3_normalize(vec3_cross(
+                axis,
+                Vec3 {
+                    x: 0.0,
+                    y: 1.0,
+                    z: 0.0,
+                },
+            ))
+        };
+        let ref_dir2 = vec3_cross(axis, ref_dir);
+
+        let mut idx = 0usize;
+        for iy in 0..ny {
+            let fy = (iy as f64) / ((ny - 1).max(1) as f64) - 0.5;
+            for ix in 0..nx {
+                if idx >= count {
+                    break;
+                }
+                let fx = (ix as f64) / ((nx - 1).max(1) as f64) - 0.5;
+                let px = plane_center.x + fx * extent_x * ref_dir.x + fy * extent_y * ref_dir2.x;
+                let py = plane_center.y + fx * extent_x * ref_dir.y + fy * extent_y * ref_dir2.y;
+                let pz = plane_center.z + fx * extent_x * ref_dir.z + fy * extent_y * ref_dir2.z;
+
+                let mut param = GpOrderParameter::default();
+                let _ = sf_gp_order_parameter(
+                    px,
+                    py,
+                    pz,
+                    vortex_center,
+                    vortex_axis,
+                    circulation_quantum,
+                    healing_length,
+                    background_density,
+                    &mut param,
+                );
+
+                buf[idx] = GpGridPoint {
+                    x: fx * extent_x,
+                    y: fy * extent_y,
+                    amplitude: param.amplitude,
+                    phase: param.phase,
+                    density: param.density,
+                };
+                idx += 1;
+            }
+        }
+
+        clear_error();
+        idx as u32
+    })
 }
 
 // ===========================================================================
@@ -1067,19 +1088,21 @@ pub extern "C" fn sf_healing_length(
     mass: f64,
     background_density: f64,
 ) -> f64 {
-    if !finite_positive(coupling_constant)
-        || !finite_positive(mass)
-        || !finite_positive(background_density)
-    {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "all parameters must be positive and finite",
-        );
-        return f64::NAN;
-    }
-    clear_error();
-    let hbar = HBAR;
-    hbar / (2.0 * mass * coupling_constant * background_density).sqrt()
+    ffi_guard(f64::NAN, || {
+        if !finite_positive(coupling_constant)
+            || !finite_positive(mass)
+            || !finite_positive(background_density)
+        {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "all parameters must be positive and finite",
+            );
+            return f64::NAN;
+        }
+        clear_error();
+        let hbar = HBAR;
+        hbar / (2.0 * mass * coupling_constant * background_density).sqrt()
+    })
 }
 
 /// Compute the speed of sound c = √(gn/m) for a superfluid.
@@ -1094,18 +1117,20 @@ pub extern "C" fn sf_sound_speed(
     mass: f64,
     background_density: f64,
 ) -> f64 {
-    if !finite_positive(coupling_constant)
-        || !finite_positive(mass)
-        || !finite_positive(background_density)
-    {
-        set_error(
-            ERR_INVALID_ARGUMENT,
-            "all parameters must be positive and finite",
-        );
-        return f64::NAN;
-    }
-    clear_error();
-    (coupling_constant * background_density / mass).sqrt()
+    ffi_guard(f64::NAN, || {
+        if !finite_positive(coupling_constant)
+            || !finite_positive(mass)
+            || !finite_positive(background_density)
+        {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "all parameters must be positive and finite",
+            );
+            return f64::NAN;
+        }
+        clear_error();
+        (coupling_constant * background_density / mass).sqrt()
+    })
 }
 
 /// Return the helium mass constant.
@@ -1115,7 +1140,7 @@ pub extern "C" fn sf_sound_speed(
 /// Takes no arguments and dereferences no pointers; always safe to call.
 #[unsafe(no_mangle)]
 pub extern "C" fn sf_helium_mass() -> f64 {
-    HELIUM_MASS
+    ffi_guard(f64::NAN, || HELIUM_MASS)
 }
 
 /// Return the scattering length for ⁴He.
@@ -1125,7 +1150,7 @@ pub extern "C" fn sf_helium_mass() -> f64 {
 /// Takes no arguments and dereferences no pointers; always safe to call.
 #[unsafe(no_mangle)]
 pub extern "C" fn sf_helium_scattering_length() -> f64 {
-    HELIUM_SCATTERING_LENGTH
+    ffi_guard(f64::NAN, || HELIUM_SCATTERING_LENGTH)
 }
 
 // ===========================================================================

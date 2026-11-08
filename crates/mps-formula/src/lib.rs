@@ -1,6 +1,9 @@
-// C ABI entry points validate raw pointers at the boundary (length/null checks
-// plus `ffi_guard`), so the safe-fn-raw-pointer lint is noise here — same
-// pattern as mps-core.
+// Every C ABI entry point validates raw pointers at the boundary (length/null
+// checks via `crate::ffi`) and wraps its whole body in `error::ffi_guard`
+// (catch_unwind → `ERR_INTERNAL` + the entry point's failure sentinel), so
+// the safe-fn-raw-pointer lint is noise here — same pattern as mps-core.
+// This crate cannot depend on mps-core/mps-cosmos, so the guard lives locally
+// in `error.rs`, next to the shared thread-local error slot.
 #![allow(clippy::not_unsafe_ptr_arg_deref)]
 
 pub mod acoustics;

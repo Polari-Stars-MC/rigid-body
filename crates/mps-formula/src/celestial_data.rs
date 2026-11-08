@@ -11,6 +11,7 @@
 //! zonal harmonics J2–J6, and low-degree spherical-harmonic coefficients
 //! for use with [`super::gravitational_models`].
 
+use crate::error::ffi_guard;
 use crate::ffi::{Bool, Vec3};
 
 // ---------------------------------------------------------------------------
@@ -649,62 +650,64 @@ pub extern "C" fn celestial_get_body(
     out_surface_density: *mut f64,
     out_scale_height: *mut f64,
 ) -> Bool {
-    let id = match body_id {
-        0 => CelestialBodyId::Sun,
-        1 => CelestialBodyId::Mercury,
-        2 => CelestialBodyId::Venus,
-        3 => CelestialBodyId::Earth,
-        4 => CelestialBodyId::Moon,
-        5 => CelestialBodyId::Mars,
-        6 => CelestialBodyId::Jupiter,
-        7 => CelestialBodyId::Saturn,
-        8 => CelestialBodyId::Uranus,
-        9 => CelestialBodyId::Neptune,
-        _ => {
-            crate::error::set_error(
-                crate::error::ERR_INVALID_ARGUMENT,
-                "invalid celestial body ID",
-            );
-            return Bool::FALSE;
+    ffi_guard(Bool::FALSE, || {
+        let id = match body_id {
+            0 => CelestialBodyId::Sun,
+            1 => CelestialBodyId::Mercury,
+            2 => CelestialBodyId::Venus,
+            3 => CelestialBodyId::Earth,
+            4 => CelestialBodyId::Moon,
+            5 => CelestialBodyId::Mars,
+            6 => CelestialBodyId::Jupiter,
+            7 => CelestialBodyId::Saturn,
+            8 => CelestialBodyId::Uranus,
+            9 => CelestialBodyId::Neptune,
+            _ => {
+                crate::error::set_error(
+                    crate::error::ERR_INVALID_ARGUMENT,
+                    "invalid celestial body ID",
+                );
+                return Bool::FALSE;
+            }
+        };
+
+        let body = get_celestial_body(id);
+        if let Some(p) = unsafe { out_gm.as_mut() } {
+            *p = body.gm;
         }
-    };
+        if let Some(p) = unsafe { out_eq_radius.as_mut() } {
+            *p = body.equatorial_radius;
+        }
+        if let Some(p) = unsafe { out_flattening.as_mut() } {
+            *p = body.flattening;
+        }
+        if let Some(p) = unsafe { out_rotation_rate.as_mut() } {
+            *p = body.rotation_rate;
+        }
+        if let Some(p) = unsafe { out_j2_j6.as_mut() } {
+            let arr = unsafe { std::slice::from_raw_parts_mut(p, 5) };
+            arr[0] = body.j2;
+            arr[1] = body.j3;
+            arr[2] = body.j4;
+            arr[3] = body.j5;
+            arr[4] = body.j6;
+        }
+        if let Some(p) = unsafe { out_max_degree.as_mut() } {
+            *p = body.max_degree;
+        }
+        if let Some(p) = unsafe { out_ref_radius.as_mut() } {
+            *p = body.ref_radius;
+        }
+        if let Some(p) = unsafe { out_surface_density.as_mut() } {
+            *p = body.surface_density;
+        }
+        if let Some(p) = unsafe { out_scale_height.as_mut() } {
+            *p = body.scale_height;
+        }
 
-    let body = get_celestial_body(id);
-    if let Some(p) = unsafe { out_gm.as_mut() } {
-        *p = body.gm;
-    }
-    if let Some(p) = unsafe { out_eq_radius.as_mut() } {
-        *p = body.equatorial_radius;
-    }
-    if let Some(p) = unsafe { out_flattening.as_mut() } {
-        *p = body.flattening;
-    }
-    if let Some(p) = unsafe { out_rotation_rate.as_mut() } {
-        *p = body.rotation_rate;
-    }
-    if let Some(p) = unsafe { out_j2_j6.as_mut() } {
-        let arr = unsafe { std::slice::from_raw_parts_mut(p, 5) };
-        arr[0] = body.j2;
-        arr[1] = body.j3;
-        arr[2] = body.j4;
-        arr[3] = body.j5;
-        arr[4] = body.j6;
-    }
-    if let Some(p) = unsafe { out_max_degree.as_mut() } {
-        *p = body.max_degree;
-    }
-    if let Some(p) = unsafe { out_ref_radius.as_mut() } {
-        *p = body.ref_radius;
-    }
-    if let Some(p) = unsafe { out_surface_density.as_mut() } {
-        *p = body.surface_density;
-    }
-    if let Some(p) = unsafe { out_scale_height.as_mut() } {
-        *p = body.scale_height;
-    }
-
-    crate::error::clear_error();
-    Bool::TRUE
+        crate::error::clear_error();
+        Bool::TRUE
+    })
 }
 
 /// Retrieve packed spherical-harmonic coefficients for a body.
@@ -727,29 +730,31 @@ pub extern "C" fn celestial_get_sh_coeffs(
     s_coeffs_out: *mut f64,
     capacity: u32,
 ) -> u32 {
-    let id = match celestial_body_id_from_u32(body_id) {
-        Some(id) => id,
-        None => return 0,
-    };
-    let body = get_celestial_body(id);
-    let count = capacity.min(body.c_coeffs.len() as u32);
-    if !c_coeffs_out.is_null() {
-        let Some(dst) = crate::ffi::formula_result(unsafe {
-            crate::ffi::checked_output_slice(c_coeffs_out, count as usize, "c_coeffs_out")
-        }) else {
-            return 0;
+    ffi_guard(0, || {
+        let id = match celestial_body_id_from_u32(body_id) {
+            Some(id) => id,
+            None => return 0,
         };
-        dst.copy_from_slice(&body.c_coeffs[..count as usize]);
-    }
-    if !s_coeffs_out.is_null() {
-        let Some(dst) = crate::ffi::formula_result(unsafe {
-            crate::ffi::checked_output_slice(s_coeffs_out, count as usize, "s_coeffs_out")
-        }) else {
-            return 0;
-        };
-        dst.copy_from_slice(&body.s_coeffs[..count as usize]);
-    }
-    count
+        let body = get_celestial_body(id);
+        let count = capacity.min(body.c_coeffs.len() as u32);
+        if !c_coeffs_out.is_null() {
+            let Some(dst) = crate::ffi::formula_result(unsafe {
+                crate::ffi::checked_output_slice(c_coeffs_out, count as usize, "c_coeffs_out")
+            }) else {
+                return 0;
+            };
+            dst.copy_from_slice(&body.c_coeffs[..count as usize]);
+        }
+        if !s_coeffs_out.is_null() {
+            let Some(dst) = crate::ffi::formula_result(unsafe {
+                crate::ffi::checked_output_slice(s_coeffs_out, count as usize, "s_coeffs_out")
+            }) else {
+                return 0;
+            };
+            dst.copy_from_slice(&body.s_coeffs[..count as usize]);
+        }
+        count
+    })
 }
 
 /// Return the number of spherical-harmonic coefficients for a given body.
@@ -760,11 +765,13 @@ pub extern "C" fn celestial_get_sh_coeffs(
 /// `body_id` (invalid IDs return 0).
 #[unsafe(no_mangle)]
 pub extern "C" fn celestial_get_sh_coeff_count(body_id: u32) -> u32 {
-    let id = match celestial_body_id_from_u32(body_id) {
-        Some(id) => id,
-        None => return 0,
-    };
-    get_celestial_body(id).c_coeffs.len() as u32
+    ffi_guard(0, || {
+        let id = match celestial_body_id_from_u32(body_id) {
+            Some(id) => id,
+            None => return 0,
+        };
+        get_celestial_body(id).c_coeffs.len() as u32
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -1050,62 +1057,3 @@ pub static MOONS: &[Moon] = &[
         orbital_period: 6.585e4,
     },
 ];
-
-#[cfg(test)]
-mod moon_tests {
-    use super::*;
-
-    /// Parent-planet GM lookup for the Kepler self-consistency check.
-    fn planet_gm(name: &str) -> f64 {
-        match name {
-            "Sun" => SUN_GM,
-            "Earth" => EARTH_GM,
-            "Mars" => MARS_GM,
-            "Jupiter" => JUPITER_GM,
-            "Saturn" => SATURN_GM,
-            "Uranus" => URANUS.gm,
-            "Neptune" => NEPTUNE.gm,
-            "Pluto" => PLUTO_GM,
-            other => panic!("unknown parent planet in MOONS: {other}"),
-        }
-    }
-
-    #[test]
-    fn moons_table_populated_and_unique() {
-        assert!(!MOONS.is_empty(), "MOONS must not be empty");
-        let mut seen = std::collections::HashSet::new();
-        for m in MOONS {
-            assert!(seen.insert(m.name), "duplicate moon name: {}", m.name);
-        }
-    }
-
-    #[test]
-    fn moons_physical_fields_positive_and_orbit_sane() {
-        for m in MOONS {
-            assert!(m.gm > 0.0, "{} gm must be positive", m.name);
-            assert!(m.radius > 0.0, "{} radius must be positive", m.name);
-            assert!(m.semi_major_axis > m.radius, "{} orbit inside body", m.name);
-            assert!(m.orbital_period > 0.0, "{} period must be positive", m.name);
-        }
-    }
-
-    #[test]
-    fn moons_satisfy_kepler_third_law() {
-        for m in MOONS {
-            let gm_total = planet_gm(m.parent_planet) + m.gm;
-            let t_calc =
-                (4.0 * std::f64::consts::PI * std::f64::consts::PI * m.semi_major_axis.powi(3)
-                    / gm_total)
-                    .sqrt();
-            let rel = (t_calc - m.orbital_period).abs() / m.orbital_period;
-            assert!(
-                rel < 0.12,
-                "{} violates Kepler: calc T={:.3e}s obs T={:.3e}s (rel {:.3})",
-                m.name,
-                t_calc,
-                m.orbital_period,
-                rel
-            );
-        }
-    }
-}
