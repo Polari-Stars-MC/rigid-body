@@ -14,7 +14,7 @@
 /// Workspace version (from root Cargo.toml), for the footer / brand.
 pub const VERSION: &str = "0.1.4";
 /// Total number of `#[test]` items in `mps-test`.
-pub const TEST_COUNT: &str = "1173";
+pub const TEST_COUNT: &str = "1176";
 /// Total number of `jni!(`/`jni_e_c!(` method entries in `mps-jni`.
 pub const JNI_METHOD_COUNT: &str = "613";
 /// Total number of `pub extern "C" fn` declarations in `mps-core/rapier`.
@@ -24,8 +24,8 @@ pub const FORMULA_MODULE_COUNT: &str = "147";
 /// Number of `CelestialBodyId` variants (built-in celestial bodies).
 pub const CELESTIAL_COUNT: &str = "10";
 /// Number of `world_set_*gravity*` C-ABI setters in mps-core (one per
-/// selectable gravity model). Counted from `crates/mps-core/src/rapier`;
-/// there is no `mps-core/src/gravity` directory.
+         /// selectable gravity model). Counted from `crates/mps-core/src/rapier`;
+         /// there is no `mps-core/src/gravity` directory.
 pub const GRAVITY_MODEL_COUNT: &str = "4";
 /// Number of `OrbitIntegration` variants (integrator selection).
 pub const INTEGRATOR_COUNT: &str = "6";
