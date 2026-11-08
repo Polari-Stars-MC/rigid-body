@@ -1013,6 +1013,17 @@ jni!(void jointBuilderSetMotorPosition(long builder, int axis, double target_pos
 jni!(long worldInsertImpulseJoint(long world, long body1, long body2, long builder, int wake_up) { handle_or_fail(jo::world_insert_impulse_joint(m::<WH>(world), body1 as RRaw, body2 as RRaw, m::<JBH>(builder), jb(wake_up)) as u64) });
 jni!(boolean worldRemoveImpulseJoint(long world, long handle, int wake_up) { jo::world_remove_impulse_joint(m::<WH>(world), handle as JRaw, jb(wake_up)).0 as jbyte });
 
+// ---- multibody joint（解运动方程那套）----
+jni!(long worldInsertMultibodyJoint(long world, long body1, long body2, long builder, int wake_up) {
+    handle_or_fail(jo::world_insert_multibody_joint(m::<WH>(world), body1 as RRaw, body2 as RRaw, m::<JBH>(builder), jb(wake_up)))
+});
+jni!(boolean worldMultibodyJointSetMotor(long world, long handle, int axis, double target, double stiffness) {
+    jo::world_multibody_joint_set_motor(m::<WH>(world), handle as u64, axis as u32, target, stiffness).0 as jbyte
+});
+jni!(boolean worldRemoveMultibodyJoint(long world, long handle, int wake_up) {
+    jo::world_remove_multibody_joint(m::<WH>(world), handle as u64, jb(wake_up)).0 as jbyte
+});
+
 jni!(long characterControllerCreate() { ptr_or_fail(cc::character_controller_create()) });
 jni!(void characterControllerDestroy(long controller) { cc::character_controller_destroy(m::<CCH>(controller)); });
 jni!(void characterControllerSetUp(long controller, double x, double y, double z) { cc::character_controller_set_up(m::<CCH>(controller), v3(x,y,z)); });
@@ -2394,9 +2405,17 @@ pub extern "system" fn cosmosWorldGetArenaDirectByteBuffer(
 // 侧比较 == 0xFFFFFFFFL）；布尔类返回 `Bool` 经 `.0 as jbyte`（0/1）。
 
 // Phase 5a: 通用软体构造（任意拓扑：质点 / 弹簧 / XPBD 距离约束 / 四面体）
-jni!(long softBodyCreate(long world, double gravity_x, double gravity_y, double gravity_z) { handle_or_fail(sb::soft_body_create(m::<WH>(world), v3(gravity_x, gravity_y, gravity_z)) as u64) });
+jni!(long softBodyCreate(long world, double gravity_x, double gravity_y, double gravity_z) {
+    // 0 是合法 id，失败用 u32::MAX -> -1
+    let id = sb::soft_body_create(m::<WH>(world), v3(gravity_x, gravity_y, gravity_z));
+    if id == u32::MAX { -1i64 } else { id as i64 }
+});
 jni!(long softBodyClone(long world, int id) { handle_or_fail(sb::soft_body_clone(m::<WH>(world), id as u32) as u64) });
-jni!(long softBodyAddParticle(long world, int id, double x, double y, double z, double mass, int pinned) { handle_or_fail(sb::soft_body_add_particle(m::<WH>(world), id as u32, x, y, z, mass, jb(pinned)) as u64) });
+jni!(long softBodyAddParticle(long world, int id, double x, double y, double z, double mass, int pinned) {
+    // 0 是合法粒子索引，失败用 u32::MAX -> -1
+    let i = sb::soft_body_add_particle(m::<WH>(world), id as u32, x, y, z, mass, jb(pinned));
+    if i == u32::MAX { -1i64 } else { i as i64 }
+});
 jni!(boolean softBodyAddSpring(long world, int id, int a, int b, double stiffness, double damping) { sb::soft_body_add_spring(m::<WH>(world), id as u32, a as u32, b as u32, stiffness, damping).0 as jbyte });
 jni!(boolean softBodyAddDistanceConstraint(long world, int id, int a, int b, double compliance) { sb::soft_body_add_distance_constraint(m::<WH>(world), id as u32, a as u32, b as u32, compliance).0 as jbyte });
 jni!(boolean softBodyAddTetrahedron(long world, int id, int a, int b, int c, int d) { sb::soft_body_add_tetrahedron(m::<WH>(world), id as u32, a as u32, b as u32, c as u32, d as u32).0 as jbyte });
@@ -2414,7 +2433,11 @@ jni!(long softBodyBuildRope(long world, double start_x, double start_y, double s
 jni!(long softBodyBuildGrid(long world, double min_x, double min_y, double min_z, double max_x, double max_y, double max_z, int nx, int ny, int nz, double particle_mass, double compliance, int iterations, int pin_boundary) { handle_or_fail(sb::soft_body_build_grid(m::<WH>(world), min_x, min_y, min_z, max_x, max_y, max_z, nx as u32, ny as u32, nz as u32, particle_mass, compliance, iterations as u32, pin_boundary as u8) as u64) });
 
 // Phase 4 + 5d: voxel 网格软体构造 + 破坏联动
-jni!(long softBodyVoxelBuild(long world, long voxels, int voxels_len, int size_x, int size_y, int size_z, double voxel_size, double origin_x, double origin_y, double origin_z, double particle_mass, double stiffness, double damping, int pin_boundary) { handle_or_fail(sb::soft_body_voxel_build(m::<WH>(world), p::<u8>(voxels), voxels_len as u32, size_x as u32, size_y as u32, size_z as u32, voxel_size, v3(origin_x, origin_y, origin_z), particle_mass, stiffness, damping, jb(pin_boundary)) as u64) });
+jni!(long softBodyVoxelBuild(long world, long voxels, int voxels_len, int size_x, int size_y, int size_z, double voxel_size, double origin_x, double origin_y, double origin_z, double particle_mass, double stiffness, double damping, int pin_boundary) {
+    // 注意：0 是合法 id，不能走 handle_or_fail；失败用 u32::MAX → -1
+    let id = sb::soft_body_voxel_build(m::<WH>(world), voxels as *const u8, u32_from_jint(voxels_len), u32_from_jint(size_x), u32_from_jint(size_y), u32_from_jint(size_z), voxel_size, v3(origin_x, origin_y, origin_z), particle_mass, stiffness, damping, jb(pin_boundary));
+    if id == u32::MAX { -1i64 } else { id as i64 }
+});
 jni!(boolean softBodyVoxelDig(long world, int id, int cell_x, int cell_y, int cell_z) { sb::soft_body_voxel_dig(m::<WH>(world), id as u32, cell_x as u32, cell_y as u32, cell_z as u32).0 as jbyte });
 
 // Phase 5b: 查询 / 读回 / 生命周期
@@ -2899,18 +2922,3 @@ jni!(int voxelBakeBoxes(long voxels, int size_x, int size_y, int size_z, double 
 #[unsafe(export_name = "Java_org_polaris2023_mps_collision_rapier_RapierConnect_RustMemoryFree")]
 #[allow(non_snake_case)]
 pub extern "system" fn RustMemoryFree(_env: JNIEnv, _class: jclass, _handle: jlong) {}
-
-// ---- multibody joint（解运动方程那套）----
-// Java 的 ModuleBoardBlockEntity.StepperMotorModule 用这三个入口驱动机电：
-// worldInsertMultibodyJoint 建铰链、worldMultibodyJointSetMotor 设目标角与刚度。
-jni!(long worldInsertMultibodyJoint(long world, long body1, long body2, long builder, int wake_up) {
-    let handle = jo::world_insert_multibody_joint(wm(world), body1 as u64, body2 as u64, builder as isize as *mut JBH, jb(wake_up));
-    // u64::MAX 是失败哨兵；JNI 侧用 -1 表示（Java 的 handle == -1 判定）。
-    if handle == u64::MAX { -1 } else { handle as jlong }
-});
-jni!(boolean worldMultibodyJointSetMotor(long world, long handle, int axis, double target, double stiffness) {
-    jo::world_multibody_joint_set_motor(wm(world), handle as u64, axis as u32, target, stiffness).0 as jbyte
-});
-jni!(boolean worldRemoveMultibodyJoint(long world, long handle, int wake_up) {
-    jo::world_remove_multibody_joint(wm(world), handle as u64, jb(wake_up)).0 as jbyte
-});

@@ -1,8 +1,8 @@
 use rapier3d::prelude::{
-    MultibodyJointHandle as RapierMultibodyJointHandle,
     FixedJointBuilder, GenericJointBuilder, ImpulseJointHandle as RapierImpulseJointHandle,
-    JointAxesMask, MotorModel, PrismaticJointBuilder, RevoluteJointBuilder, RopeJointBuilder,
-    SphericalJointBuilder, SpringJointBuilder, Vector, WheelJointBuilder,
+    JointAxesMask, JointAxis, MotorModel,
+    PrismaticJointBuilder, RevoluteJointBuilder, RopeJointBuilder, SphericalJointBuilder,
+    SpringJointBuilder, Vector, WheelJointBuilder,
 };
 
 use crate::rapier::error::{
@@ -14,6 +14,8 @@ use crate::rapier::ffi::{
     joint_type_from_raw, pack_impulse_joint_handle, unpack_impulse_joint_handle,
     unpack_rigid_body_handle, vec3_finite, vec3_to_rapier,
 };
+use rapier3d::dynamics::MultibodyJointHandle as RapierMultibodyJointHandle;
+use rapier3d::math::{Pose, Rotation};
 
 const EPSILON: f64 = 1.0e-9;
 
@@ -899,6 +901,123 @@ pub extern "C" fn world_batch_joint_axis_state(
             let rapier_axis = joint_axis_to_rapier(joint_axis_from_raw(axes[i]));
             out[i] = ij.data.position(b1, b2)[rapier_axis as usize];
         }
+        Bool::TRUE
+    })
+}
+
+/// Snap a joint axis to a target angle, but never by more than `max_step` in one call.
+///
+/// This is the force-aware version of [`world_joint_step_to`]. The uncapped call is
+/// infinitely strong: it rewrites the subtree pose, so no external load can make the
+/// joint yield and the work that load does is discarded - the body can hold or push
+/// what no real motor could. Here the per-call movement is bounded, which restores the
+/// usual trade-off: small targets are reached at once (no lag, no ringing), large ones
+/// are approached at the rate the motor could sustain, and a large external force can
+/// actually push the joint away from its target.
+///
+/// Returns TRUE when the joint was found.
+#[unsafe(no_mangle)]
+pub extern "C" fn world_joint_step_to_capped(
+    world: *mut WorldHandle,
+    joint: ImpulseJointHandleRaw,
+    axis: u32,
+    target: f64,
+    max_step: f64,
+) -> Bool {
+    if !max_step.is_finite() || max_step <= 0.0 {
+        set_error(ERR_INVALID_ARGUMENT, "max_step must be positive and finite");
+        return Bool::FALSE;
+    }
+    ffi_guard(Bool::FALSE, || {
+        let Some(world) = (unsafe { world.as_mut() }) else {
+            set_error(ERR_NULL_POINTER, "world is null");
+            return Bool::FALSE;
+        };
+        if !target.is_finite() {
+            set_error(ERR_INVALID_ARGUMENT, "target is not finite");
+            return Bool::FALSE;
+        }
+        let handle = unpack_impulse_joint_handle(joint);
+
+        let h1;
+        let h2;
+        let current;
+        let rapier_axis;
+        let anchor_world;
+        let axis_world;
+        {
+            let Some(ij) = world.inner.impulse_joints.get(handle) else {
+                set_error(ERR_NOT_FOUND, "impulse joint not found");
+                return Bool::FALSE;
+            };
+            h1 = ij.body1();
+            h2 = ij.body2();
+            rapier_axis = joint_axis_to_rapier(joint_axis_from_raw(axis));
+            let (Some(b1), Some(b2)) = (world.inner.bodies.get(h1), world.inner.bodies.get(h2))
+            else {
+                set_error(ERR_NOT_FOUND, "joint bodies not found");
+                return Bool::FALSE;
+            };
+            current = ij.data.position(b1, b2)[rapier_axis as usize];
+            anchor_world = b1
+                .position()
+                .transform_point(ij.data.local_frame1.translation);
+            let frame_rot = b1.rotation() * ij.data.local_frame1.rotation;
+            let local_axis = match rapier_axis {
+                JointAxis::AngX | JointAxis::LinX => Vector::X,
+                JointAxis::AngY | JointAxis::LinY => Vector::Y,
+                _ => Vector::Z,
+            };
+            axis_world = frame_rot * local_axis;
+        }
+
+        let wanted = target - current;
+        if !wanted.is_finite() {
+            set_error(ERR_INVALID_ARGUMENT, "current angle is not finite");
+            return Bool::FALSE;
+        }
+        if wanted.abs() < 1.0e-12 {
+            return Bool::TRUE;
+        }
+        // Only the part of the error the spring cannot hold is snapped. With
+        // and = max_torque / stiffness this is continuous: at |e| == band the snap is
+        // exactly zero, so an external load below the motor's strength is answered by the
+        // spring (proportional, no teleport) instead of being silently absorbed, and a
+        // load above it moves the joint by the surplus only.
+        let band = max_step.max(0.0);
+        let delta = wanted - wanted.clamp(-band, band);
+
+        let mut subtree: Vec<_> = vec![h2];
+        let mut frontier: Vec<_> = vec![h2];
+        let mut guard = 0usize;
+        while !frontier.is_empty() && guard < 4096 {
+            guard += 1;
+            let mut next = Vec::new();
+            for candidate in world.inner.impulse_joints.iter() {
+                if frontier.iter().any(|p| *p == candidate.1.body1()) {
+                    let child = candidate.1.body2();
+                    if !subtree.iter().any(|b| *b == child) {
+                        subtree.push(child);
+                        next.push(child);
+                    }
+                }
+            }
+            frontier = next;
+        }
+
+        let step_rot = Rotation::from_axis_angle(axis_world, delta);
+        for h in subtree {
+            let Some(body) = world.inner.bodies.get_mut(h) else {
+                continue;
+            };
+            let old_pos = body.position().translation;
+            let old_rot = *body.rotation();
+            let new_pos = anchor_world + step_rot * (old_pos - anchor_world);
+            let new_rot = (step_rot * old_rot).normalize();
+            body.set_position(Pose::from_parts(new_pos, new_rot), true);
+        }
+
+        clear_error();
         Bool::TRUE
     })
 }

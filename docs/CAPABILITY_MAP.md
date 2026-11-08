@@ -11,11 +11,11 @@
 | 项 | 数量 |
 | --- | --- |
 | `mps-core` 里有 `extern "C"` 入口的源模块 | 63 |
-| `mps-core` C ABI 入口总数 | 939 |
-| 其中出现在生成头文件 `rigid_body.h` 里 | 939 |
+| `mps-core` C ABI 入口总数 | 940 |
+| 其中出现在生成头文件 `rigid_body.h` 里 | 940 |
 | 其中被 `mps-jni` 的 `jni!` 体引用 | 607 |
 | 其中被 `mps-test` 引用 | 700 |
-| 既无 JNI 绑定也无测试引用 | 129 |
+| 既无 JNI 绑定也无测试引用 | 130 |
 
 ## 模块表
 
@@ -52,7 +52,7 @@
 | `fracture_mesh` | — | 13 | — | [fracture_mesh.md](mps-core/fracture_mesh.md) | [fracture_mesh.rs](../crates/mps-test/src/rapier/fracture_mesh.rs) | 13 | 13 |
 | `granular` | `granular_*` | 8 | — | [granular.md](mps-core/granular.md) | [granular.rs](../crates/mps-test/src/rapier/granular.rs) | 8 | 8 |
 | `hair` | `hair_system_*` | 6 | — | [hair.md](mps-core/hair.md) | [hair.rs](../crates/mps-test/src/rapier/hair.rs) | 6 | 6 |
-| `joints` | — | 26 | — | [joints.md](mps-core/joints.md) | [joints.rs](../crates/mps-test/src/rapier/joints.rs) | 13 | 10 |
+| `joints` | — | 27 | — | [joints.md](mps-core/joints.md) | [joints.rs](../crates/mps-test/src/rapier/joints.rs) | 13 | 10 |
 | `matmech` | `material_mechanics_*` | 24 | — | [matmech.md](mps-core/matmech.md) | [matmech.rs](../crates/mps-test/src/rapier/matmech.rs) | 24 | 9 |
 | `minecraft` | — | 1 | — | — | [minecraft.rs](../crates/mps-test/src/rapier/minecraft.rs) | 1 | 0 |
 | `molecular` | `molecular_*` | 8 | — | [molecular.md](mps-core/molecular.md) | [molecular.rs](../crates/mps-test/src/rapier/molecular.rs) | 5 | 5 |
@@ -114,7 +114,7 @@ cbindgen 不按 feature 过滤，所以这些符号出现在 `rigid_body.h` 里�
 | `anvilkit` | 4 |
 | `astrocalc` | 18 |
 | `emag` | 14 |
-| `joints` | 13 |
+| `joints` | 14 |
 | `nucphys` | 10 |
 | `qphys` | 21 |
 | `rel` | 22 |

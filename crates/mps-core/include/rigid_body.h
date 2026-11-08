@@ -6512,6 +6512,25 @@ struct Bool world_batch_joint_axis_state(const struct WorldHandle *world,
                                          double *out);
 
 /**
+ * Snap a joint axis to a target angle, but never by more than `max_step` in one call.
+ *
+ * This is the force-aware version of [`world_joint_step_to`]. The uncapped call is
+ * infinitely strong: it rewrites the subtree pose, so no external load can make the
+ * joint yield and the work that load does is discarded - the body can hold or push
+ * what no real motor could. Here the per-call movement is bounded, which restores the
+ * usual trade-off: small targets are reached at once (no lag, no ringing), large ones
+ * are approached at the rate the motor could sustain, and a large external force can
+ * actually push the joint away from its target.
+ *
+ * Returns TRUE when the joint was found.
+ */
+struct Bool world_joint_step_to_capped(struct WorldHandle *world,
+                                       ImpulseJointHandleRaw joint,
+                                       uint32_t axis,
+                                       double target,
+                                       double max_step);
+
+/**
  * 用 multibody joint 连接两个刚体（解运动方程那套），返回 handle；`u64::MAX` = 失败。
  *
  * # Safety

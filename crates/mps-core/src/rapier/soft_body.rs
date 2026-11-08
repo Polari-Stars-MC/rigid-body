@@ -427,10 +427,10 @@ pub extern "C" fn soft_body_voxel_build(
     damping: f64,
     pin_boundary: Bool,
 ) -> u32 {
-    ffi_guard(0, || {
+    ffi_guard(u32::MAX, || {
         let Some(world) = (unsafe { world.as_mut() }) else {
             set_error(ERR_NULL_POINTER, "world is null");
-            return 0;
+            return u32::MAX;
         };
         if voxels.is_null()
             || voxels_len == 0
@@ -447,7 +447,7 @@ pub extern "C" fn soft_body_voxel_build(
             || damping < 0.0
         {
             set_error(ERR_INVALID_ARGUMENT, "soft_body_voxel_build: bad params");
-            return 0;
+            return u32::MAX;
         }
         let n = size_x as usize * size_y as usize * size_z as usize;
         if n > voxels_len as usize {
@@ -455,7 +455,7 @@ pub extern "C" fn soft_body_voxel_build(
                 ERR_INVALID_ARGUMENT,
                 "soft_body_voxel_build: grid exceeds voxels_len",
             );
-            return 0;
+            return u32::MAX;
         }
         let grid = unsafe { std::slice::from_raw_parts(voxels, voxels_len as usize) };
 
@@ -503,7 +503,7 @@ pub extern "C" fn soft_body_voxel_build(
                 ERR_INVALID_ARGUMENT,
                 "soft_body_voxel_build: no solid voxels",
             );
-            return 0;
+            return u32::MAX;
         }
 
         // Connect face-adjacent solid cells with springs (avoid double-linking by
