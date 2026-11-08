@@ -25,7 +25,7 @@
 //! wires `SoftBodySet` into `World` / `PersistentIslands`. Phase 1+ add joint-based
 //! and mass-spring/FEM coupling.
 
-use rapier3d::math::{AngVector, Real, Vector};
+use rapier3d::math::{AngVector, Real, Rotation, Vector};
 use rapier3d::prelude::{RigidBodyHandle, RigidBodySet};
 use std::collections::{HashMap, HashSet};
 use std::vec::Vec;
@@ -34,6 +34,22 @@ use std::vec::Vec;
 /// Routed through `force_containers` so they share the same `Persistent` lifecycle
 /// and `compute_body_effective_forces` summation as gravity/thrust (Phase 2).
 pub const SOFT_SPRING_CUSTOM_ID: u32 = 0x5_042; // "SB" encoded; arbitrary custom tag
+
+/// Linear-blend skinning binding for one soft body.
+#[derive(Clone, Debug)]
+pub struct VertexSkin {
+    pub bone_idx: [u32; 4],
+    pub weight: [f64; 4],
+    pub local: [Vector; 4],
+}
+
+#[derive(Clone, Debug)]
+pub struct SkinBinding {
+    pub bones: Vec<RigidBodyHandle>,
+    pub bind_translation: Vec<Vector>,
+    pub bind_rotation: Vec<Rotation>,
+    pub vertices: HashMap<u32, VertexSkin>,
+}
 
 /// Opaque id of a [`SoftBody`] inside a [`SoftBodySet`].
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -323,6 +339,10 @@ pub struct SoftBody {
     /// = perfectly elastic (Hookean). Pure rest-length edit — no new solver
     /// mechanics, no SoA interaction.
     pub plasticity: Option<PlasticityParams>,
+    /// Phase 3: linear-blend skinning binding (optional).
+    pub skin: Option<SkinBinding>,
+    /// Phase 3: cached skinned target positions (computed in prepare).
+    pub skin_targets: Vec<Vector>,
     /// Phase 12: self-collision. When `Some(params)`, the body's free particles
     /// repel each other when their centres come within `2·params.radius` (each
     /// particle behaves as a sphere of that radius). Broad-phase uses a uniform
@@ -485,6 +505,8 @@ impl SoftBody {
             wind: None,
             tear: None,
             plasticity: None,
+            skin: None,
+            skin_targets: Vec::new(),
             pressure: None,
             anisotropy: None,
             viscoelastic: None,
@@ -1616,7 +1638,6 @@ impl SoftBody {
     }
 }
 
-
 /// Signed volume of the tetrahedron `(p0, p1, p2, p3)`.
 fn signed_tetra_volume(p0: Vector, p1: Vector, p2: Vector, p3: Vector) -> Real {
     let e1 = p1 - p0;
@@ -1707,6 +1728,201 @@ impl SoftBodySet {
             .filter_map(|(i, b)| b.as_ref().map(|sb| (SoftBodyId(i as u32), sb)))
     }
 
+    /// Phase 17: cohesion glue projection (XPBD-style) over authorized data. For
+    /// every pair of live bodies that both enable cohesion, free particle pairs
+    /// within `break_distance` are projected toward the contact distance
+    /// `radius`. `compliance == 0` (hard glue) fully corrects in one pass; a
+    /// larger compliance applies a softened fraction.
+    pub fn apply_cohesion(&mut self) {
+        let ids: Vec<SoftBodyId> = self
+            .bodies
+            .iter()
+            .enumerate()
+            .filter_map(|(i, b)| {
+                b.as_ref()
+                    .filter(|sb| sb.cohesion.is_some())
+                    .map(|_| SoftBodyId(i as u32))
+            })
+            .collect();
+        for i in 0..ids.len() {
+            for j in i + 1..ids.len() {
+                let (ca, cb) = {
+                    let (a, b) = self.get2_mut(ids[i], ids[j]);
+                    let (Some(a), Some(b)) = (a, b) else {
+                        continue;
+                    };
+                    match (a.cohesion, b.cohesion) {
+                        (Some(ca), Some(cb)) => (ca, cb),
+                        _ => continue,
+                    }
+                };
+                let radius = ca.radius.min(cb.radius).max(1.0e-6);
+                let compliance = ca.stiffness.min(cb.stiffness);
+                let break_distance = ca
+                    .break_distance
+                    .max(cb.break_distance)
+                    .max(radius)
+                    .max(1.0e-6);
+                let alpha = if compliance <= 1.0e-9 {
+                    1.0
+                } else {
+                    1.0 / (1.0 + compliance)
+                };
+                let (a, b) = self.get2_mut(ids[i], ids[j]);
+                let (Some(a), Some(b)) = (a, b) else {
+                    continue;
+                };
+                for pi in 0..a.particles.len() {
+                    if a.particles[pi].inv_mass <= 0.0 {
+                        continue;
+                    }
+                    for pj in 0..b.particles.len() {
+                        if b.particles[pj].inv_mass <= 0.0 {
+                            continue;
+                        }
+                        let d = b.particles[pj].pos - a.particles[pi].pos;
+                        let dist = d.length();
+                        if dist > break_distance || dist <= 1.0e-9 {
+                            continue;
+                        }
+                        let dir = d / dist;
+                        let ma = a.particles[pi].mass().max(1.0e-9);
+                        let mb = b.particles[pj].mass().max(1.0e-9);
+                        let wa = mb / (ma + mb);
+                        let wb = ma / (ma + mb);
+                        let corr = (dist - radius) * alpha;
+                        a.particles[pi].pos += dir * (corr * wa);
+                        b.particles[pj].pos -= dir * (corr * wb);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Phase 12/14: self-collision projection within each body (XPBD-style push-apart
+    /// of free particle pairs closer than `2·radius`), plus Coulomb tangential friction.
+    pub fn apply_self_collision(&mut self) {
+        for id in 0..self.bodies.len() as u32 {
+            let Some(body) = self.get_mut(SoftBodyId(id)) else {
+                continue;
+            };
+            let Some(sc) = body.self_collision else {
+                continue;
+            };
+            let rest = 2.0 * sc.radius.max(1.0e-6);
+            let alpha = if sc.stiffness <= 1.0e-9 {
+                1.0
+            } else {
+                1.0 / (1.0 + sc.stiffness)
+            };
+            let n = body.particles.len();
+            for _ in 0..200 {
+                for i in 0..n {
+                    if body.particles[i].inv_mass <= 0.0 {
+                        continue;
+                    }
+                    for j in i + 1..n {
+                        if body.particles[j].inv_mass <= 0.0 {
+                            continue;
+                        }
+                        let d = body.particles[j].pos - body.particles[i].pos;
+                        let dist = d.length();
+                        if dist >= rest || dist <= 1.0e-9 {
+                            continue;
+                        }
+                        let dir = d / dist;
+                        let ma = body.particles[i].mass().max(1.0e-9);
+                        let mb = body.particles[j].mass().max(1.0e-9);
+                        let wa = mb / (ma + mb);
+                        let wb = ma / (ma + mb);
+                        let corr = (rest - dist) * alpha;
+                        body.particles[i].pos -= dir * (corr * wa);
+                        body.particles[j].pos += dir * (corr * wb);
+                        if let Some(mu) = sc.friction {
+                            let rel = body.particles[j].vel - body.particles[i].vel;
+                            let tangent = rel - dir * rel.dot(dir);
+                            body.particles[i].vel += tangent * (mu * wa);
+                            body.particles[j].vel -= tangent * (mu * wb);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Phase 14: cross-body collision projection between every pair of live bodies
+    /// that both enable `cross_collision`, plus tangential friction.
+    pub fn apply_cross_collision(&mut self) {
+        let ids: Vec<SoftBodyId> = self
+            .bodies
+            .iter()
+            .enumerate()
+            .filter_map(|(i, b)| {
+                b.as_ref()
+                    .filter(|sb| sb.cross_collision.is_some())
+                    .map(|_| SoftBodyId(i as u32))
+            })
+            .collect();
+        for i in 0..ids.len() {
+            for j in i + 1..ids.len() {
+                let (ca, cb) = {
+                    let (a, b) = self.get2_mut(ids[i], ids[j]);
+                    let (Some(a), Some(b)) = (a, b) else {
+                        continue;
+                    };
+                    match (a.cross_collision, b.cross_collision) {
+                        (Some(ca), Some(cb)) => (ca, cb),
+                        _ => continue,
+                    }
+                };
+                let radius = ca.radius.min(cb.radius).max(1.0e-6);
+                let rest = 2.0 * radius;
+                let stiffness = ca.stiffness.min(cb.stiffness);
+                let friction = ca.friction.or(cb.friction);
+                let alpha = if stiffness <= 1.0e-9 {
+                    1.0
+                } else {
+                    1.0 / (1.0 + stiffness)
+                };
+                let (a, b) = self.get2_mut(ids[i], ids[j]);
+                let (Some(a), Some(b)) = (a, b) else {
+                    continue;
+                };
+                for _ in 0..200 {
+                    for pi in 0..a.particles.len() {
+                        if a.particles[pi].inv_mass <= 0.0 {
+                            continue;
+                        }
+                        for pj in 0..b.particles.len() {
+                            if b.particles[pj].inv_mass <= 0.0 {
+                                continue;
+                            }
+                            let d = b.particles[pj].pos - a.particles[pi].pos;
+                            let dist = d.length();
+                            if dist >= rest || dist <= 1.0e-9 {
+                                continue;
+                            }
+                            let dir = d / dist;
+                            let ma = a.particles[pi].mass().max(1.0e-9);
+                            let mb = b.particles[pj].mass().max(1.0e-9);
+                            let wa = mb / (ma + mb);
+                            let wb = ma / (ma + mb);
+                            let corr = (rest - dist) * alpha;
+                            a.particles[pi].pos -= dir * (corr * wa);
+                            b.particles[pj].pos += dir * (corr * wb);
+                            if let Some(mu) = friction {
+                                let rel = b.particles[pj].vel - a.particles[pi].vel;
+                                let tangent = rel - dir * rel.dot(dir);
+                                a.particles[pi].vel += tangent * (mu * wa);
+                                b.particles[pj].vel -= tangent * (mu * wb);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     /// Simultaneous mutable access to two distinct live bodies. Returns
     /// `(None, None)` if either id is unknown/removed or the two ids are equal.
     /// Used by the Phase 14 cross-body collision pass to project two bodies apart.
@@ -1764,5 +1980,4 @@ impl SoftBodySet {
             .map(|b| b.sleeping)
             .unwrap_or(false)
     }
-
 }

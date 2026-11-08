@@ -7435,13 +7435,14 @@ uint32_t soft_body_read_contact_force(const struct WorldHandle *world,
                                       uint32_t capacity);
 
 /**
- * Set the number of solver substeps per `soft_body_step` call for a soft body.
+ * Set the extra solver iterations applied at end-of-step sync for a soft body.
  *
- * `n >= 1` splits the frame `dt` into `n` equal slices; the active solver
- * (XPBD or MassSpring) is run once per slice, projecting constraints at a finer
- * time resolution. Stiff materials and high-compliance edges converge faster
- * and stay stable with more substeps (at `n×` the per-step CPU cost). `n == 0`
- * is rejected and leaves the previous value unchanged.
+ * Official semantics: `n` (clamped to the engine's `max_extra_substeps` cap of 4)
+ * extra constraint-projection passes are run on top of the base solver iterations
+ * at the end of each step. This is *not* a time subdivision of the frame `dt`:
+ * the frame is still integrated once. Higher `n` improves convergence of stiff /
+ * high-compliance edges at extra CPU cost. `n == 0` is rejected and leaves the
+ * previous value unchanged.
  *
  * Returns the new substep count, or 0 on null world / unknown id / invalid `n`.
  */

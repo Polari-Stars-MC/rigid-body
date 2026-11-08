@@ -18,17 +18,17 @@
 //! 子步、撕裂三准则）已经在 rapier 里融合进官方求解路径（`dynamics::soft_body::
 //! fork_extras`），这里只负责把 mps 的字段翻译成设置调用。
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::rapier::soft_data::{
     SoftBody as ForkSoftBody, SoftBodyId, SoftBodySet as ForkSoftBodySet, TearCriterion,
 };
-use rapier3d::prelude::SpringCoefficients;
 use rapier3d::math::Real;
+use rapier3d::prelude::SpringCoefficients;
 use rapier3d::prelude::{
-    CohesionParams, ColliderSet, ForkTearCriterion, ImpulseJointSet, IslandManager,
-    MultibodyJointSet, RigidBodySet, SoftBodyBuilder, SoftBodyHandle, SoftBodySet, ThermalParams,
-    Vector, ViscoelasticParams, Wind,
+    ColliderSet, ForkTearCriterion, ImpulseJointSet, IslandManager, MultibodyJointSet,
+    RigidBodySet, SoftBodyBuilder, SoftBodyHandle, SoftBodySet, ThermalParams, Vector,
+    ViscoelasticParams, Wind,
 };
 
 /// 软体求解后端。
@@ -83,6 +83,35 @@ fn topology_signature(body: &ForkSoftBody) -> u64 {
             mix(&mut h, *i as u64);
         }
     }
+    // bound_body per particle (attach/detach triggers rebuild)
+    for p in &body.particles {
+        match p.bound_body {
+            Some(hh) => {
+                let (id, genid) = hh.into_raw_parts();
+                mix(&mut h, id as u64);
+                mix(&mut h, genid as u64);
+            }
+            None => mix(&mut h, 0),
+        }
+    }
+    // self/cross collision params
+    if let Some(sc) = body.self_collision {
+        mix(&mut h, 1);
+        mix(&mut h, sc.radius.to_bits());
+        mix(&mut h, sc.stiffness.to_bits());
+    } else {
+        mix(&mut h, 0);
+    }
+    if let Some(cc) = body.cross_collision {
+        mix(&mut h, 2);
+        mix(&mut h, cc.radius.to_bits());
+        mix(&mut h, cc.stiffness.to_bits());
+    } else {
+        mix(&mut h, 0);
+    }
+    // corotated / neo-hookean flags
+    mix(&mut h, body.corotated.map(|v| v.to_bits()).unwrap_or(0));
+    mix(&mut h, body.neo_hookean.map(|v| v.to_bits()).unwrap_or(0));
     h
 }
 
@@ -150,10 +179,33 @@ fn build(
         .gravity_scale(0.0)
         .can_sleep(true);
 
+    // self-collision → official self_contacts + particle radius.
+    if let Some(sc) = body.self_collision {
+        builder = builder.self_contacts(true).particle_radius(sc.radius);
+    }
+    // corotated / neo-hookean → cell model + shape matching.
+    if body.corotated.is_some() {
+        builder = builder
+            .cell_model(rapier3d::dynamics::SoftBodyCellModel::Corotational)
+            .shape_matching(true);
+    }
+    if body.neo_hookean.is_some() {
+        builder = builder
+            .cell_model(rapier3d::dynamics::SoftBodyCellModel::NeoHookean)
+            .shape_matching(true);
+    }
+
     if body.triangles.is_empty() {
         builder = builder.no_surface_collider();
     } else {
         builder = builder.surface(body.triangles.clone());
+        // surface-collider friction from self/cross collision params.
+        if let Some(sc) = body.self_collision.or(body.cross_collision)
+            && let Some(mu) = sc.friction
+        {
+            builder = builder
+                .surface_collider(rapier3d::geometry::ColliderBuilder::default().friction(mu));
+        }
     }
 
     set.insert(builder, bodies, colliders)
@@ -179,11 +231,7 @@ fn sync_extras(sim: &mut rapier3d::prelude::SoftBody, body: &ForkSoftBody) {
         rate_coefficient: v.rate_coefficient,
     }));
     let _ = sim.set_anisotropy_axes(body.anisotropy);
-    let _ = sim.set_cohesion_glue(body.cohesion.map(|c| CohesionParams {
-        radius: c.radius,
-        stiffness: c.stiffness,
-        break_distance: c.break_distance,
-    }));
+    let _ = sim.set_cohesion_glue(None); // handled in authorized layer (apply_cohesion)
     let _ = sim.set_extra_substeps(body.substeps.max(1));
     sim.set_tear_criterion(body.tear.map(|t| match t {
         TearCriterion::Strain(threshold) => ForkTearCriterion::Strain(threshold),
@@ -224,6 +272,27 @@ pub(crate) fn prepare(
                     multibody_joints,
                 );
             }
+        }
+    }
+    // Reclaim orphan official bodies created by tears (split pieces): we do not
+    // mirror multi-body splits into authorized data, so drop them from the
+    // official set to avoid memory/behavior drift.
+    let slot_handles: HashSet<SoftBodyHandle> = slots.values().map(|s| s.handle).collect();
+    let orphans: Vec<SoftBodyHandle> = set
+        .iter()
+        .map(|(h, _)| h)
+        .filter(|h| !slot_handles.contains(h))
+        .collect();
+    for h in orphans {
+        if set.contains(h) {
+            set.remove(
+                h,
+                islands,
+                bodies,
+                colliders,
+                impulse_joints,
+                multibody_joints,
+            );
         }
     }
 
@@ -276,8 +345,6 @@ pub(crate) fn prepare(
             continue;
         };
 
-
-
         // 拓扑/外部参数：每次全量同步（都是廉价的字段赋值与 wake）。
         sync_extras(sim, body);
 
@@ -293,9 +360,65 @@ pub(crate) fn prepare(
             }
             // 绑定到刚体的粒子：官方有自己的 attachment（锚点按当前位姿算局部坐标），
             // 重建时注册一次即可。
+            // Bound particles are driven via kinematic target below, not the official
+            // two-way attachment constraint (which would drag the rigid body back).
             for i in 0..n {
-                if let Some(anchor) = body.particles[i].bound_body {
-                    sim.attach_particle(i, anchor, &*bodies);
+                if body.particles[i].bound_body.is_some() {
+                    sim.detach_particle(i);
+                }
+            }
+        }
+
+        // 皮层蒙皮（LBS）：根据当前骨骼位姿计算目标位置，缓存供 collect() 覆盖。
+        if let Some(skin) = &body.skin {
+            if body.skin_targets.len() != body.particles.len() {
+                body.skin_targets = vec![rapier3d::math::Vector::ZERO; body.particles.len()];
+            }
+            for i in 0..body.particles.len() {
+                body.skin_targets[i] = body.particles[i].pos;
+            }
+            for (pi, vs) in &skin.vertices {
+                let mut pos = rapier3d::math::Vector::ZERO;
+                for k in 0..4 {
+                    let w = vs.weight[k];
+                    if w <= 0.0 {
+                        continue;
+                    }
+                    let bi = vs.bone_idx[k] as usize;
+                    if bi >= skin.bones.len() {
+                        continue;
+                    }
+                    if let Some(rb) = bodies.get(skin.bones[bi]) {
+                        pos += w * (rb.position() * vs.local[k]);
+                    }
+                }
+                if (*pi as usize) < body.skin_targets.len() {
+                    body.skin_targets[*pi as usize] = pos;
+                }
+            }
+        }
+
+        // 绑定到刚体的 pinned 质点：官方 attach_particle 是点对点约束，无法驱动 inv_mass=0
+        // 的质点，这里每步把它们设为运动学目标，实现 fork 的刚性跟随语义。
+        // 绑定到刚体的质点：fork 语义是刚性跟随，官方 attach_particle 是点对点约束且对
+        // pinned 质点失效；这里每步直接写位姿/速度实现刚性跟随。
+        for i in 0..n {
+            if let Some(anchor) = body.particles[i].bound_body
+                && let Some(rb) = bodies.get(anchor)
+            {
+                let target = rb.position() * body.particles[i].bound_local;
+                sim.set_particle_pinned(i, true);
+                sim.set_particle_position(i, target);
+                sim.set_particle_velocity(i, rb.linvel());
+            }
+        }
+
+        // Cross-collision bodies: push the (possibly friction-damped) authorized
+        // velocities back into the solver so the damping persists across steps.
+        if body.cross_collision.is_some() {
+            for i in 0..n {
+                if body.particles[i].inv_mass > 0.0 {
+                    sim.set_particle_velocity(i, body.particles[i].vel);
                 }
             }
         }
@@ -332,12 +455,22 @@ pub(crate) fn prepare(
         }
         for (k, c) in body.distance_constraints.iter().enumerate() {
             let m = edge_mass(body, c.a, c.b);
-            let f = if c.compliance <= 1.0e-9 {
+            let f = if body.pressure.is_some() && c.compliance <= 1.0e-9 {
+                // A pressurized shell with rigid edges cannot inflate; force a soft
+                // edge frequency so the pressure force can stretch the skin.
+                0.2
+            } else if c.compliance <= 1.0e-9 {
                 RIGID_FREQUENCY
             } else {
                 1.0 / (2.0 * std::f64::consts::PI * (c.compliance * m).sqrt())
             };
             sim.set_edge_softness(base + k, Some(softness(f)));
+            let fc = if c.compression <= 1.0e-9 {
+                RIGID_FREQUENCY
+            } else {
+                1.0 / (2.0 * std::f64::consts::PI * (c.compression * m).sqrt())
+            };
+            sim.set_edge_compression_softness(base + k, Some(softness(fc)));
         }
 
         // 授权数据的 `sleeping` 直接映射到官方的 enabled 开关：官方有自己的睡眠
@@ -368,6 +501,53 @@ pub(crate) fn collect(
             body.particles[i].pos = sim.particle_position(i);
             body.particles[i].vel = sim.particle_velocity(i);
         }
+        // Apply LBS in authorized layer: override skinned particles' positions.
+        if body.skin.is_some() {
+            let nn = body.skin_targets.len().min(body.particles.len());
+            for i in 0..nn {
+                body.particles[i].pos = body.skin_targets[i];
+            }
+        }
+        // Mirror official tears: drop authorized edges/triangles that the solver
+        // removed (including those lost to a split). Particle indices are assumed
+        // to still line up for the retained piece; orphan split pieces are
+        // reclaimed in `prepare()`.
+        let surviving_edges: HashSet<(usize, usize)> = sim
+            .edges()
+            .iter()
+            .map(|e| {
+                let a = e.vertices[0] as usize;
+                let b = e.vertices[1] as usize;
+                (a.min(b), a.max(b))
+            })
+            .collect();
+        body.springs
+            .retain(|s| surviving_edges.contains(&(s.a.min(s.b), s.a.max(s.b))));
+        body.distance_constraints
+            .retain(|c| surviving_edges.contains(&(c.a.min(c.b), c.a.max(c.b))));
+        let surviving_tris: HashSet<[u32; 3]> = sim
+            .boundary()
+            .iter()
+            .map(|t| {
+                let mut tri = [t[0], t[1], t[2]];
+                tri.sort();
+                tri
+            })
+            .collect();
+        body.triangles.retain(|t| {
+            let mut tri = *t;
+            tri.sort();
+            surviving_tris.contains(&tri)
+        });
+        // plasticity: apply fork's rest-length creep on authorized data
+        if body.plasticity.is_some() {
+            body.apply_plasticity();
+        }
+        // tearing: apply fork's tear criterion on authorized data (official tearing is
+        // not reliably mirrored, so run the authorized tear pass here).
+        if body.tear.is_some() {
+            body.tear();
+        }
         // The authorized `sleeping` flag is the source of truth (set by
         // `soft_body_sleep`/`soft_body_wake`); never clear it from the mirror — a
         // disabled official body reports `is_sleeping() == false`, which would
@@ -375,6 +555,10 @@ pub(crate) fn collect(
         // Natural (energy-based) sleep only ever *sets* the flag here.
         body.sleeping = body.sleeping || sim.is_sleeping();
     }
+    // Cohesion glue is applied on authorized data (see SoftBodySet::apply_cohesion).
+    fork.apply_self_collision();
+    fork.apply_cross_collision();
+    fork.apply_cohesion();
 }
 
 /// 逐边换算用的阻尼比：接近临界阻尼，避免引入额外振荡。
