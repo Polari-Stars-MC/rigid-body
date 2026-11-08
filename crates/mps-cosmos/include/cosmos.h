@@ -17,8 +17,13 @@
 
 /**
  * Current cosmos arena layout version — increment on any layout change.
+ *
+ * 头文件里经 cbindgen `[export] rename` 导出为 **`COSMOS_ARENA_VERSION`**：
+ * 与 mps-core `rigid_body.h` 的同名宏（对端已改名 `MPS_ARENA_VERSION`）不再
+ * 冲突，宿主可同时 include 两份头而不触发宏重定义。Rust 侧常量名保持
+ * `ARENA_VERSION` 不变（mps-test 等既有引用方不受影响）。
  */
-#define ARENA_VERSION 1
+#define COSMOS_ARENA_VERSION 1
 
 /**
  * Body slot stride (must match Java side exactly).
@@ -101,6 +106,22 @@
  */
 typedef struct CosmosWorld CosmosWorld;
 
+/**
+ * C ABI 不透明 builder 句柄（对应 `cosmos.h` 里的 `CosmosRigidBodyBuilder *`）。
+ *
+ * cbindgen 以 `parse_deps = false` 运行，只能打印**本 crate 内定义**的类型名：
+ * 此前 `extern "C"` 签名直接用 rapier 的 `RigidBodyBuilder`，头文件里就会出现
+ * 没有任何 typedef 的裸 `RigidBodyBuilder *`，`cosmos.h` 无法独立编译。本类型
+ * 仿照 mps-core 的 `RigidBodyBuilderHandle`（私有 `inner` 字段 → cbindgen 只发
+ * `typedef struct CosmosRigidBodyBuilder CosmosRigidBodyBuilder;`）。
+ *
+ * `#[repr(transparent)]` 保证与 `RigidBodyBuilder` 同大小/对齐/ABI：JNI 侧
+ * （mps-jni）仍按 `Box<RigidBodyBuilder>` 分配 builder 并把裸指针当 jlong 传递，
+ * 与 ffi 侧 `Box<CosmosRigidBodyBuilder>` 的裸指针布局完全一致、可安全互转——
+ * 两条路径创建的 builder 句柄在 ABI 上仍然是同一份内存。
+ */
+typedef RigidBodyBuilder CosmosRigidBodyBuilder;
+
 
 
 #ifdef __cplusplus
@@ -111,25 +132,25 @@ extern "C" {
  * 构造一个动态刚体 builder（质量 kg、初始位置/速度）。返回 `*mut` 给调用
  * 方；后续交给 `cosmos_world_insert_body` 插入。失败（panic）返回 null。
  */
-RigidBodyBuilder *cosmos_satellite_builder(double mass,
-                                           double px,
-                                           double py,
-                                           double pz,
-                                           double vx,
-                                           double vy,
-                                           double vz,
-                                           double radius);
+CosmosRigidBodyBuilder *cosmos_satellite_builder(double mass,
+                                                 double px,
+                                                 double py,
+                                                 double pz,
+                                                 double vx,
+                                                 double vy,
+                                                 double vz,
+                                                 double radius);
 
 /**
  * 构造固定（静态）刚体 builder —— 适合做 n-body 引力源中心本体。
  */
-RigidBodyBuilder *cosmos_fixed_body_builder(double px, double py, double pz);
+CosmosRigidBodyBuilder *cosmos_fixed_body_builder(double px, double py, double pz);
 
-void cosmos_builder_set_linear_damping(RigidBodyBuilder *builder, double value);
+void cosmos_builder_set_linear_damping(CosmosRigidBodyBuilder *builder, double value);
 
-void cosmos_builder_set_angular_damping(RigidBodyBuilder *builder, double value);
+void cosmos_builder_set_angular_damping(CosmosRigidBodyBuilder *builder, double value);
 
-void cosmos_builder_set_gravity_scale(RigidBodyBuilder *builder, double value);
+void cosmos_builder_set_gravity_scale(CosmosRigidBodyBuilder *builder, double value);
 
 /**
  * **激活**平移锁定（动态刚体不再平动，仅可转动）。`RigidBodyBuilder::lock_translations`
@@ -140,13 +161,13 @@ void cosmos_builder_set_gravity_scale(RigidBodyBuilder *builder, double value);
  * 旧内存被释放、`builder` 句柄变成悬垂指针，调用方下一次 set/insert 就是
  * use-after-free（分配器恰好复用同一地址时还会「看起来正常」）。
  */
-void cosmos_builder_lock_translations(RigidBodyBuilder *builder);
+void cosmos_builder_lock_translations(CosmosRigidBodyBuilder *builder);
 
 /**
  * 显式释放一个**未插入**的 builder。插入 `cosmos_world_insert_body` 后所有权
  * 已转移，**不要**再调本函数（会 double-free）。null 是 no-op。
  */
-void cosmos_builder_destroy(RigidBodyBuilder *builder);
+void cosmos_builder_destroy(CosmosRigidBodyBuilder *builder);
 
 /**
  * 创建一个 `CosmosWorld`。
@@ -156,6 +177,8 @@ void cosmos_builder_destroy(RigidBodyBuilder *builder);
  * - `solver_iterations`、`ccd_substeps`：rapier 求解器参数；
  * - `orbit_integration`：0 = `RapierForce`（默认），1 = `Verlet`，
  *   2 = `Yoshida4`，3 = `Yoshida4Kahan`，4 = `ForestRuth8`，5 = `ForestRuth8Kahan`；
+ *   `6..=u32::MAX` 非法：返回 null（`ERR_INVALID_ARGUMENT`）——此前未识别的值
+ *   会静默落到 1 阶 `RapierForce`，调用方以为选了高阶积子实际在走半隐式欧拉；
  * - `verlet_substeps`：Verlet 路径的内部子步数（≥1，仅 `Verlet` 模式生效）；
  * - `n_body_softening_sq`：n-body 互引力软化平方项（m²），0 表示无软化。
  *
@@ -203,25 +226,34 @@ int32_t cosmos_world_add_moon(struct CosmosWorld *world,
 /**
  * 把已插入的刚体登记为 n-body 互引力质点源（给定质量 kg）。
  * `body` 是 `cosmos_world_insert_body` 返回的 packed handle。返回 1 / 0。
+ *
+ * `mass` 必须有限且为正——非法时返回 0（`ERR_INVALID_ARGUMENT`），不登记源
+ * （与 `world::add_n_body` 的拒绝语义一致）。
  */
 uint8_t cosmos_world_add_n_body(struct CosmosWorld *world, uint64_t body, double mass);
 
 /**
  * 插入 builder，返回打包的 body 句柄（0 = 失败）。builder 所有权转移。
- * 连带把质量登记为 n-body 源。
+ * 连带把质量登记为 n-body 源。`mass` 非法（非有限/非正）时不登记源，但
+ * builder 仍会被插入（返回其句柄）。
  */
 uint64_t cosmos_world_insert_body_as_gravity_source(struct CosmosWorld *world,
-                                                    RigidBodyBuilder *builder,
+                                                    CosmosRigidBodyBuilder *builder,
                                                     double mass);
 
 /**
  * 插入 builder，返回打包的 body 句柄（0 = 失败）。builder 所有权转移。
  */
-uint64_t cosmos_world_insert_body(struct CosmosWorld *world, RigidBodyBuilder *builder);
+uint64_t cosmos_world_insert_body(struct CosmosWorld *world, CosmosRigidBodyBuilder *builder);
 
 /**
  * 设置某刚体的环境扰动配置（大气阻力 + 太阳光压 + 太阳风动压 +
  * Chandrasekhar 动力学摩擦）。返回 1 / 0。
+ *
+ * 全部数值参数须为有限值（0 = 未配置的合法值）：`NaN`/`±Inf` 会经
+ * atmospheric_drag / solar_pressure / solar_wind / dynamical_friction 直接把
+ * 非有限值注进合力、污染积分态。非法 → 返回 0（`ERR_INVALID_ARGUMENT`），
+ * 不触碰扰动表。`enable_*` 是 int 开关，不参与校验。
  *
  * `sun_position` 通过 `cosmos_world_set_sun_position` 单独设置；太阳风方向
  * 复用 `sun_position → 刚体位置` 的世界方向。
@@ -248,7 +280,10 @@ uint8_t cosmos_world_set_perturbation(struct CosmosWorld *world,
  * - `-1`：`Substepped`（拆子步完成）；
  * - `-2`：`Skipped(NonFinite)`（dt 为 NaN/Inf）；
  * - `-3`：`Skipped(NonPositive)`（dt ≤ 0）；
- * - `-4`：`Skipped(TooLarge)`（dt 超过 30s 硬上限）。
+ * - `-4`：`Skipped(TooLarge)`（dt 超过 30s 硬上限）；
+ * - [`i32::MIN`]：**panic 兜底哨兵**（[`STEP_PANIC_SENTINEL`]）——不可能与
+ *   任何合法返回混淆；此时已 `set_error(ERR_INTERNAL, "internal panic")`，
+ *   宿主可用 `abiLastErrorCode` 区分。
  */
 int32_t cosmos_world_step(struct CosmosWorld *world, double dt);
 
@@ -435,6 +470,9 @@ uint8_t cosmos_world_radio_submit_signal(struct CosmosWorld *world, const double
  * 取走本轮传播结果：`out` 指向 `capacity * 4` 个 f64 缓冲，
  * 每条 = `signal_id, rx_node_id, received_power, received_frequency`（f64 位型存 id）。
  * 返回实际条数。
+ *
+ * - `capacity == 0` → 返回 0（`ERR_INVALID_ARGUMENT`），先于 out 指针校验；
+ * - `out` 为 null 且 `capacity > 0` → 返回 0（`ERR_NULL_POINTER`）。
  */
 uint32_t cosmos_world_radio_take_results(struct CosmosWorld *world, double *out, uint32_t capacity);
 

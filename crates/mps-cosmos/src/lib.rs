@@ -16,7 +16,14 @@
 // `ffi_guard`), so the safe-fn-raw-pointer lint is noise here.
 #![allow(clippy::not_unsafe_ptr_arg_deref)]
 
-pub extern crate rapier3d;
+// 不再把整个 rapier3d 暴露给 workspace 外（`mps_cosmos::rapier3d::…` 曾是
+// mps-jni 的取类型路径）；只按需 re-export 公共 API 签名里出现的值类型，
+// 供下游（mps-jni）直接 `use mps_cosmos::{RigidBodyBuilder, RigidBodyHandle, Vector}`。
+// FFI 面（cosmos.h）走的是 `bodies::CosmosRigidBodyBuilder` 不透明包装，
+// 不再出现裸 rapier 类型名。
+pub(crate) extern crate rapier3d;
+
+pub use rapier3d::prelude::{RigidBodyBuilder, RigidBodyHandle, Vector};
 
 /// H. `explicit_substep` 阶段耗时剖分（env-gated，默认零开销）。
 ///

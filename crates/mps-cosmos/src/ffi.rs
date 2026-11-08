@@ -5,9 +5,12 @@
 //! `crates/mps-cosmos/include/cosmos.h` —— 与 `mps-core` 的 `rigid_body.h`
 //! 平行、互不耦合（[CLAUDE.md]：mps-cosmos 不介入 mps-core 的 C ABI）。
 //!
-//! 每个入口都过 `ffi_guard`：panic → `set_error(ERR_INTERNAL, ...)` + 失败
-//! 哨兵（与 mps-core/`src/rapier/error.rs` 同模式）。workspace `panic = "abort"`
-//! 再兜一层，panics 不可能 unwind 进 JVM。
+//! 每个入口都过 `ffi_guard`（`catch_unwind`）：panic → `set_error(ERR_INTERNAL,
+//! ...)` + 各入口自己的失败哨兵（与 mps-core/`src/rapier/error.rs` 同模式）。
+//! workspace profile 的 `panic` 保持 **"unwind"**（根 `Cargo.toml`
+//! `[profile.release]` 明文注释：cdylib 跑在 JVM 里，`"abort"` 会让
+//! `catch_unwind` 失效、panic 直接杀死宿主进程），unwind 由 `ffi_guard` 兜住，
+//! panics 不可能穿进 JVM。
 //!
 //! ### Handle 编码
 //!
@@ -24,9 +27,9 @@ use mps_formula::error::{
     ERR_CAPACITY, ERR_INTERNAL, ERR_INVALID_ARGUMENT, ERR_NULL_POINTER, set_error,
 };
 use mps_formula::ffi::Vec3;
-use rapier3d::prelude::{RigidBodyBuilder, RigidBodyHandle, Vector};
+use rapier3d::prelude::{RigidBodyHandle, Vector};
 
-use crate::bodies::{fixed_body_builder, satellite_builder};
+use crate::bodies::{CosmosRigidBodyBuilder, fixed_body_builder, satellite_builder};
 use crate::gravity::CelestialSource;
 use crate::world::{CosmosWorld, CosmosWorldConfig, OrbitIntegration, StepResult, StepSkipReason};
 
@@ -111,7 +114,7 @@ pub extern "C" fn cosmos_satellite_builder(
     vy: f64,
     vz: f64,
     radius: f64,
-) -> *mut RigidBodyBuilder {
+) -> *mut CosmosRigidBodyBuilder {
     ffi_guard(std::ptr::null_mut(), || {
         if !finite(&[mass, px, py, pz, vx, vy, vz, radius]) || mass <= 0.0 || radius <= 0.0 {
             set_error(
@@ -120,50 +123,61 @@ pub extern "C" fn cosmos_satellite_builder(
             );
             return std::ptr::null_mut();
         }
-        Box::into_raw(Box::new(satellite_builder(
+        Box::into_raw(Box::new(CosmosRigidBodyBuilder::new(satellite_builder(
             mass,
             Vector::new(px, py, pz),
             Vector::new(vx, vy, vz),
             radius,
-        )))
+        ))))
     })
 }
 
 /// 构造固定（静态）刚体 builder —— 适合做 n-body 引力源中心本体。
 #[unsafe(no_mangle)]
-pub extern "C" fn cosmos_fixed_body_builder(px: f64, py: f64, pz: f64) -> *mut RigidBodyBuilder {
+pub extern "C" fn cosmos_fixed_body_builder(px: f64, py: f64, pz: f64) -> *mut CosmosRigidBodyBuilder {
     ffi_guard(std::ptr::null_mut(), || {
         if !finite(&[px, py, pz]) {
             set_error(ERR_INVALID_ARGUMENT, "position must be finite");
             return std::ptr::null_mut();
         }
-        Box::into_raw(Box::new(fixed_body_builder(Vector::new(px, py, pz))))
+        Box::into_raw(Box::new(CosmosRigidBodyBuilder::new(fixed_body_builder(
+            Vector::new(px, py, pz),
+        ))))
     })
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn cosmos_builder_set_linear_damping(builder: *mut RigidBodyBuilder, value: f64) {
+pub extern "C" fn cosmos_builder_set_linear_damping(
+    builder: *mut CosmosRigidBodyBuilder,
+    value: f64,
+) {
     ffi_guard((), || {
         if let Some(b) = unsafe { builder.as_mut() } {
-            b.linear_damping = value;
+            b.as_inner_mut().linear_damping = value;
         }
     });
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn cosmos_builder_set_angular_damping(builder: *mut RigidBodyBuilder, value: f64) {
+pub extern "C" fn cosmos_builder_set_angular_damping(
+    builder: *mut CosmosRigidBodyBuilder,
+    value: f64,
+) {
     ffi_guard((), || {
         if let Some(b) = unsafe { builder.as_mut() } {
-            b.angular_damping = value;
+            b.as_inner_mut().angular_damping = value;
         }
     });
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn cosmos_builder_set_gravity_scale(builder: *mut RigidBodyBuilder, value: f64) {
+pub extern "C" fn cosmos_builder_set_gravity_scale(
+    builder: *mut CosmosRigidBodyBuilder,
+    value: f64,
+) {
     ffi_guard((), || {
         if let Some(b) = unsafe { builder.as_mut() } {
-            b.gravity_scale = value;
+            b.as_inner_mut().gravity_scale = value;
         }
     });
 }
@@ -176,7 +190,7 @@ pub extern "C" fn cosmos_builder_set_gravity_scale(builder: *mut RigidBodyBuilde
 /// 旧内存被释放、`builder` 句柄变成悬垂指针，调用方下一次 set/insert 就是
 /// use-after-free（分配器恰好复用同一地址时还会「看起来正常」）。
 #[unsafe(no_mangle)]
-pub extern "C" fn cosmos_builder_lock_translations(builder: *mut RigidBodyBuilder) {
+pub extern "C" fn cosmos_builder_lock_translations(builder: *mut CosmosRigidBodyBuilder) {
     ffi_guard((), || {
         let Some(b) = (unsafe { builder.as_mut() }) else {
             set_error(ERR_NULL_POINTER, "builder is null");
@@ -186,8 +200,8 @@ pub extern "C" fn cosmos_builder_lock_translations(builder: *mut RigidBodyBuilde
         // moves the value out and `write` puts the transformed value back into
         // the same allocation, so no pointer handed out earlier is invalidated.
         unsafe {
-            let owned = std::ptr::read(b);
-            std::ptr::write(b, owned.lock_translations());
+            let owned = std::ptr::read(b).into_inner();
+            std::ptr::write(b, CosmosRigidBodyBuilder::new(owned.lock_translations()));
         }
     });
 }
@@ -195,7 +209,7 @@ pub extern "C" fn cosmos_builder_lock_translations(builder: *mut RigidBodyBuilde
 /// 显式释放一个**未插入**的 builder。插入 `cosmos_world_insert_body` 后所有权
 /// 已转移，**不要**再调本函数（会 double-free）。null 是 no-op。
 #[unsafe(no_mangle)]
-pub extern "C" fn cosmos_builder_destroy(builder: *mut RigidBodyBuilder) {
+pub extern "C" fn cosmos_builder_destroy(builder: *mut CosmosRigidBodyBuilder) {
     ffi_guard((), || {
         if !builder.is_null() {
             drop(unsafe { Box::from_raw(builder) });
@@ -214,6 +228,8 @@ pub extern "C" fn cosmos_builder_destroy(builder: *mut RigidBodyBuilder) {
 /// - `solver_iterations`、`ccd_substeps`：rapier 求解器参数；
 /// - `orbit_integration`：0 = `RapierForce`（默认），1 = `Verlet`，
 ///   2 = `Yoshida4`，3 = `Yoshida4Kahan`，4 = `ForestRuth8`，5 = `ForestRuth8Kahan`；
+///   `6..=u32::MAX` 非法：返回 null（`ERR_INVALID_ARGUMENT`）——此前未识别的值
+///   会静默落到 1 阶 `RapierForce`，调用方以为选了高阶积子实际在走半隐式欧拉；
 /// - `verlet_substeps`：Verlet 路径的内部子步数（≥1，仅 `Verlet` 模式生效）；
 /// - `n_body_softening_sq`：n-body 互引力软化平方项（m²），0 表示无软化。
 ///
@@ -238,12 +254,17 @@ pub extern "C" fn cosmos_world_create(
             return std::ptr::null_mut();
         }
         let orbit_integration = match orbit_integration {
+            0 => OrbitIntegration::RapierForce,
             1 => OrbitIntegration::Verlet,
             2 => OrbitIntegration::Yoshida4,
             3 => OrbitIntegration::Yoshida4Kahan,
             4 => OrbitIntegration::ForestRuth8,
             5 => OrbitIntegration::ForestRuth8Kahan,
-            _ => OrbitIntegration::RapierForce,
+            // 6..=u32::MAX 显式拒绝而不是静默落回 RapierForce（见上方文档）。
+            _ => {
+                set_error(ERR_INVALID_ARGUMENT, "orbit_integration must be 0..=5");
+                return std::ptr::null_mut();
+            }
         };
         let cfg = CosmosWorldConfig {
             gravity: Vector::ZERO,
@@ -337,6 +358,9 @@ pub extern "C" fn cosmos_world_add_moon(world: *mut CosmosWorld, moon_index: i32
 
 /// 把已插入的刚体登记为 n-body 互引力质点源（给定质量 kg）。
 /// `body` 是 `cosmos_world_insert_body` 返回的 packed handle。返回 1 / 0。
+///
+/// `mass` 必须有限且为正——非法时返回 0（`ERR_INVALID_ARGUMENT`），不登记源
+/// （与 `world::add_n_body` 的拒绝语义一致）。
 #[unsafe(no_mangle)]
 pub extern "C" fn cosmos_world_add_n_body(world: *mut CosmosWorld, body: u64, mass: f64) -> u8 {
     ffi_guard(0, || {
@@ -344,17 +368,22 @@ pub extern "C" fn cosmos_world_add_n_body(world: *mut CosmosWorld, body: u64, ma
             Some(t) => t,
             None => return 0,
         };
+        if !mass.is_finite() || mass <= 0.0 {
+            set_error(ERR_INVALID_ARGUMENT, "n-body mass must be finite and positive");
+            return 0;
+        }
         w.add_n_body(unpack_handle(body), mass);
         1
     })
 }
 
 /// 插入 builder，返回打包的 body 句柄（0 = 失败）。builder 所有权转移。
-/// 连带把质量登记为 n-body 源。
+/// 连带把质量登记为 n-body 源。`mass` 非法（非有限/非正）时不登记源，但
+/// builder 仍会被插入（返回其句柄）。
 #[unsafe(no_mangle)]
 pub extern "C" fn cosmos_world_insert_body_as_gravity_source(
     world: *mut CosmosWorld,
-    builder: *mut RigidBodyBuilder,
+    builder: *mut CosmosRigidBodyBuilder,
     mass: f64,
 ) -> u64 {
     ffi_guard(0, || {
@@ -365,7 +394,7 @@ pub extern "C" fn cosmos_world_insert_body_as_gravity_source(
         if builder.is_null() {
             return 0;
         }
-        let b = *unsafe { Box::from_raw(builder) };
+        let b = unsafe { Box::from_raw(builder) }.into_inner();
         pack_handle(w.insert_body_as_gravity_source(b, mass))
     })
 }
@@ -374,7 +403,7 @@ pub extern "C" fn cosmos_world_insert_body_as_gravity_source(
 #[unsafe(no_mangle)]
 pub extern "C" fn cosmos_world_insert_body(
     world: *mut CosmosWorld,
-    builder: *mut RigidBodyBuilder,
+    builder: *mut CosmosRigidBodyBuilder,
 ) -> u64 {
     ffi_guard(0, || {
         let w = match unsafe { world.as_mut() } {
@@ -384,13 +413,18 @@ pub extern "C" fn cosmos_world_insert_body(
         if builder.is_null() {
             return 0;
         }
-        let b = *unsafe { Box::from_raw(builder) };
+        let b = unsafe { Box::from_raw(builder) }.into_inner();
         pack_handle(w.insert_body(b))
     })
 }
 
 /// 设置某刚体的环境扰动配置（大气阻力 + 太阳光压 + 太阳风动压 +
 /// Chandrasekhar 动力学摩擦）。返回 1 / 0。
+///
+/// 全部数值参数须为有限值（0 = 未配置的合法值）：`NaN`/`±Inf` 会经
+/// atmospheric_drag / solar_pressure / solar_wind / dynamical_friction 直接把
+/// 非有限值注进合力、污染积分态。非法 → 返回 0（`ERR_INVALID_ARGUMENT`），
+/// 不触碰扰动表。`enable_*` 是 int 开关，不参与校验。
 ///
 /// `sun_position` 通过 `cosmos_world_set_sun_position` 单独设置；太阳风方向
 /// 复用 `sun_position → 刚体位置` 的世界方向。
@@ -417,6 +451,20 @@ pub extern "C" fn cosmos_world_set_perturbation(
             Some(t) => t,
             None => return 0,
         };
+        if !finite(&[
+            drag_coefficient,
+            area,
+            reflectivity,
+            optical_area,
+            solar_wind_proton_density,
+            solar_wind_speed,
+            solar_wind_area,
+            friction_background_density,
+            friction_coulomb_log,
+        ]) {
+            set_error(ERR_INVALID_ARGUMENT, "perturbation parameters must be finite");
+            return 0;
+        }
         w.set_perturbation(
             unpack_handle(body),
             crate::world::PerturbationConfig {
@@ -444,15 +492,24 @@ pub extern "C" fn cosmos_world_set_perturbation(
     })
 }
 
+/// `ffi_guard` 的 panic 兜底哨兵：`i32::MIN` 不可能由任何合法 `StepResult`
+/// 映射产生（合法返回集为 `>0`、`-1`、`-2`、`-3`、`-4`，见
+/// [`cosmos_world_step`] 的文档）。旧实现复用 `-2`（`Skipped(NonFinite)`），
+/// panic 会被 ABI 解码成「dt 非有限」被宿主静默吞掉。
+const STEP_PANIC_SENTINEL: i32 = i32::MIN;
+
 /// 推进一步，返回一个 `int` 编码的 `StepResult`：
 /// - `>0`：`Stepped(n)` —— 实际推进的秒数 ×1000；
 /// - `-1`：`Substepped`（拆子步完成）；
 /// - `-2`：`Skipped(NonFinite)`（dt 为 NaN/Inf）；
 /// - `-3`：`Skipped(NonPositive)`（dt ≤ 0）；
-/// - `-4`：`Skipped(TooLarge)`（dt 超过 30s 硬上限）。
+/// - `-4`：`Skipped(TooLarge)`（dt 超过 30s 硬上限）；
+/// - [`i32::MIN`]：**panic 兜底哨兵**（[`STEP_PANIC_SENTINEL`]）——不可能与
+///   任何合法返回混淆；此时已 `set_error(ERR_INTERNAL, "internal panic")`，
+///   宿主可用 `abiLastErrorCode` 区分。
 #[unsafe(no_mangle)]
 pub extern "C" fn cosmos_world_step(world: *mut CosmosWorld, dt: f64) -> i32 {
-    ffi_guard(-2, || {
+    ffi_guard(STEP_PANIC_SENTINEL, || {
         let w = match unsafe { world.as_mut() } {
             Some(t) => t,
             None => return -2,
@@ -890,6 +947,12 @@ pub extern "C" fn cosmos_world_radio_register_node(
             return 0;
         };
         let v = unsafe { std::slice::from_raw_parts(values, len) };
+        // 发射功率必须有限：NaN/Inf 的 power 进不了传播公式（本字段虽不直接
+        // 参与链路预算，但非法值代表调用方状态已坏，统一拒绝）。
+        if !v[11].is_finite() {
+            set_error(ERR_INVALID_ARGUMENT, "node power must be finite");
+            return 0;
+        }
         w.radio_register_node(crate::radio::RadioNode {
             id: v[0] as u64,
             pos: Vector::new(v[1], v[2], v[3]),
@@ -942,6 +1005,12 @@ pub extern "C" fn cosmos_world_radio_submit_signal(
             return 0;
         };
         let v = unsafe { std::slice::from_raw_parts(values, len) };
+        // 信号能量必须有限：NaN/Inf 的 energy 会沿 `energy · dist_att · att ·
+        // rx_gain` 直接污染接收功率（NaN 结果或把噪声误判成可收包）。
+        if !v[13].is_finite() {
+            set_error(ERR_INVALID_ARGUMENT, "signal energy must be finite");
+            return 0;
+        }
         w.radio_submit_signal(crate::radio::ActiveSignal {
             id: v[0] as u64,
             tx_node_id: v[1] as u64,
@@ -964,6 +1033,9 @@ pub extern "C" fn cosmos_world_radio_submit_signal(
 /// 取走本轮传播结果：`out` 指向 `capacity * 4` 个 f64 缓冲，
 /// 每条 = `signal_id, rx_node_id, received_power, received_frequency`（f64 位型存 id）。
 /// 返回实际条数。
+///
+/// - `capacity == 0` → 返回 0（`ERR_INVALID_ARGUMENT`），先于 out 指针校验；
+/// - `out` 为 null 且 `capacity > 0` → 返回 0（`ERR_NULL_POINTER`）。
 #[unsafe(no_mangle)]
 pub extern "C" fn cosmos_world_radio_take_results(
     world: *mut CosmosWorld,
@@ -975,10 +1047,14 @@ pub extern "C" fn cosmos_world_radio_take_results(
             set_error(ERR_NULL_POINTER, "cosmos world is null");
             return 0;
         };
-        if buffer_len(out, capacity as usize, 4).is_none() {
+        // capacity == 0 先于 out 指针校验：0 容量不需要任何缓冲，报
+        // `ERR_INVALID_ARGUMENT` 而不是把「调用方故意传 null + 0」误判成
+        // `ERR_NULL_POINTER`。null out + **非 0** 容量仍是 `ERR_NULL_POINTER`。
+        if capacity == 0 {
+            set_error(ERR_INVALID_ARGUMENT, "capacity is zero");
             return 0;
         }
-        if capacity == 0 {
+        if buffer_len(out, capacity as usize, 4).is_none() {
             return 0;
         }
         let results = w.radio_take_results();

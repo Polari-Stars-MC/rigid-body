@@ -437,6 +437,11 @@ pub struct CosmosWorld {
 
 /// 一次 `step` 的诊断结果。调用方原本只能靠 `step` 的静默 return 猜
 /// "为什么没推进"，现在能直接判。
+///
+/// FFI 侧（`ffi::cosmos_world_step`）把本枚举压成一个 `i32`：`>0` = 推进毫秒数，
+/// `-1` = 子步完成，`-2/-3/-4` = 三种 `Skipped`。**panic 兜底哨兵是 `i32::MIN`**
+/// （`ffi::STEP_PANIC_SENTINEL`）——它不可能与任何合法编码混淆（旧实现复用
+/// `-2`，panic 会被 ABI 解码成 `Skipped(NonFinite)` 静默吞掉）。
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum StepResult {
     /// 正常推进了 `dt` 秒（RapierForce 路径下就是入参 dt；Verlet 路径下
@@ -667,6 +672,20 @@ impl CosmosWorld {
         let idx = &self.arena_idx_map;
 
         for (cmd_type, body_index, a0, a1, a2) in commands {
+            // 命令环是跨进程写入的不可信输入：payload 一律做有限性校验，按命令
+            // 实际消费的字段判定（0..=8 消费 a0..a2；9..=11 只消费 a0；
+            // WakeUp/Sleep(5/6) 不消费 payload，未知类型本就忽略）。非有限的力 /
+            // 速度 / 位姿 / 阻尼一旦注入（add_force / set_linvel / set_position / …）
+            // 会把 NaN/Inf 永久写进积分态且无法恢复，故整条命令丢弃。命令环 header
+            // 没有「丢弃计数」字段（布局冻结），与未知命令类型一样静默丢弃。
+            let args_finite = match cmd_type {
+                0..=8 => a0.is_finite() && a1.is_finite() && a2.is_finite(),
+                9..=11 => a0.is_finite(),
+                _ => true,
+            };
+            if !args_finite {
+                continue;
+            }
             let h = match idx.get(body_index as usize) {
                 Some(&h) => h,
                 None => continue,
@@ -808,9 +827,17 @@ impl CosmosWorld {
     /// 远场/近场均按 `a = G·M·r̂ / r²` 算，与历史行为完全一致。若刚体已插入，
     /// 也可直接调 [`Self::insert_body_as_gravity_source`]。
     ///
+    /// `mass` 必须**有限且为正**：`NaN` / `±Inf` / 非正质量会得到非法 `gm`，
+    /// 进而把非有限加速度注入 n-body 互引力、污染整条积分链。非法质量被
+    /// **静默拒绝**（本方法不写线程局部错误槽；FFI 边界 `ffi::cosmos_world_add_n_body`
+    /// 负责 `set_error(ERR_INVALID_ARGUMENT)` 并返回 0）。
+    ///
     /// 不规则分布（非球星体、土豆星、双瓣小行星）请用 [`Self::add_n_body_irregular`]
     /// ——它带一组离散质量点来表达延展/非对流球对称的质量分布。
     pub fn add_n_body(&mut self, handle: RigidBodyHandle, mass: f64) {
+        if !mass.is_finite() || mass <= 0.0 {
+            return;
+        }
         let gm = gm_from_mass(mass);
         self.n_body_sources.push(NBodySource::monopole(handle, gm));
     }
@@ -844,7 +871,15 @@ impl CosmosWorld {
     }
 
     /// 设置某刚体的环境扰动配置。
+    ///
+    /// 句柄须指向本世界**已存在**的刚体（与本文件其余 API 一致）；无效句柄
+    /// （伪造 / 已移除）直接返回、不做任何修改——此前实现会按未校验的槽 id
+    /// `resize(idx + 1)` 扩容 `perturbations`，伪造 u64（槽 id ~2³²）可触发
+    /// 数百 GB 的分配（P1）。
     pub fn set_perturbation(&mut self, handle: RigidBodyHandle, cfg: PerturbationConfig) {
+        if self.bodies.get(handle).is_none() {
+            return;
+        }
         let idx = handle.into_raw_parts().0 as usize;
         if idx >= self.perturbations.len() {
             self.perturbations.resize(idx + 1, None);
@@ -1450,6 +1485,13 @@ impl CosmosWorld {
         // 先确保 `kahan_state` 足够长且本 task 槽已初始化，再把累加态拷出到
         // `self.kahan_src_buf`（跨子步复用缓冲，纯 Copy），供并行 advance 使用。
         // 复用而非每子步新建：稳态零堆分配。
+        //
+        // 索引约定：`kahan_src_buf` 按 **task 序号**（`scratch_tasks` 的下标）
+        // 填充/读取——`scratch_tasks` 只含动态体，而 rapier 槽 id（`into_raw_parts().0`）
+        // 含 fixed 体留下的空洞，二者不可混用。此前并行 advance 用槽 id 索引本
+        // 缓冲，fixed 体存在时会读到别的体的 Kahan 累加态（数值错误），槽 id
+        // ≥ n_tasks 时直接越界 panic（P1 回归，见 mps-test `cosmos/world.rs`
+        // `kahan_src_buf_is_indexed_by_task_position_with_fixed_bodies`）。
         self.kahan_src_buf.clear();
         self.kahan_src_buf.reserve(n_tasks);
         for &(h, p, v, _m, _pt) in &self.scratch_tasks {
@@ -1479,7 +1521,12 @@ impl CosmosWorld {
                 self.scratch_tasks
                     .par_iter()
                     .with_min_len(16)
-                    .map(|&(h, pos, vel, mass, perturb)| {
+                    // 按 task 序号枚举：`kahan_src_buf` 与 `scratch_tasks` 同序
+                    // （见上方填充段），故第 i 个 task 读 `kahan_src_buf[i]`。
+                    // 全动态稠密 id 时 task 序号 == rapier 槽 id，与旧行为
+                    // 逐位一致；有 fixed 体/空洞时槽 id 不再是合法下标。
+                    .enumerate()
+                    .map(|(i, &(h, pos, vel, mass, perturb))| {
                         let a0 = crate::integrator::total_acceleration(
                             pos,
                             vel,
@@ -1500,13 +1547,12 @@ impl CosmosWorld {
                             );
                             // Kahan 推进纯函数：用拷贝出来的累加态，跨步补偿不重置，
                             // 与串行 `explicit_highorder_kahan_step` 逐位一致。
-                            let kaho = self.kahan_src_buf[h.into_raw_parts().0 as usize].map(
-                                |(kp, kv)| {
-                                    crate::integrator::advance_highorder_kahan(
-                                        mode, pos, vel, kp, kv, mass, h, perturb, &ctx, dt,
-                                    )
-                                },
-                            );
+                            // 下标用 task 序号 i（不是槽 id）：`kahan_src_buf[i]`。
+                            let kaho = self.kahan_src_buf[i].map(|(kp, kv)| {
+                                crate::integrator::advance_highorder_kahan(
+                                    mode, pos, vel, kp, kv, mass, h, perturb, &ctx, dt,
+                                )
+                            });
                             (Some(ho), kaho)
                         };
                         (a0, ho, kaho)

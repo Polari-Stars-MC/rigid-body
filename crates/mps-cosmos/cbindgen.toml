@@ -12,3 +12,8 @@ parse_deps = false
 include = [
   "Vec3",
 ]
+# `ARENA_VERSION` 与 mps-core `rigid_body.h` 的同名宏冲突（两份头被同一宿主
+# include 时宏重定义，取值取决于包含顺序）。cosmos 侧在头文件里改名为
+# `COSMOS_ARENA_VERSION`；Rust 侧常量名保持 `ARENA_VERSION` 不变（mps-test
+# 等既有引用方不受影响）。
+rename = { "ARENA_VERSION" = "COSMOS_ARENA_VERSION" }

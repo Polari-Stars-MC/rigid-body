@@ -59,16 +59,21 @@ pub fn eccentricity_vector(position: Vector, velocity: Vector, gm: f64) -> Vecto
 ///
 /// 其中 `P_out = 2π·sqrt(a_out³ / (G·M3))` 为第三体绕内双星质心的周期
 /// （vis-viva 周期）。输入：内体半长轴 `a_in`、外体半长轴 `a_out`、外体离心率
-/// `e_out`、内主星质量 `M1`、第三体质量 `M3`。任一参数非法返回 0。
+/// `e_out`（须 ∈ [0, 1)）、内主星质量 `M1`（须有限且为正）、第三体质量 `M3`。
+/// 任一参数非法返回 0（文档化的失败值）。
 /// 只读诊断，不改积分。
 #[inline]
 pub fn kozai_period(a_in: f64, a_out: f64, e_out: f64, m_primary: f64, m_tertiary: f64) -> f64 {
     if a_in <= 0.0
         || a_out <= 0.0
+        || m_primary <= 0.0
         || m_tertiary <= 0.0
         || !a_in.is_finite()
         || !a_out.is_finite()
+        || !m_primary.is_finite()
         || !m_tertiary.is_finite()
+        || !e_out.is_finite()
+        || !(0.0..1.0).contains(&e_out)
     {
         return 0.0;
     }

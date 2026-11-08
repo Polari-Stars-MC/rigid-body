@@ -40,6 +40,11 @@ use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 pub const ARENA_MAGIC: u64 = 0x434F534D_4152454E;
 
 /// Current cosmos arena layout version — increment on any layout change.
+///
+/// 头文件里经 cbindgen `[export] rename` 导出为 **`COSMOS_ARENA_VERSION`**：
+/// 与 mps-core `rigid_body.h` 的同名宏（对端已改名 `MPS_ARENA_VERSION`）不再
+/// 冲突，宿主可同时 include 两份头而不触发宏重定义。Rust 侧常量名保持
+/// `ARENA_VERSION` 不变（mps-test 等既有引用方不受影响）。
 pub const ARENA_VERSION: u32 = 1;
 
 /// Body slot stride (must match Java side exactly).

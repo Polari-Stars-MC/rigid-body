@@ -7,6 +7,47 @@
 
 use rapier3d::prelude::{MassProperties, RigidBodyBuilder, Vector};
 
+/// C ABI 不透明 builder 句柄（对应 `cosmos.h` 里的 `CosmosRigidBodyBuilder *`）。
+///
+/// cbindgen 以 `parse_deps = false` 运行，只能打印**本 crate 内定义**的类型名：
+/// 此前 `extern "C"` 签名直接用 rapier 的 `RigidBodyBuilder`，头文件里就会出现
+/// 没有任何 typedef 的裸 `RigidBodyBuilder *`，`cosmos.h` 无法独立编译。本类型
+/// 仿照 mps-core 的 `RigidBodyBuilderHandle`（私有 `inner` 字段 → cbindgen 只发
+/// `typedef struct CosmosRigidBodyBuilder CosmosRigidBodyBuilder;`）。
+///
+/// `#[repr(transparent)]` 保证与 `RigidBodyBuilder` 同大小/对齐/ABI：JNI 侧
+/// （mps-jni）仍按 `Box<RigidBodyBuilder>` 分配 builder 并把裸指针当 jlong 传递，
+/// 与 ffi 侧 `Box<CosmosRigidBodyBuilder>` 的裸指针布局完全一致、可安全互转——
+/// 两条路径创建的 builder 句柄在 ABI 上仍然是同一份内存。
+#[repr(transparent)]
+pub struct CosmosRigidBodyBuilder {
+    inner: RigidBodyBuilder,
+}
+
+impl CosmosRigidBodyBuilder {
+    pub fn new(inner: RigidBodyBuilder) -> Self {
+        Self { inner }
+    }
+
+    pub fn as_inner(&self) -> &RigidBodyBuilder {
+        &self.inner
+    }
+
+    pub fn as_inner_mut(&mut self) -> &mut RigidBodyBuilder {
+        &mut self.inner
+    }
+
+    pub fn into_inner(self) -> RigidBodyBuilder {
+        self.inner
+    }
+}
+
+impl std::fmt::Debug for CosmosRigidBodyBuilder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CosmosRigidBodyBuilder").finish_non_exhaustive()
+    }
+}
+
 /// 构造一个动态刚体 builder，给定质量（kg）、初始位置与速度（SI 单位）。
 ///
 /// 惯性张量设为均匀球体 `I = 2/5 · m · r²`，其中 `r` 由 `radius` 给出
