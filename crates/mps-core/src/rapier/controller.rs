@@ -1,4 +1,4 @@
-use rapier3d::control::{
+﻿use rapier3d::control::{
     CharacterAutostep, CharacterCollision as RapierCharacterCollision, CharacterLength,
     KinematicCharacterController,
 };
@@ -7,9 +7,9 @@ use crate::rapier::error::{
     ERR_INVALID_ARGUMENT, ERR_NOT_FOUND, ERR_NULL_POINTER, ffi_guard, set_error,
 };
 use crate::rapier::ffi::{
-    Bool, CharacterCollision as FfiCharacterCollision, CharacterControllerHandle,
-    EffectiveCharacterMovement, Quat, ShapeDesc, Vec3, WorldHandle, pack_collider_handle,
-    quat_finite, shape_desc_valid, shape_from_desc, vec3_finite, vec3_from_rapier, vec3_to_rapier,
+    Bool, CharacterCollision, CharacterControllerHandle, EffectiveCharacterMovement, Quat,
+    ShapeDesc, Vec3, WorldHandle, pack_collider_handle, quat_finite, shape_desc_valid,
+    shape_from_desc, vec3_finite, vec3_from_rapier, vec3_to_rapier,
 };
 use crate::rapier::terrain_gravity::terrain_gravity_acceleration;
 
@@ -257,7 +257,7 @@ pub extern "C" fn character_controller_move_shape(
             set_error(ERR_NULL_POINTER, "world is null");
             return EffectiveCharacterMovement::default();
         };
-        // move_shape 会改世界内刚体状态，需要写锁与查询互斥
+        // move_shape 浼氭敼涓栫晫鍐呭垰浣撶姸鎬侊紝闇€瑕佸啓閿佷笌鏌ヨ浜掓枼
         let _query_lock = world.inner.query_lock.write();
         let Some(controller) = (unsafe { controller.as_mut() }) else {
             set_error(ERR_NULL_POINTER, "character controller is null");
@@ -325,18 +325,18 @@ pub extern "C" fn character_controller_collision_count(
 pub extern "C" fn character_controller_get_collision(
     controller: *const CharacterControllerHandle,
     index: u32,
-) -> FfiCharacterCollision {
-    ffi_guard(FfiCharacterCollision::default(), || {
+) -> CharacterCollision {
+    ffi_guard(CharacterCollision::default(), || {
         let Some(controller) = (unsafe { controller.as_ref() }) else {
             set_error(ERR_NULL_POINTER, "character controller is null");
-            return FfiCharacterCollision::default();
+            return CharacterCollision::default();
         };
         let Some(collision) = controller.inner.collisions.get(index as usize) else {
             set_error(ERR_NOT_FOUND, "collision index out of range");
-            return FfiCharacterCollision::default();
+            return CharacterCollision::default();
         };
 
-        FfiCharacterCollision {
+        CharacterCollision {
             collider: pack_collider_handle(collision.handle),
             character_translation: vec3_from_rapier(collision.character_pos.translation),
             translation_applied: vec3_from_rapier(collision.translation_applied),
@@ -412,7 +412,7 @@ pub extern "C" fn character_controller_solve_impulses(
 /// Like [`character_controller_move_shape`] but additionally samples the world's
 /// registered terrain gravity (polyhedron / DEM / lunar-mascon) at the character's
 /// current `translation` and folds the resulting free-fall displacement
-/// (`½·a·dt²`, directed along the local terrain-gravity acceleration `a`) into the
+/// (`陆路a路dt虏`, directed along the local terrain-gravity acceleration `a`) into the
 /// desired translation.  This lets a kinematic character fall toward and stand on an
 /// irregular small-body surface instead of floating.  When no terrain-gravity law is
 /// registered the call is identical to `character_controller_move_shape`.

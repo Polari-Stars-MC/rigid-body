@@ -33,7 +33,12 @@ use mps_core::rapier::{
     spaceflight as sf, thermo as th, tire_model as tm, vehicle as vc, volcano as vol, voxel as vx,
     world as wo,
 };
-use mps_core::rapier3d::prelude::{Collider as CB, RigidBody as RB};
+// `ColliderMemHandle` (not rapier's `Collider`) is the opaque built-collider
+// type the FFI surface uses — `world_insert_collider` / `collider_destroy_raw` /
+// `collider_builder_build` take/return `*mut ColliderMemHandle`.
+use mps_core::rapier::ffi::ColliderMemHandle as CB;
+// Same for the built rigid body: `*mut RigidBodyMemHandle`.
+use mps_core::rapier::ffi::RigidBodyMemHandle as RB;
 use mps_ffm as abi;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 

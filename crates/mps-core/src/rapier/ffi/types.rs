@@ -38,6 +38,35 @@ pub struct RigidBodyBuilderHandle {
     pub(crate) inner: rapier3d::prelude::RigidBodyBuilder,
 }
 
+/// Opaque FFI wrapper for a **built** collider — the pointer returned by
+/// `collider_builder_build` / `world_copy_collider` and consumed by
+/// `world_insert_collider*` / `collider_destroy_raw`.
+///
+/// Keeps the Rapier `Collider` type name out of `rigid_body.h` so the header
+/// stays self-contained C (same pattern as `RigidBodyBuilderHandle` /
+/// `ColliderBuilderHandle`): cbindgen only emits
+/// `typedef struct ColliderMemHandle ColliderMemHandle;`. A single-field repr(Rust)
+/// struct has the same size/alignment as the wrapped collider, so boxing this
+/// is layout-equivalent to boxing the `rapier3d::prelude::Collider` directly.
+pub struct ColliderMemHandle {
+    pub(crate) inner: rapier3d::prelude::Collider,
+}
+
+/// Opaque FFI wrapper for a **built** rigid body — the pointer returned by
+/// `rigid_body_builder_build` / `world_copy_rigid_body` and consumed by
+/// `world_insert_rigid_body` / `rigid_body_destroy_raw`.
+///
+/// Keeps the Rapier `RigidBody` type name out of `rigid_body.h` so the header
+/// stays self-contained C. Named `RigidBodyMemHandle` (not `RigidBodyHandle`,
+/// which is Rapier's index handle imported all over this crate) and follows
+/// the `memory_handle` parameter name used by the FFI docs. A single-field
+/// repr(Rust) struct has the same size/alignment as the wrapped body, so
+/// boxing this is layout-equivalent to boxing the `rapier3d::dynamics::RigidBody`
+/// directly.
+pub struct RigidBodyMemHandle {
+    pub(crate) inner: rapier3d::dynamics::RigidBody,
+}
+
 pub struct ColliderBuilderHandle {
     pub(crate) inner: rapier3d::prelude::ColliderBuilder,
     /// Retained voxel source grid + options when this builder was created from

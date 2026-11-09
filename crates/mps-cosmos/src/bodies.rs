@@ -9,17 +9,20 @@ use rapier3d::prelude::{MassProperties, RigidBodyBuilder, Vector};
 
 /// C ABI 不透明 builder 句柄（对应 `cosmos.h` 里的 `CosmosRigidBodyBuilder *`）。
 ///
-/// cbindgen 以 `parse_deps = false` 运行，只能打印**本 crate 内定义**的类型名：
-/// 此前 `extern "C"` 签名直接用 rapier 的 `RigidBodyBuilder`，头文件里就会出现
-/// 没有任何 typedef 的裸 `RigidBodyBuilder *`，`cosmos.h` 无法独立编译。本类型
-/// 仿照 mps-core 的 `RigidBodyBuilderHandle`（私有 `inner` 字段 → cbindgen 只发
+/// cbindgen 以 `parse_deps = true`（include `mps-formula`）运行，只为**本 crate
+/// 内定义**的函数生成声明：此前 `extern "C"` 签名直接用 rapier 的
+/// `RigidBodyBuilder`，头文件里就会出现没有任何 typedef 的裸 `RigidBodyBuilder *`，
+/// `cosmos.h` 无法独立编译。本类型仿照 mps-core 的 `RigidBodyBuilderHandle`
+/// （无 `repr` 属性 + 私有 `inner` 字段 → cbindgen 只发
 /// `typedef struct CosmosRigidBodyBuilder CosmosRigidBodyBuilder;`）。
 ///
-/// `#[repr(transparent)]` 保证与 `RigidBodyBuilder` 同大小/对齐/ABI：JNI 侧
-/// （mps-jni）仍按 `Box<RigidBodyBuilder>` 分配 builder 并把裸指针当 jlong 传递，
-/// 与 ffi 侧 `Box<CosmosRigidBodyBuilder>` 的裸指针布局完全一致、可安全互转——
-/// 两条路径创建的 builder 句柄在 ABI 上仍然是同一份内存。
-#[repr(transparent)]
+/// 不加 `#[repr(transparent)]`（否则 cbindgen 会穿透单字段结构，把头文件里的
+/// typedef 发成指向未定义 `RigidBodyBuilder` 的别名，`cosmos.h` 又不能独立
+/// 编译）。单字段 repr(Rust) 结构与字段本身同大小/对齐（与 mps-core 的
+/// `RigidBodyBuilderHandle` 同一先例）：JNI 侧（mps-jni）仍按
+/// `Box<RigidBodyBuilder>` 分配 builder 并把裸指针当 jlong 传递，与 ffi 侧
+/// `Box<CosmosRigidBodyBuilder>` 的裸指针布局一致、可安全互转——两条路径
+/// 创建的 builder 句柄在 ABI 上仍然是同一份内存。
 pub struct CosmosRigidBodyBuilder {
     inner: RigidBodyBuilder,
 }

@@ -6,7 +6,12 @@ documentation = true
 include_guard = "COSMOS_H"
 
 [parse]
-parse_deps = false
+# Parse `mps-formula` so shared FFI value types (`Vec3`, ...) get their
+# `typedef struct` definitions emitted into `cosmos.h` — with `parse_deps =
+# false` cbindgen only prints the type *names* in signatures, leaving the
+# header not self-contained/compilable.
+parse_deps = true
+include = ["mps-formula"]
 
 [export]
 include = [

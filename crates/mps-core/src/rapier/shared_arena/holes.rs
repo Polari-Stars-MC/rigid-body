@@ -57,19 +57,21 @@ impl super::SharedPhysicsArena {
             let current_gen = gen_ptr.load(Ordering::Relaxed);
             gen_ptr.store(current_gen.wrapping_add(1) | 1, Ordering::Release);
 
-            // Write data
-            (slot.add(8) as *mut f64).write_unaligned(pos_x);
-            (slot.add(16) as *mut f64).write_unaligned(pos_y);
-            (slot.add(24) as *mut f64).write_unaligned(pos_z);
-            (slot.add(32) as *mut f64).write_unaligned(vel_x);
-            (slot.add(40) as *mut f64).write_unaligned(vel_y);
-            (slot.add(48) as *mut f64).write_unaligned(vel_z);
-            (slot.add(56) as *mut f64).write_unaligned(angvel_x);
-            (slot.add(64) as *mut f64).write_unaligned(angvel_y);
-            (slot.add(72) as *mut f64).write_unaligned(angvel_z);
-            (slot.add(80) as *mut u32).write_unaligned(body_type);
-            (slot.add(84) as *mut u32).write_unaligned(sleeping);
-            (slot.add(88) as *mut u64).write_unaligned(user_data);
+            // Write data (atomic stores, mirroring mps-cosmos so the seqlock
+            // payload is not a Rust data race on weakly-ordered targets).
+            use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+            (&*(slot.add(8) as *const AtomicU64)).store(pos_x.to_bits(), Ordering::Relaxed);
+            (&*(slot.add(16) as *const AtomicU64)).store(pos_y.to_bits(), Ordering::Relaxed);
+            (&*(slot.add(24) as *const AtomicU64)).store(pos_z.to_bits(), Ordering::Relaxed);
+            (&*(slot.add(32) as *const AtomicU64)).store(vel_x.to_bits(), Ordering::Relaxed);
+            (&*(slot.add(40) as *const AtomicU64)).store(vel_y.to_bits(), Ordering::Relaxed);
+            (&*(slot.add(48) as *const AtomicU64)).store(vel_z.to_bits(), Ordering::Relaxed);
+            (&*(slot.add(56) as *const AtomicU64)).store(angvel_x.to_bits(), Ordering::Relaxed);
+            (&*(slot.add(64) as *const AtomicU64)).store(angvel_y.to_bits(), Ordering::Relaxed);
+            (&*(slot.add(72) as *const AtomicU64)).store(angvel_z.to_bits(), Ordering::Relaxed);
+            (&*(slot.add(80) as *const AtomicU32)).store(body_type, Ordering::Relaxed);
+            (&*(slot.add(84) as *const AtomicU32)).store(sleeping, Ordering::Relaxed);
+            (&*(slot.add(88) as *const AtomicU64)).store(user_data, Ordering::Relaxed);
 
             // Increment generation to even (done writing)
             gen_ptr.store(current_gen.wrapping_add(2), Ordering::Release);
@@ -163,7 +165,8 @@ impl super::SharedPhysicsArena {
             let slot = self
                 .ptr
                 .add(self.body_handle_map_offset + index as usize * 8);
-            (slot as *mut u64).write_unaligned(handle_raw);
+            use std::sync::atomic::{AtomicU64, Ordering};
+            (&*(slot as *const AtomicU64)).store(handle_raw, Ordering::Relaxed);
         }
     }
 
@@ -188,11 +191,17 @@ impl super::SharedPhysicsArena {
             let type_tag = crate::rapier::ffi::force_law_type_tag(law_type);
             let offset = self.force_report_offset + count as usize * 32;
             unsafe {
-                (self.ptr.add(offset) as *mut f64).write_unaligned(contrib.total_force.x);
-                (self.ptr.add(offset + 8) as *mut f64).write_unaligned(contrib.total_force.y);
-                (self.ptr.add(offset + 16) as *mut f64).write_unaligned(contrib.total_force.z);
-                (self.ptr.add(offset + 24) as *mut u32).write_unaligned(contrib.body_count);
-                (self.ptr.add(offset + 28) as *mut u32).write_unaligned(type_tag);
+                use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+                (&*(self.ptr.add(offset) as *const AtomicU64))
+                    .store(contrib.total_force.x.to_bits(), Ordering::Relaxed);
+                (&*(self.ptr.add(offset + 8) as *const AtomicU64))
+                    .store(contrib.total_force.y.to_bits(), Ordering::Relaxed);
+                (&*(self.ptr.add(offset + 16) as *const AtomicU64))
+                    .store(contrib.total_force.z.to_bits(), Ordering::Relaxed);
+                (&*(self.ptr.add(offset + 24) as *const AtomicU32))
+                    .store(contrib.body_count, Ordering::Relaxed);
+                (&*(self.ptr.add(offset + 28) as *const AtomicU32))
+                    .store(type_tag, Ordering::Relaxed);
             }
             count += 1;
         }
@@ -257,17 +266,20 @@ impl super::SharedPhysicsArena {
             let current_gen = gen_ptr.load(Ordering::Relaxed);
             gen_ptr.store(current_gen.wrapping_add(1) | 1, Ordering::Release);
 
-            (slot.add(8) as *mut u32).write_unaligned(parent_body_index);
-            (slot.add(16) as *mut f64).write_unaligned(pos_x);
-            (slot.add(24) as *mut f64).write_unaligned(pos_y);
-            (slot.add(32) as *mut f64).write_unaligned(pos_z);
-            (slot.add(40) as *mut f64).write_unaligned(friction);
-            (slot.add(48) as *mut f64).write_unaligned(restitution);
-            (slot.add(56) as *mut f64).write_unaligned(density);
-            (slot.add(64) as *mut u32).write_unaligned(sensor);
-            (slot.add(68) as *mut u32).write_unaligned(active_events);
-            (slot.add(72) as *mut u32).write_unaligned(collision_groups_memberships);
-            (slot.add(76) as *mut u32).write_unaligned(collision_groups_filter);
+            use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+            (&*(slot.add(8) as *const AtomicU32)).store(parent_body_index, Ordering::Relaxed);
+            (&*(slot.add(16) as *const AtomicU64)).store(pos_x.to_bits(), Ordering::Relaxed);
+            (&*(slot.add(24) as *const AtomicU64)).store(pos_y.to_bits(), Ordering::Relaxed);
+            (&*(slot.add(32) as *const AtomicU64)).store(pos_z.to_bits(), Ordering::Relaxed);
+            (&*(slot.add(40) as *const AtomicU64)).store(friction.to_bits(), Ordering::Relaxed);
+            (&*(slot.add(48) as *const AtomicU64)).store(restitution.to_bits(), Ordering::Relaxed);
+            (&*(slot.add(56) as *const AtomicU64)).store(density.to_bits(), Ordering::Relaxed);
+            (&*(slot.add(64) as *const AtomicU32)).store(sensor, Ordering::Relaxed);
+            (&*(slot.add(68) as *const AtomicU32)).store(active_events, Ordering::Relaxed);
+            (&*(slot.add(72) as *const AtomicU32))
+                .store(collision_groups_memberships, Ordering::Relaxed);
+            (&*(slot.add(76) as *const AtomicU32))
+                .store(collision_groups_filter, Ordering::Relaxed);
 
             gen_ptr.store(current_gen.wrapping_add(2), Ordering::Release);
         }

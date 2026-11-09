@@ -1,14 +1,13 @@
-use rapier3d::dynamics::RigidBody;
 use rapier3d::prelude::{MassProperties, RigidBodyBuilder};
 
 use crate::rapier::error::{
     ERR_INVALID_ARGUMENT, ERR_NOT_FOUND, ERR_NULL_POINTER, clear_error, ffi_guard, set_error,
 };
 use crate::rapier::ffi::{
-    BodyStatus, Bool, Quat, RigidBodyBuilderHandle, RigidBodyHandleRaw, Vec3, WorldHandle,
-    body_status_from_rapier, body_status_from_raw, body_status_to_rapier, body_status_to_raw,
-    isometry_from_parts, pack_rigid_body_handle, quat_finite, quat_from_rapier, quat_to_rapier,
-    unpack_rigid_body_handle, vec3_finite, vec3_from_rapier, vec3_to_rapier,
+    BodyStatus, Bool, Quat, RigidBodyBuilderHandle, RigidBodyHandleRaw, RigidBodyMemHandle, Vec3,
+    WorldHandle, body_status_from_rapier, body_status_from_raw, body_status_to_rapier,
+    body_status_to_raw, isometry_from_parts, pack_rigid_body_handle, quat_finite, quat_from_rapier,
+    quat_to_rapier, unpack_rigid_body_handle, vec3_finite, vec3_from_rapier, vec3_to_rapier,
 };
 
 #[cfg(feature = "relative-force")]
@@ -44,7 +43,9 @@ pub extern "C" fn rigid_body_builder_create(status: u32) -> *mut RigidBodyBuilde
 /// `builder` must be a live pointer returned by `rigid_body_builder_create` (or null); ownership
 /// is taken and the pointer must not be used afterwards.
 #[unsafe(no_mangle)]
-pub extern "C" fn rigid_body_builder_build(builder: *mut RigidBodyBuilderHandle) -> *mut RigidBody {
+pub extern "C" fn rigid_body_builder_build(
+    builder: *mut RigidBodyBuilderHandle,
+) -> *mut RigidBodyMemHandle {
     ffi_guard(std::ptr::null_mut(), || {
         if builder.is_null() {
             set_error(ERR_NULL_POINTER, "builder is null");
@@ -54,7 +55,9 @@ pub extern "C" fn rigid_body_builder_build(builder: *mut RigidBodyBuilderHandle)
         let builder = unsafe { Box::from_raw(builder) };
         let RigidBodyBuilderHandle { inner } = *builder;
         clear_error();
-        Box::into_raw(Box::new(inner.build()))
+        Box::into_raw(Box::new(RigidBodyMemHandle {
+            inner: inner.build(),
+        }))
     })
 }
 
@@ -81,7 +84,7 @@ pub extern "C" fn rigid_body_builder_destroy(builder: *mut RigidBodyBuilderHandl
 /// `world_copy_rigid_body` (or null, which is a no-op); ownership is taken and the pointer must
 /// not be used afterwards.
 #[unsafe(no_mangle)]
-pub extern "C" fn rigid_body_destroy_raw(rigid_body: *mut RigidBody) {
+pub extern "C" fn rigid_body_destroy_raw(rigid_body: *mut RigidBodyMemHandle) {
     ffi_guard((), || {
         if rigid_body.is_null() {
             return;
@@ -422,7 +425,7 @@ pub extern "C" fn rigid_body_builder_set_additional_mass(
 #[unsafe(no_mangle)]
 pub extern "C" fn world_insert_rigid_body(
     world: *mut WorldHandle,
-    memory_handle: *mut RigidBody,
+    memory_handle: *mut RigidBodyMemHandle,
 ) -> RigidBodyHandleRaw {
     ffi_guard(0, || {
         let Some(world) = (unsafe { world.as_mut() }) else {
@@ -435,7 +438,7 @@ pub extern "C" fn world_insert_rigid_body(
             return 0;
         }
 
-        let mut built = unsafe { *Box::from_raw(memory_handle) };
+        let mut built = unsafe { Box::from_raw(memory_handle).inner };
         world.inner.runtime_settings.apply_body(&mut built);
         clear_error();
         pack_rigid_body_handle(world.inner.bodies.insert(built))
@@ -488,7 +491,7 @@ pub extern "C" fn world_remove_rigid_body(
 pub extern "C" fn world_copy_rigid_body(
     world: *mut WorldHandle,
     handle: RigidBodyHandleRaw,
-) -> *mut RigidBody {
+) -> *mut RigidBodyMemHandle {
     ffi_guard(std::ptr::null_mut(), || {
         let Some(world) = (unsafe { world.as_mut() }) else {
             set_error(ERR_NULL_POINTER, "world is null");
@@ -507,7 +510,7 @@ pub extern "C" fn world_copy_rigid_body(
         };
 
         clear_error();
-        Box::into_raw(Box::new(rb))
+        Box::into_raw(Box::new(RigidBodyMemHandle { inner: rb }))
     })
 }
 

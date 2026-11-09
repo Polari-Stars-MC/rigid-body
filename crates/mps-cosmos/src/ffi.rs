@@ -23,11 +23,13 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use mps_formula::celestial_data::{MOONS, celestial_body_id_from_u32, get_celestial_body};
-use mps_formula::error::{
-    ERR_CAPACITY, ERR_INTERNAL, ERR_INVALID_ARGUMENT, ERR_NULL_POINTER, set_error,
-};
+use mps_formula::error::set_error;
 use mps_formula::ffi::Vec3;
 use rapier3d::prelude::{RigidBodyHandle, Vector};
+
+// ERR_* come from the crate-local literal declarations (see `crate::error`)
+// so cbindgen can emit them as `#define`s into `cosmos.h`.
+use crate::error::{ERR_CAPACITY, ERR_INTERNAL, ERR_INVALID_ARGUMENT, ERR_NULL_POINTER};
 
 use crate::bodies::{CosmosRigidBodyBuilder, fixed_body_builder, satellite_builder};
 use crate::gravity::CelestialSource;

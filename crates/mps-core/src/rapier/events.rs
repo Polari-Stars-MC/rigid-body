@@ -14,13 +14,32 @@
 //! * **Callback slots** (`CallbackSlot`) — typed function pointers behind a
 //!   `Mutex`; dispatch happens on the physics thread.
 //!
+//! ## Callback re-entrancy contract (read before registering any callback)
+//!
+//! Event callbacks are dispatched **inside `pipeline.step`, while the physics
+//! thread holds `world.inner.query_lock` in write mode**. Therefore a callback
+//! MUST NOT call back into any FFI entry that acquires `query_lock` (every
+//! `query_*` entry takes the read lock; `world_step`, `rigid_body_set_*`,
+//! `world_insert_*`, `joints`, `controller`, `character_body` take the write
+//! lock). `parking_lot::RwLock` is not re-entrant, so doing so **deadlocks
+//! the physics thread** (and for the write-lock entries it is also an
+//! aliasing UB on `&mut WorldHandle`). Safe callback behaviour is limited to:
+//! recording the event (e.g. into a Java-side buffer via JNI — do not call
+//! back into mps), or pushing into an application-owned queue that is drained
+//! *after* `world_step` returns. Ring drains (`world_drain_*_event_ring`,
+//! `*_ring_len`, `*_ring_stats`) are safe from callbacks because they only
+//! take the drain counter, never `query_lock`.
+//!
 //! Init-time-only operations (ring (re-)init, callback registration, dispatch
 //! mode changes) take `&mut` to the `UnsafeCell` producer cache and therefore
-//! must **not** run concurrently with `world_step` or with each other. This
-//! contract is enforced at runtime: `world_step` raises `step_active` for its
-//! whole duration and every init-time FFI entry takes `init_guard()`; a
-//! violation fails with `ERR_UNSUPPORTED` instead of causing undefined
-//! behavior. The raw-address→function-pointer transmutes in
+//! must **not** run concurrently with `world_step`, with each other, **or with
+//! an in-flight drain-side call** (`world_drain_*` / `*_ring_len` /
+//! `*_ring_stats` / `world_clear_event_rings`). This contract is enforced at
+//! runtime: `world_step` raises `state` for its whole duration, drain-side
+//! calls raise `drain_active`, and every init-time FFI entry takes
+//! `init_guard()` (which checks both); a violation fails with
+//! `ERR_UNSUPPORTED` instead of causing undefined behavior. The
+//! raw-address→function-pointer transmutes in
 //! `collision_callback_from_raw` / `contact_force_callback_from_raw` are a
 //! frozen-ABI requirement (Java passes callback addresses as `usize`) and
 //! happen exactly once at registration; the caller must pass the address of a
@@ -79,6 +98,13 @@ pub(crate) struct CollectingEventHandler {
     /// Init-time-only FFI calls check it via `init_guard()` and fail with
     /// `ERR_UNSUPPORTED` instead of aliasing the `UnsafeCell` producer cache.
     state: AtomicU8,
+    /// Number of drain-side FFI calls (ring drain / len / stats / clear)
+    /// currently in flight on this world. Ring (re-)initialization *replaces*
+    /// the ring buffers behind the `UnsafeCell`, so it must not run while any
+    /// drain-side reader still holds `&*producer_cache.get()` — this counter
+    /// closes that init-vs-drain use-after-free window (checked in
+    /// [`CollectingEventHandler::init_guard`]).
+    drain_active: AtomicUsize,
 }
 
 /// RAII guard released when an init-time-only FFI call returns. Created by
@@ -102,6 +128,20 @@ pub(crate) struct StepGuard<'a> {
 impl Drop for StepGuard<'_> {
     fn drop(&mut self) {
         self.events.state.store(0, Ordering::Release);
+    }
+}
+
+/// RAII guard marking one drain-side FFI call as in-flight; released on scope
+/// exit. Created by [`CollectingEventHandler::drain_begin`]. While at least
+/// one is alive, init-time re-initialization of the rings is rejected by
+/// `init_guard()` (it would free/replace the ring buffers being read).
+pub(crate) struct DrainGuard<'a> {
+    events: &'a CollectingEventHandler,
+}
+
+impl Drop for DrainGuard<'_> {
+    fn drop(&mut self) {
+        self.events.drain_active.fetch_sub(1, Ordering::AcqRel);
     }
 }
 
@@ -136,14 +176,26 @@ impl CollectingEventHandler {
     }
 
     /// Begin an init-time-only producer-cache mutation. Fails (returns
-    /// `None`) when `world_step` is in flight or another init-time call is
-    /// active — the caller must report an error instead of touching the
-    /// `UnsafeCell` producer cache.
+    /// `None`) when `world_step` is in flight, another init-time call is
+    /// active, **or a drain-side reader is in flight** (re-initializing the
+    /// rings would free the buffer that reader holds) — the caller must
+    /// report an error instead of touching the `UnsafeCell` producer cache.
     pub(crate) fn init_guard(&self) -> Option<EventInitGuard<'_>> {
+        if self.drain_active.load(Ordering::Acquire) != 0 {
+            return None;
+        }
         self.state
             .compare_exchange(0, 2, Ordering::AcqRel, Ordering::Acquire)
             .ok()
             .map(|_| EventInitGuard { events: self })
+    }
+
+    /// Mark one drain-side FFI call (ring drain / len / stats / clear) as
+    /// in-flight until the returned guard drops. Init-time re-initialization
+    /// checks this counter via `init_guard()`.
+    pub(crate) fn drain_begin(&self) -> DrainGuard<'_> {
+        self.drain_active.fetch_add(1, Ordering::AcqRel);
+        DrainGuard { events: self }
     }
 
     pub(crate) fn clear(&self) {
@@ -1751,7 +1803,7 @@ pub extern "C" fn world_init_collision_event_ring(world: *mut WorldHandle, capac
         let Some(_init) = world.inner.events.init_guard() else {
             set_error(
                 ERR_UNSUPPORTED,
-                "collision event ring init while physics is stepping",
+                "collision event ring init while physics is stepping or a ring drain is in flight",
             );
             return Bool::FALSE;
         };
@@ -1785,7 +1837,7 @@ pub extern "C" fn world_init_contact_force_event_ring(
         let Some(_init) = world.inner.events.init_guard() else {
             set_error(
                 ERR_UNSUPPORTED,
-                "contact force event ring init while physics is stepping",
+                "contact force event ring init while physics is stepping or a ring drain is in flight",
             );
             return Bool::FALSE;
         };
@@ -1819,6 +1871,7 @@ pub extern "C" fn world_drain_collision_event_ring(
             set_error(ERR_NULL_POINTER, "world is null");
             return 0;
         };
+        let _drain = world.inner.events.drain_begin();
         if out_events.is_null() || capacity == 0 || capacity > MAX_OUTPUT_CAPACITY {
             set_error(ERR_CAPACITY, "invalid collision event drain output");
             return 0;
@@ -1853,6 +1906,7 @@ pub extern "C" fn world_drain_contact_force_event_ring(
             set_error(ERR_NULL_POINTER, "world is null");
             return 0;
         };
+        let _drain = world.inner.events.drain_begin();
         if out_events.is_null() || capacity == 0 || capacity > MAX_OUTPUT_CAPACITY {
             set_error(ERR_CAPACITY, "invalid contact force event drain output");
             return 0;
@@ -1881,6 +1935,7 @@ pub extern "C" fn world_collision_event_ring_len(world: *const WorldHandle) -> u
         let Some(world) = (unsafe { world.as_ref() }) else {
             return 0;
         };
+        let _drain = world.inner.events.drain_begin();
         // SAFETY: read-only access to ring buffer length (atomically loaded internally)
         let pc = unsafe { &*world.inner.events.producer_cache.get() };
         pc.collisions.as_ref().map(|ring| ring.len()).unwrap_or(0)
@@ -1899,6 +1954,7 @@ pub extern "C" fn world_contact_force_event_ring_len(world: *const WorldHandle) 
         let Some(world) = (unsafe { world.as_ref() }) else {
             return 0;
         };
+        let _drain = world.inner.events.drain_begin();
         let pc = unsafe { &*world.inner.events.producer_cache.get() };
         pc.contact_forces
             .as_ref()
@@ -1924,6 +1980,7 @@ pub extern "C" fn world_collision_event_ring_stats(
             set_error(ERR_NULL_POINTER, "world is null");
             return Bool::FALSE;
         };
+        let _drain = world.inner.events.drain_begin();
         let Some(out_stats) = (unsafe { out_stats.as_mut() }) else {
             set_error(ERR_NULL_POINTER, "ring stats output is null");
             return Bool::FALSE;
@@ -1954,6 +2011,7 @@ pub extern "C" fn world_contact_force_event_ring_stats(
             set_error(ERR_NULL_POINTER, "world is null");
             return Bool::FALSE;
         };
+        let _drain = world.inner.events.drain_begin();
         let Some(out_stats) = (unsafe { out_stats.as_mut() }) else {
             set_error(ERR_NULL_POINTER, "ring stats output is null");
             return Bool::FALSE;
@@ -1981,6 +2039,7 @@ pub extern "C" fn world_clear_event_rings(world: *mut WorldHandle) {
         let Some(world) = (unsafe { world.as_mut() }) else {
             return;
         };
+        let _drain = world.inner.events.drain_begin();
         // SAFETY: clear is atomic write on the ring; safe even if Java is draining
         let pc = unsafe { &*world.inner.events.producer_cache.get() };
         if let Some(ref ring) = pc.collisions {
@@ -2007,6 +2066,14 @@ pub extern "C" fn world_clear_event_rings(world: *mut WorldHandle) {
 /// with no concurrent event-ring/callback FFI calls on the same world.  The
 /// producer cache is an `UnsafeCell`; violations of this contract are caught
 /// at runtime and fail with `ERR_UNSUPPORTED` (see the `events` module docs).
+///
+/// # Callback re-entrancy
+///
+/// The callback is invoked from inside `pipeline.step` while the physics
+/// thread holds `query_lock` in write mode. The callback MUST NOT call any
+/// `query_*` / `world_step` / mutation FFI on this world (deadlock / UB) —
+/// record the event and process it after `world_step` returns. See the
+/// `events` module docs ("Callback re-entrancy contract") for the full list.
 #[unsafe(no_mangle)]
 pub extern "C" fn world_register_collision_callback(
     world: *mut WorldHandle,

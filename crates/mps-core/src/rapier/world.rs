@@ -1487,6 +1487,7 @@ pub extern "C" fn world_get_rigid_body_set_size(world: *const WorldHandle) -> i3
         let Some(world) = (unsafe { world.as_ref() }) else {
             return -1;
         };
+        let _query_lock = world.inner.query_lock.read();
 
         world.inner.bodies.len() as i32
     })
@@ -1502,6 +1503,7 @@ pub extern "C" fn world_get_collider_set_size(world: *const WorldHandle) -> i32 
         let Some(world) = (unsafe { world.as_ref() }) else {
             return -1;
         };
+        let _query_lock = world.inner.query_lock.read();
 
         world.inner.colliders.len() as i32
     })
@@ -1533,6 +1535,7 @@ pub extern "C" fn world_dynamic_body_snapshot_count(world: *const WorldHandle) -
         let Some(world) = (unsafe { world.as_ref() }) else {
             return 0;
         };
+        let _query_lock = world.inner.query_lock.read();
 
         world
             .inner
@@ -1560,6 +1563,7 @@ pub extern "C" fn world_dynamic_body_snapshot(
         let Some(world) = (unsafe { world.as_ref() }) else {
             return 0;
         };
+        let _query_lock = world.inner.query_lock.read();
         if out_handles.is_null()
             || out_values.is_null()
             || capacity == 0
@@ -1610,6 +1614,7 @@ pub extern "C" fn world_body_snapshot_count(world: *const WorldHandle) -> u32 {
         let Some(world) = (unsafe { world.as_ref() }) else {
             return 0;
         };
+        let _query_lock = world.inner.query_lock.read();
 
         world.inner.bodies.len().min(u32::MAX as usize) as u32
     })
@@ -1634,6 +1639,7 @@ pub extern "C" fn world_body_snapshot(
             set_error(ERR_NULL_POINTER, "world is null");
             return 0;
         };
+        let _query_lock = world.inner.query_lock.read();
         if out_handles.is_null()
             || out_values.is_null()
             || capacity == 0

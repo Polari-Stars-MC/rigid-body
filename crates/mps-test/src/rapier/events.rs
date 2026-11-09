@@ -1661,3 +1661,59 @@ fn event_ring_concurrent_step_and_drain_stays_safe() {
     assert_eq!(world_contact_force_event_ring_len(world), 0);
     mps_core::rapier::world::world_destroy(world);
 }
+
+/// Regression test for the init-vs-drain UAF window: ring (re-)initialization
+/// replaces the ring buffers behind the `UnsafeCell` producer cache, so it
+/// must fail with `ERR_UNSUPPORTED` while a drain-side call is in flight
+/// (either thread may win the race, but no other error code and no UB may
+/// appear). See the `events` module docs (`drain_active` counter).
+#[test]
+fn reinit_during_concurrent_drain_fails_cleanly() {
+    use mps_core::rapier::error::{ERR_UNSUPPORTED, last_error_code};
+    use mps_core::rapier::events::{
+        world_collision_event_ring_len, world_drain_collision_event_ring,
+        world_init_collision_event_ring,
+    };
+    use mps_core::rapier::ffi::*;
+
+    let world = mps_core::rapier::world::world_create(Vec3::default());
+    assert!(!world.is_null());
+    assert_eq!(
+        world_init_collision_event_ring(world, 256),
+        Bool::TRUE,
+        "initial ring init must succeed"
+    );
+
+    let world_addr = world as usize;
+    let drainer = std::thread::spawn(move || {
+        let world = world_addr as *mut WorldHandle;
+        let mut collisions = vec![CollisionEventRecord::default(); 64];
+        for _ in 0..20_000 {
+            let _ = world_drain_collision_event_ring(world, collisions.as_mut_ptr(), 64);
+            let _ = world_collision_event_ring_len(world);
+        }
+    });
+
+    // Hammer re-init from the main thread while the drain thread hammers
+    // drain/len. Each re-init either succeeds (drain not in flight) or
+    // fails with ERR_UNSUPPORTED (drain counter non-zero) -- anything else
+    // means the guard contract is broken.
+    for _ in 0..20_000 {
+        if world_init_collision_event_ring(world, 256) == Bool::FALSE {
+            assert_eq!(
+                last_error_code(),
+                ERR_UNSUPPORTED,
+                "failed re-init must report ERR_UNSUPPORTED"
+            );
+        }
+    }
+    drainer.join().unwrap();
+
+    // After both threads settle a fresh init must succeed again.
+    assert_eq!(
+        world_init_collision_event_ring(world, 256),
+        Bool::TRUE,
+        "post-concurrency init must succeed"
+    );
+    mps_core::rapier::world::world_destroy(world);
+}

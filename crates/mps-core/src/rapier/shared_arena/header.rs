@@ -13,17 +13,21 @@ impl super::SharedPhysicsArena {
     // -----------------------------------------------------------------------
 
     pub fn header_u32(&self, offset: usize) -> u32 {
-        unsafe { (self.ptr.add(offset) as *const u32).read_unaligned() }
+        use std::sync::atomic::{AtomicU32, Ordering};
+        debug_assert_eq!(offset % std::mem::align_of::<AtomicU32>(), 0);
+        unsafe { (&*(self.ptr.add(offset) as *const AtomicU32)).load(Ordering::Acquire) }
     }
 
     pub(super) fn set_header_u32(&self, offset: usize, value: u32) {
-        unsafe {
-            (self.ptr.add(offset) as *mut u32).write_unaligned(value);
-        }
+        use std::sync::atomic::{AtomicU32, Ordering};
+        debug_assert_eq!(offset % std::mem::align_of::<AtomicU32>(), 0);
+        unsafe { (&*(self.ptr.add(offset) as *const AtomicU32)).store(value, Ordering::Release) }
     }
 
     pub fn header_u64(&self, offset: usize) -> u64 {
-        unsafe { (self.ptr.add(offset) as *const u64).read_unaligned() }
+        use std::sync::atomic::{AtomicU64, Ordering};
+        debug_assert_eq!(offset % std::mem::align_of::<AtomicU64>(), 0);
+        unsafe { (&*(self.ptr.add(offset) as *const AtomicU64)).load(Ordering::Acquire) }
     }
 
     /// Set flags in the header atomically.
@@ -55,13 +59,19 @@ impl super::SharedPhysicsArena {
         gravity: &rapier3d::prelude::Vector,
     ) {
         let base = self.integration_params_offset;
+        use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
         unsafe {
-            (self.ptr.add(base) as *mut f64).write_unaligned(dt);
-            (self.ptr.add(base + 8) as *mut u32).write_unaligned(solver_iterations);
-            (self.ptr.add(base + 12) as *mut u32).write_unaligned(ccd_substeps);
-            (self.ptr.add(base + 16) as *mut f64).write_unaligned(gravity.x);
-            (self.ptr.add(base + 24) as *mut f64).write_unaligned(gravity.y);
-            (self.ptr.add(base + 32) as *mut f64).write_unaligned(gravity.z);
+            (&*(self.ptr.add(base) as *const AtomicU64)).store(dt.to_bits(), Ordering::Relaxed);
+            (&*(self.ptr.add(base + 8) as *const AtomicU32))
+                .store(solver_iterations, Ordering::Relaxed);
+            (&*(self.ptr.add(base + 12) as *const AtomicU32))
+                .store(ccd_substeps, Ordering::Relaxed);
+            (&*(self.ptr.add(base + 16) as *const AtomicU64))
+                .store(gravity.x.to_bits(), Ordering::Relaxed);
+            (&*(self.ptr.add(base + 24) as *const AtomicU64))
+                .store(gravity.y.to_bits(), Ordering::Relaxed);
+            (&*(self.ptr.add(base + 32) as *const AtomicU64))
+                .store(gravity.z.to_bits(), Ordering::Relaxed);
         }
     }
 
@@ -75,16 +85,26 @@ impl super::SharedPhysicsArena {
         ext_force_body_count: u32,
     ) {
         let base = self.force_summary_offset;
+        use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
         unsafe {
-            (self.ptr.add(base) as *mut f64).write_unaligned(max_reynolds);
-            (self.ptr.add(base + 8) as *mut f64).write_unaligned(total_external_force.x);
-            (self.ptr.add(base + 16) as *mut f64).write_unaligned(total_external_force.y);
-            (self.ptr.add(base + 24) as *mut f64).write_unaligned(total_external_force.z);
-            (self.ptr.add(base + 32) as *mut f64).write_unaligned(total_drag_force.x);
-            (self.ptr.add(base + 40) as *mut f64).write_unaligned(total_drag_force.y);
-            (self.ptr.add(base + 48) as *mut f64).write_unaligned(total_drag_force.z);
-            (self.ptr.add(base + 56) as *mut u32).write_unaligned(drag_body_count);
-            (self.ptr.add(base + 60) as *mut u32).write_unaligned(ext_force_body_count);
+            (&*(self.ptr.add(base) as *const AtomicU64))
+                .store(max_reynolds.to_bits(), Ordering::Relaxed);
+            (&*(self.ptr.add(base + 8) as *const AtomicU64))
+                .store(total_external_force.x.to_bits(), Ordering::Relaxed);
+            (&*(self.ptr.add(base + 16) as *const AtomicU64))
+                .store(total_external_force.y.to_bits(), Ordering::Relaxed);
+            (&*(self.ptr.add(base + 24) as *const AtomicU64))
+                .store(total_external_force.z.to_bits(), Ordering::Relaxed);
+            (&*(self.ptr.add(base + 32) as *const AtomicU64))
+                .store(total_drag_force.x.to_bits(), Ordering::Relaxed);
+            (&*(self.ptr.add(base + 40) as *const AtomicU64))
+                .store(total_drag_force.y.to_bits(), Ordering::Relaxed);
+            (&*(self.ptr.add(base + 48) as *const AtomicU64))
+                .store(total_drag_force.z.to_bits(), Ordering::Relaxed);
+            (&*(self.ptr.add(base + 56) as *const AtomicU32))
+                .store(drag_body_count, Ordering::Relaxed);
+            (&*(self.ptr.add(base + 60) as *const AtomicU32))
+                .store(ext_force_body_count, Ordering::Relaxed);
         }
     }
 }

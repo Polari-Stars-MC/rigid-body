@@ -6,7 +6,21 @@ documentation = true
 include_guard = "RIGID_BODY_H"
 
 [parse]
-parse_deps = false
+# Parse `mps-formula` so shared FFI value types (`Vec3`, `Quat`, `Bool`,
+# `ShapeDesc`, ...) get their `typedef struct`/`typedef enum` definitions
+# emitted into `rigid_body.h` — with `parse_deps = false` cbindgen only prints
+# the type *names* in signatures, leaving the header not self-contained.
+parse_deps = true
+include = ["mps-formula"]
+
+[enum]
+# C enum constants live in the global namespace, so unprefixed variant names
+# collide across enums (`BodyStatus::Fixed` vs `JointTypeDesc::Fixed`,
+# `ShapeType::Cylinder` vs `struct Cylinder`). Prefix every variant with its
+# enum name (`BodyStatus_Fixed`, `ShapeType_Cylinder`, ...). No previously
+# published header ever contained enum *constant* definitions (only forward
+# declarations), so this renames nothing that any C consumer could have used.
+prefix_with_name = true
 
 [export]
 include = [

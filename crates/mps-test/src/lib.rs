@@ -4,6 +4,7 @@
 pub mod cosmos {
     pub mod arena;
     pub mod bodies;
+    pub mod error;
     pub mod ffi;
     pub mod flight;
     pub mod gravity;

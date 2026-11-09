@@ -5,9 +5,9 @@ mod tests {
     use mps_core::rapier::error::{
         ERR_CAPACITY, ERR_INVALID_ARGUMENT, ERR_NULL_POINTER, last_error_code,
     };
+    use mps_core::rapier::ffi::ColliderMemHandle;
     use mps_core::rapier::ffi::*;
     use mps_core::rapier::ffi::{Quat, Vec3};
-    use rapier3d::prelude::Collider;
 
     fn identity_rotation() -> Quat {
         Quat {
@@ -18,7 +18,10 @@ mod tests {
         }
     }
 
-    fn assert_bound_hits(builder: *mut Collider, count: impl FnOnce(*const WorldHandle) -> u32) {
+    fn assert_bound_hits(
+        builder: *mut ColliderMemHandle,
+        count: impl FnOnce(*const WorldHandle) -> u32,
+    ) {
         assert!(!builder.is_null());
         let world = mps_core::rapier::world::world_create(Vec3::default());
         let collider = world_insert_collider(world, builder);

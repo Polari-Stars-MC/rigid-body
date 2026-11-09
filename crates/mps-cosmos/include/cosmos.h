@@ -65,6 +65,20 @@
  */
 #define OFF_CMD_RING 96
 
+#define ERR_OK 0
+
+#define ERR_NULL_POINTER 1
+
+#define ERR_INVALID_ARGUMENT 2
+
+#define ERR_NOT_FOUND 3
+
+#define ERR_CAPACITY 4
+
+#define ERR_UNSUPPORTED 5
+
+#define ERR_INTERNAL 6
+
 /**
  * 默认近场阈值倍率：|d| ≤ 8·bounding_radius 时走质点求和。8 给到 r² 误差 ~1.5%
  * 的 monopole，足够典型的薄壳/扁平分布过渡到 monopole。
@@ -97,6 +111,26 @@
 #define MIN_SENSITIVITY 1.0e-15
 
 /**
+ * C ABI 不透明 builder 句柄（对应 `cosmos.h` 里的 `CosmosRigidBodyBuilder *`）。
+ *
+ * cbindgen 以 `parse_deps = true`（include `mps-formula`）运行，只为**本 crate
+ * 内定义**的函数生成声明：此前 `extern "C"` 签名直接用 rapier 的
+ * `RigidBodyBuilder`，头文件里就会出现没有任何 typedef 的裸 `RigidBodyBuilder *`，
+ * `cosmos.h` 无法独立编译。本类型仿照 mps-core 的 `RigidBodyBuilderHandle`
+ * （无 `repr` 属性 + 私有 `inner` 字段 → cbindgen 只发
+ * `typedef struct CosmosRigidBodyBuilder CosmosRigidBodyBuilder;`）。
+ *
+ * 不加 `#[repr(transparent)]`（否则 cbindgen 会穿透单字段结构，把头文件里的
+ * typedef 发成指向未定义 `RigidBodyBuilder` 的别名，`cosmos.h` 又不能独立
+ * 编译）。单字段 repr(Rust) 结构与字段本身同大小/对齐（与 mps-core 的
+ * `RigidBodyBuilderHandle` 同一先例）：JNI 侧（mps-jni）仍按
+ * `Box<RigidBodyBuilder>` 分配 builder 并把裸指针当 jlong 传递，与 ffi 侧
+ * `Box<CosmosRigidBodyBuilder>` 的裸指针布局一致、可安全互转——两条路径
+ * 创建的 builder 句柄在 ABI 上仍然是同一份内存。
+ */
+typedef struct CosmosRigidBodyBuilder CosmosRigidBodyBuilder;
+
+/**
  * 太空物理世界。所有公开 API 自行管理内部 `RigidBodySet` 等。
  *
  * 手写 `Clone`（而非 derive）因为 `PhysicsPipeline` 不实现 `Clone`——它是
@@ -106,21 +140,11 @@
  */
 typedef struct CosmosWorld CosmosWorld;
 
-/**
- * C ABI 不透明 builder 句柄（对应 `cosmos.h` 里的 `CosmosRigidBodyBuilder *`）。
- *
- * cbindgen 以 `parse_deps = false` 运行，只能打印**本 crate 内定义**的类型名：
- * 此前 `extern "C"` 签名直接用 rapier 的 `RigidBodyBuilder`，头文件里就会出现
- * 没有任何 typedef 的裸 `RigidBodyBuilder *`，`cosmos.h` 无法独立编译。本类型
- * 仿照 mps-core 的 `RigidBodyBuilderHandle`（私有 `inner` 字段 → cbindgen 只发
- * `typedef struct CosmosRigidBodyBuilder CosmosRigidBodyBuilder;`）。
- *
- * `#[repr(transparent)]` 保证与 `RigidBodyBuilder` 同大小/对齐/ABI：JNI 侧
- * （mps-jni）仍按 `Box<RigidBodyBuilder>` 分配 builder 并把裸指针当 jlong 传递，
- * 与 ffi 侧 `Box<CosmosRigidBodyBuilder>` 的裸指针布局完全一致、可安全互转——
- * 两条路径创建的 builder 句柄在 ABI 上仍然是同一份内存。
- */
-typedef RigidBodyBuilder CosmosRigidBodyBuilder;
+typedef struct Vec3 {
+  double x;
+  double y;
+  double z;
+} Vec3;
 
 
 
@@ -132,25 +156,25 @@ extern "C" {
  * 构造一个动态刚体 builder（质量 kg、初始位置/速度）。返回 `*mut` 给调用
  * 方；后续交给 `cosmos_world_insert_body` 插入。失败（panic）返回 null。
  */
-CosmosRigidBodyBuilder *cosmos_satellite_builder(double mass,
-                                                 double px,
-                                                 double py,
-                                                 double pz,
-                                                 double vx,
-                                                 double vy,
-                                                 double vz,
-                                                 double radius);
+struct CosmosRigidBodyBuilder *cosmos_satellite_builder(double mass,
+                                                        double px,
+                                                        double py,
+                                                        double pz,
+                                                        double vx,
+                                                        double vy,
+                                                        double vz,
+                                                        double radius);
 
 /**
  * 构造固定（静态）刚体 builder —— 适合做 n-body 引力源中心本体。
  */
-CosmosRigidBodyBuilder *cosmos_fixed_body_builder(double px, double py, double pz);
+struct CosmosRigidBodyBuilder *cosmos_fixed_body_builder(double px, double py, double pz);
 
-void cosmos_builder_set_linear_damping(CosmosRigidBodyBuilder *builder, double value);
+void cosmos_builder_set_linear_damping(struct CosmosRigidBodyBuilder *builder, double value);
 
-void cosmos_builder_set_angular_damping(CosmosRigidBodyBuilder *builder, double value);
+void cosmos_builder_set_angular_damping(struct CosmosRigidBodyBuilder *builder, double value);
 
-void cosmos_builder_set_gravity_scale(CosmosRigidBodyBuilder *builder, double value);
+void cosmos_builder_set_gravity_scale(struct CosmosRigidBodyBuilder *builder, double value);
 
 /**
  * **激活**平移锁定（动态刚体不再平动，仅可转动）。`RigidBodyBuilder::lock_translations`
@@ -161,13 +185,13 @@ void cosmos_builder_set_gravity_scale(CosmosRigidBodyBuilder *builder, double va
  * 旧内存被释放、`builder` 句柄变成悬垂指针，调用方下一次 set/insert 就是
  * use-after-free（分配器恰好复用同一地址时还会「看起来正常」）。
  */
-void cosmos_builder_lock_translations(CosmosRigidBodyBuilder *builder);
+void cosmos_builder_lock_translations(struct CosmosRigidBodyBuilder *builder);
 
 /**
  * 显式释放一个**未插入**的 builder。插入 `cosmos_world_insert_body` 后所有权
  * 已转移，**不要**再调本函数（会 double-free）。null 是 no-op。
  */
-void cosmos_builder_destroy(CosmosRigidBodyBuilder *builder);
+void cosmos_builder_destroy(struct CosmosRigidBodyBuilder *builder);
 
 /**
  * 创建一个 `CosmosWorld`。
@@ -199,7 +223,7 @@ void cosmos_world_destroy(struct CosmosWorld *world);
 /**
  * 设太阳位置（光压方向参考）。
  */
-void cosmos_world_set_sun_position(struct CosmosWorld *world, Vec3 pos);
+void cosmos_world_set_sun_position(struct CosmosWorld *world, struct Vec3 pos);
 
 /**
  * 设/改 n-body 中心天体（按整数 id：0=Sun..9=Neptune）。`id < 0` 清除。
@@ -238,13 +262,14 @@ uint8_t cosmos_world_add_n_body(struct CosmosWorld *world, uint64_t body, double
  * builder 仍会被插入（返回其句柄）。
  */
 uint64_t cosmos_world_insert_body_as_gravity_source(struct CosmosWorld *world,
-                                                    CosmosRigidBodyBuilder *builder,
+                                                    struct CosmosRigidBodyBuilder *builder,
                                                     double mass);
 
 /**
  * 插入 builder，返回打包的 body 句柄（0 = 失败）。builder 所有权转移。
  */
-uint64_t cosmos_world_insert_body(struct CosmosWorld *world, CosmosRigidBodyBuilder *builder);
+uint64_t cosmos_world_insert_body(struct CosmosWorld *world,
+                                  struct CosmosRigidBodyBuilder *builder);
 
 /**
  * 设置某刚体的环境扰动配置（大气阻力 + 太阳光压 + 太阳风动压 +
@@ -340,12 +365,14 @@ uint64_t cosmos_world_get_shared_arena_size(const struct CosmosWorld *world);
  * 取刚体当前位置（3×f64）。`out` 指向 24 字节 native 缓冲（`Vec3`）。
  * 返回 1 成功 / 0 句柄无效或 world 为 null。
  */
-int32_t cosmos_body_translation_out(const struct CosmosWorld *world, uint64_t body, Vec3 *out);
+int32_t cosmos_body_translation_out(const struct CosmosWorld *world,
+                                    uint64_t body,
+                                    struct Vec3 *out);
 
 /**
  * 取刚体当前线速度（3×f64）。
  */
-int32_t cosmos_body_linvel_out(const struct CosmosWorld *world, uint64_t body, Vec3 *out);
+int32_t cosmos_body_linvel_out(const struct CosmosWorld *world, uint64_t body, struct Vec3 *out);
 
 /**
  * 取刚体质量（kg）。`NaN` 表示句柄无效 / world 为 null。

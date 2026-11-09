@@ -263,6 +263,7 @@ fn intersect_neural_count(
         set_error(ERR_NULL_POINTER, "world is null");
         return 0;
     };
+    let _query_lock = world.inner.query_lock.read();
     let Some((pose, shape)) = neural_shape(desc, weights) else {
         set_error(
             ERR_INVALID_ARGUMENT,
@@ -295,6 +296,7 @@ fn intersect_neural(
         set_error(ERR_NULL_POINTER, "world is null");
         return 0;
     };
+    let _query_lock = world.inner.query_lock.read();
     if out_handles.is_null() {
         set_error(ERR_NULL_POINTER, "output buffer is null");
         return 0;

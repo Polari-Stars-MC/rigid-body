@@ -1453,6 +1453,7 @@ pub extern "C" fn collider_voxel_cell_at_point(
             set_error(ERR_NULL_POINTER, "world is null");
             return Bool::FALSE;
         };
+        let _query_lock = world.inner.query_lock.read();
         if !vec3_finite(point) {
             set_error(ERR_INVALID_ARGUMENT, "invalid point");
             return Bool::FALSE;
@@ -1535,6 +1536,7 @@ pub extern "C" fn collider_voxel_read_cell(
             }
             return Bool::FALSE;
         };
+        let _query_lock = world.inner.query_lock.read();
 
         let Some(cache) = world.inner.voxel_grids.get(&collider) else {
             set_error(ERR_UNSUPPORTED, "collider is not a voxel collider");
@@ -1842,6 +1844,7 @@ pub extern "C" fn collider_voxel_ray_pick(
             set_error(ERR_NULL_POINTER, "world is null");
             return Bool::FALSE;
         };
+        let _query_lock = world.inner.query_lock.read();
         if !vec3_finite(origin) || !vec3_finite(direction) || !max_toi.is_finite() || max_toi < 0.0
         {
             set_error(ERR_INVALID_ARGUMENT, "invalid ray parameters");

@@ -246,6 +246,7 @@ pub extern "C" fn query_intersect_aabb_rigid_body_count(
             set_error(ERR_NULL_POINTER, "world is null");
             return 0;
         };
+        let _query_lock = world.inner.query_lock.read();
         if !valid_aabb(aabb) {
             set_error(ERR_INVALID_ARGUMENT, "invalid AABB");
             return 0;
@@ -296,6 +297,7 @@ pub extern "C" fn query_intersect_aabb_rigid_bodies(
             set_error(ERR_NULL_POINTER, "world is null");
             return 0;
         };
+        let _query_lock = world.inner.query_lock.read();
         if out_handles.is_null() {
             set_error(ERR_NULL_POINTER, "output buffer is null");
             return 0;

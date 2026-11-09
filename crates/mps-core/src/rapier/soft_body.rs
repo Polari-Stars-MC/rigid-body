@@ -123,7 +123,9 @@ unsafe fn spawn_node(
     .translation(vec3_to_rapier(position))
     .additional_mass(mass);
 
-    let body = Box::into_raw(Box::new(builder.build()));
+    let body = Box::into_raw(Box::new(crate::rapier::ffi::RigidBodyMemHandle {
+        inner: builder.build(),
+    }));
     let body_handle =
         crate::rapier::rigid_body::world_insert_rigid_body(world as *mut WorldHandle, body);
     if body_handle == 0 {

@@ -66,6 +66,19 @@ jobs:
         run: |
           git diff --exit-code -- crates/mps-core/include/rigid_body.h crates/mps-cosmos/include/cosmos.h
 
+      # The generated headers must be self-contained C: they are the contract for
+      # any C/FFM consumer, so a header that references undefined types is broken
+      # even if byte-reproducible. Syntax-check both with a real C compiler.
+      - name: Syntax-check generated C headers (self-contained)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          echo '#include "crates/mps-core/include/rigid_body.h"' > /tmp/hdr_core.c
+          echo 'int main(void) { return 0; }' >> /tmp/hdr_core.c
+          echo '#include "crates/mps-cosmos/include/cosmos.h"' > /tmp/hdr_cosmos.c
+          echo 'int main(void) { return 0; }' >> /tmp/hdr_cosmos.c
+          gcc -fsyntax-only -std=c11 -Wall /tmp/hdr_core.c
+          gcc -fsyntax-only -std=c11 -Wall /tmp/hdr_cosmos.c
+
       # `crates/mps-web/src/metrics.rs` carries 18 constants consumed by the docs
       # site. The in-repo guard (`verify_metrics_sync`) only recomputes 3 of them,
       # so anything else could drift unnoticed. Regenerating and diffing is the

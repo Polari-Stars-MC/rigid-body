@@ -3,17 +3,17 @@ use crate::rapier::error::{
     ERR_INVALID_ARGUMENT, ERR_NOT_FOUND, ERR_NULL_POINTER, ffi_guard, set_error,
 };
 use crate::rapier::ffi::{
-    AabbDesc, Bool, ColliderBuilderHandle, ColliderHandleRaw, InteractionGroupsDesc, Obb, Quat,
-    RigidBodyHandleRaw, ShapeDesc, Sphere, Vec3, WorldHandle, active_events_from_bits,
-    active_hooks_from_bits, interaction_groups_to_rapier, isometry_from_parts,
-    pack_collider_handle, quat_finite, quat_from_rapier, shape_desc_valid, shape_from_desc,
-    unpack_collider_handle, unpack_rigid_body_handle, vec3_finite, vec3_from_rapier,
-    vec3_to_rapier,
+    AabbDesc, Bool, ColliderBuilderHandle, ColliderHandleRaw, ColliderMemHandle,
+    InteractionGroupsDesc, Obb, Quat, RigidBodyHandleRaw, ShapeDesc, Sphere, Vec3, WorldHandle,
+    active_events_from_bits, active_hooks_from_bits, interaction_groups_to_rapier,
+    isometry_from_parts, pack_collider_handle, quat_finite, quat_from_rapier, shape_desc_valid,
+    shape_from_desc, unpack_collider_handle, unpack_rigid_body_handle, vec3_finite,
+    vec3_from_rapier, vec3_to_rapier,
 };
 use rapier3d::math::{Pose, Rotation, Vector};
 use rapier3d::na::Unit;
 use rapier3d::prelude::{
-    Array2, CoefficientCombineRule, Collider, ColliderBuilder, SharedShape, TypedShape,
+    Array2, CoefficientCombineRule, ColliderBuilder, SharedShape, TypedShape,
 };
 
 // Side-channel that carries a voxel source grid from `collider_builder_build`
@@ -743,7 +743,9 @@ pub extern "C" fn collider_builder_create_medial_spheres(
 /// `builder` must be a pointer returned by a `collider_builder_create_*`
 /// function. It is consumed by this call and must not be used afterwards.
 #[unsafe(no_mangle)]
-pub extern "C" fn collider_builder_build(builder: *mut ColliderBuilderHandle) -> *mut Collider {
+pub extern "C" fn collider_builder_build(
+    builder: *mut ColliderBuilderHandle,
+) -> *mut ColliderMemHandle {
     ffi_guard(std::ptr::null_mut(), || {
         if builder.is_null() {
             set_error(ERR_NULL_POINTER, "builder is null");
@@ -757,7 +759,9 @@ pub extern "C" fn collider_builder_build(builder: *mut ColliderBuilderHandle) ->
         } = *builder;
         // Hand the voxel source grid (if any) to the next `world_insert_collider*`.
         PENDING_VOXEL_CACHE.with(|slot| *slot.borrow_mut() = voxel_source);
-        Box::into_raw(Box::new(inner.build()))
+        Box::into_raw(Box::new(ColliderMemHandle {
+            inner: inner.build(),
+        }))
     })
 }
 
@@ -784,7 +788,7 @@ pub extern "C" fn collider_builder_destroy(builder: *mut ColliderBuilderHandle) 
 /// `collider` must be a pointer returned by `collider_builder_build` or
 /// `world_copy_collider` that has not already been destroyed.
 #[unsafe(no_mangle)]
-pub extern "C" fn collider_destroy_raw(collider: *mut Collider) {
+pub extern "C" fn collider_destroy_raw(collider: *mut ColliderMemHandle) {
     ffi_guard((), || {
         if collider.is_null() {
             set_error(ERR_NULL_POINTER, "collider is null");
@@ -1107,7 +1111,7 @@ pub extern "C" fn collider_builder_set_contact_force_event_threshold(
 #[unsafe(no_mangle)]
 pub extern "C" fn world_insert_collider(
     world: *mut WorldHandle,
-    memory_handle: *mut Collider,
+    memory_handle: *mut ColliderMemHandle,
 ) -> ColliderHandleRaw {
     ffi_guard(0, || {
         let Some(world) = (unsafe { world.as_mut() }) else {
@@ -1119,7 +1123,7 @@ pub extern "C" fn world_insert_collider(
             return 0;
         }
 
-        let mut built = unsafe { *Box::from_raw(memory_handle) };
+        let mut built = unsafe { Box::from_raw(memory_handle).inner };
         world.inner.runtime_settings.apply_collider(&mut built);
         let handle = world.inner.colliders.insert(built);
         crate::rapier::world::invalidate_region_index(&mut world.inner);
@@ -1141,7 +1145,7 @@ pub extern "C" fn world_insert_collider(
 #[unsafe(no_mangle)]
 pub extern "C" fn world_insert_collider_with_parent(
     world: *mut WorldHandle,
-    memory_handle: *mut Collider,
+    memory_handle: *mut ColliderMemHandle,
     parent: RigidBodyHandleRaw,
 ) -> ColliderHandleRaw {
     ffi_guard(0, || {
@@ -1154,7 +1158,7 @@ pub extern "C" fn world_insert_collider_with_parent(
             return 0;
         }
 
-        let mut built = unsafe { *Box::from_raw(memory_handle) };
+        let mut built = unsafe { Box::from_raw(memory_handle).inner };
         world.inner.runtime_settings.apply_collider(&mut built);
         let handle = world.inner.colliders.insert_with_parent(
             built,
@@ -1219,7 +1223,7 @@ pub extern "C" fn world_remove_collider(
 pub extern "C" fn world_copy_collider(
     world: *mut WorldHandle,
     handle: ColliderHandleRaw,
-) -> *mut Collider {
+) -> *mut ColliderMemHandle {
     ffi_guard(std::ptr::null_mut(), || {
         let Some(world) = (unsafe { world.as_mut() }) else {
             set_error(ERR_NULL_POINTER, "world is null");
@@ -1236,7 +1240,7 @@ pub extern "C" fn world_copy_collider(
             return std::ptr::null_mut();
         };
 
-        Box::into_raw(Box::new(collider))
+        Box::into_raw(Box::new(ColliderMemHandle { inner: collider }))
     })
 }
 
