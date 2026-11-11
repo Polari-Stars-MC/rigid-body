@@ -477,7 +477,7 @@ jni-mangle-title = 符号重整（symbol mangling）
 jni-mangle-desc = export_name 必须与 Java 类 FQN 严格对齐：'.' 转下划线，标识符内的 '_' 转成 '_1'。
 jni-col-class = Java 类
 jni-col-symbol = 导出符号前缀
-jni-mangle-note = 漏写 _1 会让 System.load 成功但 dlsym 失败 → UnsatisfiedLinkError；RigidBodyNative 必须写 mps_1rigid_1body，RapierNative 不写 _1。
+jni-mangle-note = 库名是 mps_rigid_body（mps-jni），整名无下划线、无需 _1；_1 转义只作用于类 FQN 包名里的下划线（如 cn_1grass_1block）。漏写会导致 System.load 成功但 dlsym 失败 → UnsatisfiedLinkError。
 jni-groups-title = API 分组（{ $ffi } 个 extern C 入口）
 jni-group-abi-title = ABI / 版本
 jni-group-abi-desc = abiVersion / abiSupportsFfm / abiSupportsJni / last_error_code / last_error_message / clear。
@@ -515,6 +515,33 @@ jni-deploy-title = 部署
 jni-deploy-lib = cargo build --release -p mps-jni 产物 mps_rigid_body.dll 放进 src/main/resources/natives/。
 jni-deploy-load = Java 端按架构 System.load("mps_rigid_body")，缺失时 UnsatisfiedLinkError 会带出错的符号名。
 jni-deploy-version = ABI 通过 abiVersion() 商谈；当前 mps-web 自报 v{ $version }，运行时不匹配应由调用方主动 abort。
+# ---- Debug replay page ----
+nav-debug-replay = 调试回放
+replay-tag = // MPS
+replay-title = 调试录制与回放
+replay-desc = Jolt-Viewer 风格的捕获/回放：debugRecording* JNI 面录制 13-lane 体快照环形缓冲，并导出可被 Canvas 渲染器解码的回放 blob。
+replay-lifecycle-title = 录制生命周期
+replay-lifecycle-lead = 环形缓冲采用 Jolt-Viewer 溢出语义：写满后覆盖最旧帧，录制占用永不超过容量上限。
+replay-lifecycle-note = 未录制时 capture 是静默 no-op，热路径可在每次 step 后无条件调用。max_frames 上限为 MAX_OUTPUT_CAPACITY；容量非法时 start() 返回 0 并置 ERR_INVALID_ARGUMENT。
+replay-blob-title = 导出 blob 布局
+replay-blob-desc = debugRecordingExport 两段式：先以 out = 0 查询总 f64 槽数，分配后再调一次。所有值都是 f64（handle 与 magic 以原始位型承载）。
+replay-col-slot = 槽位
+replay-col-value = 值
+replay-col-meaning = 含义
+replay-row-frame-count = 保留帧数；[1] 是环形溢出丢弃的最旧帧数（未溢出为 0）。
+replay-row-dropped = 帧头。magic 槽承载 0x4d50534452303131（"MPSDR01"）的 f64 位型——解码前先校验。
+replay-row-magic = 本帧体数（fixed + dynamic 全量快照）。
+replay-row-body-count = 帧步长（秒）——捕获时的 step dt。
+replay-row-dt = 打包 RigidBodyHandleRaw u64（与 worldBodySnapshot 同一打包：高 32 = index，低 32 = generation）。
+replay-row-handle = pos3 + quat4 (i,j,k,w) + linvel3 + angvel3 —— 与 worldBodySnapshot 完全相同的 13-lane 布局。
+replay-row-lanes = 每体 13 个 f64：0..3 位姿、3..7 四元数、7..10 线速度、10..13 角速度——权威 lane 表见 rigid_body.h 的 BodySnapshot 文档。
+replay-blob-note = blob 为小端原生序；用 ByteOrder.nativeOrder() 的 DoubleBuffer 读取。录制期间也可用 debugRecordingFrame 逐帧读（布局不含开头 frame_count/dropped 两槽）。
+replay-java-title = 最小 Java 回放循环
+replay-java-lead = 零新依赖：Unsafe.allocateMemory 存 blob、DoubleBuffer 解码、任意 Canvas/BufferedImage 渲染器做固定轴正交投影。
+replay-java-note = 示例只保留渲染所需的位姿；需要运动矢量或轨迹线时保留速度 lane。handle 跨帧稳定，实体颜色/标签在整个录制期间保持一致。
+replay-recenter-title = 浮动原点交互
+replay-recenter-lead = 长距航线 recenter 会把所有体平移同一偏移；录制帧坐标恰好跳变一次。
+replay-recenter-note = 以 pivot 相对坐标渲染，跳变在画面上不可见。cosmosWorldRecenter 必须在两次 step 之间调用，绝不能在 step 中途。
 # ---- FFM page ----
 ffm-tag = // MPS
 ffm-title = Java FFM 绑定

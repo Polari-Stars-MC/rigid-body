@@ -327,8 +327,22 @@ mod tests {
             if stem.is_empty() || stem == "lib" || stem.starts_with('_') {
                 continue;
             }
-            let needle = format!("mod {stem};");
-            if !sources.iter().any(|(_, body)| body.contains(&needle)) {
+            // Wire-up detection must match a *real* module declaration, not a
+            // substring: `body.contains("mod x;")` also matches a comment line
+            // ("// mod x; removed") or a suffix collision ("mod x_old;" does
+            // not, but "mod x;" inside "/// mod x;" does). Parse per line and
+            // require the declaration token at line start (after optional
+            // `pub`), and the statement terminated by `;`.
+            let needle_line = |body: &str| {
+                body.lines().any(|line| {
+                    let t = line.trim_start();
+                    let t = t.strip_prefix("pub ").unwrap_or(t);
+                    let t = t.strip_prefix("mod ").unwrap_or(t);
+                    let t = t.trim_end();
+                    t == format!("{stem};")
+                })
+            };
+            if !sources.iter().any(|(_, body)| needle_line(body)) {
                 unwired.push(rel.display().to_string());
             }
         }

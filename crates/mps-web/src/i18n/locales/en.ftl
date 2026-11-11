@@ -477,7 +477,7 @@ jni-mangle-title = Symbol mangling
 jni-mangle-desc = The export_name must match the Java class FQN exactly: '.' becomes underscore, and '_' inside an identifier becomes '_1'.
 jni-col-class = Java class
 jni-col-symbol = Exported symbol prefix
-jni-mangle-note = Forgetting _1 makes System.load succeed but dlsym fail → UnsatisfiedLinkError; RigidBodyNative must use mps_1rigid_1body, RapierNative needs no _1.
+jni-mangle-note = Forgetting _1 makes System.load succeed but dlsym fail → UnsatisfiedLinkError; the library name is mps_rigid_body (mps-jni), so no _1 is needed anywhere — underscore mangling only applies to class-FQN packages like cn_1grass_1block.
 jni-groups-title = API surface groups ({ $ffi } extern C entries)
 jni-group-abi-title = ABI / version
 jni-group-abi-desc = abiVersion / abiSupportsFfm / abiSupportsJni / last_error_code / last_error_message / clear.
@@ -515,6 +515,33 @@ jni-deploy-title = Deployment
 jni-deploy-lib = The cargo build --release -p mps-jni product mps_rigid_body.dll goes into src/main/resources/natives/.
 jni-deploy-load = On the Java side, System.load("mps_rigid_body") per architecture; on failure UnsatisfiedLinkError will carry the offending symbol name.
 jni-deploy-version = ABI is negotiated via abiVersion(); mps-web self-reports v{ $version }, any runtime mismatch should cause the caller to abort.
+# ---- Debug replay page ----
+nav-debug-replay = Debug Replay
+replay-tag = // MPS
+replay-title = Debug Recording & Replay
+replay-desc = Jolt-Viewer-style capture/replay: the debugRecording* JNI surface records a ring buffer of 13-lane body snapshots and exports a replay blob for a canvas renderer.
+replay-lifecycle-title = Recording lifecycle
+replay-lifecycle-lead = A ring buffer with Jolt-Viewer overflow semantics: once full, the oldest frame is evicted, so a recording never grows unbounded.
+replay-lifecycle-note = capture is a silent no-op while not recording, so the hot path can call it unconditionally after every step. max_frames is capped at MAX_OUTPUT_CAPACITY; start() returns 0 and sets ERR_INVALID_ARGUMENT on a bad capacity.
+replay-blob-title = Export blob layout
+replay-blob-desc = debugRecordingExport is two-phase: call with out = 0 to query the total f64 slot count, allocate, then call again. All values are f64 (handles and the magic are carried as raw bits).
+replay-col-slot = Slot
+replay-col-value = Value
+replay-col-meaning = Meaning
+replay-row-frame-count = Number of retained frames; [1] is the count of oldest frames evicted by the ring (0 unless the ring overflowed).
+replay-row-dropped = Frame header. The magic slot carries 0x4d50534452303131 ("MPSDR01") as f64 bits — verify before decoding.
+replay-row-magic = Number of bodies in this frame (fixed + dynamic, the full snapshot).
+replay-row-body-count = Frame delta time in seconds — the step dt at capture time.
+replay-row-dt = Packed RigidBodyHandleRaw u64 (same packing as worldBodySnapshot: high 32 = index, low 32 = generation).
+replay-row-handle = pos3 + quat4 (i,j,k,w) + linvel3 + angvel3 — identical 13-lane layout to worldBodySnapshot.
+replay-row-lanes = 13 f64 per body, offset 0 = x, 1 = y, 2 = z, 3..7 = quaternion, 8..11 = linear velocity, 11..14... — see rigid_body.h `BodySnapshot` doc for the authoritative lane table.
+replay-blob-note = The blob is little-endian native order; read it through a DoubleBuffer with ByteOrder.nativeOrder(). Frame reads during recording are also available via debugRecordingFrame (layout without the leading frame_count/dropped slots).
+replay-java-title = Minimal Java replay loop
+replay-java-lead = No new dependency: Unsafe.allocateMemory for the blob, DoubleBuffer for decoding, and any Canvas/BufferedImage renderer doing a fixed-axis orthographic projection.
+replay-java-note = The example keeps only poses for rendering; keep the velocity lanes when you need motion vectors or trail rendering. Handles are stable across frames, so entity colors/labels survive the whole recording.
+replay-recenter-title = Floating origin interaction
+replay-recenter-lead = A long-haul flight recentering shifts every body by the same offset; recorded frame coordinates jump by that offset exactly once.
+replay-recenter-note = Render relative-to-pivot instead of absolute coordinates and the jump disappears from the picture. cosmosWorldRecenter must be called between steps, never mid-step.
 # ---- FFM page ----
 ffm-tag = // MPS
 ffm-title = Java FFM Bindings

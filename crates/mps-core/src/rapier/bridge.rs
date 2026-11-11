@@ -44,9 +44,14 @@ use rayon::prelude::*;
 /// ByteBuffer buf = ByteBuffer.allocateDirect(N * 8).order(ByteOrder.nativeOrder());
 /// DoubleBuffer db = buf.asDoubleBuffer();
 ///
-/// // Per frame: write data into db, pass address to native
-/// long ptr = ((sun.nio.ch.DirectBuffer) buf).address();
-/// RigidBodyNative.worldBodySnapshot(world, handlesPtr, ptr, N);
+/// // Per frame: write data into db, pass address to native.
+/// // NOTE: `((sun.nio.ch.DirectBuffer) buf).address()` (the old example) is a
+/// // JDK-internal interface — blocked by strong encapsulation on JDK 9+
+/// // without --add-exports java.base/sun.nio.ch=ALL-UNNAMED. The supported
+/// // accessors are JNI `GetDirectBufferAddress` (where a JNIEnv is already
+/// // available) or `MemorySegment.address()` on the FFM path (Java 22+).
+/// long ptr = addressOf(buf);   // via GetDirectBufferAddress / FFM
+/// RapierNative.worldBodySnapshot(world, handlesPtr, ptr, N);
 /// ```
 ///
 /// # Safety
