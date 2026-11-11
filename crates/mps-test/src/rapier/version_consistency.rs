@@ -24,8 +24,10 @@
 //!
 //! - `ARENA_VERSION = 2` pins the binary layout of the shared-memory ring
 //!   (slot strides, header size, slot capacities).
-//! - `ABI_VERSION = 1` pins the **top-level** foreign-function entry-point
-//!   surface as seen by Java via `mps-ffm::abi_version()`.
+//! - `ABI_VERSION = 2` pins the **top-level** foreign-function entry-point
+//!   surface as seen by Java via `mps-ffm::abi_version()`. v2 = v1 + 纯增量
+//!   探针符号（`abi_supports_formula_ffi` / `abi_formula_ffi_healthcheck` /
+//!   `abi_error_slot_note`，公式层 FFM 兼容性），旧符号全部保留。
 //!
 //! What this module *does* enforce:
 //!
@@ -45,7 +47,7 @@
 #[cfg(test)]
 pub const CURRENT_ARENA_VERSION: u32 = 2;
 #[cfg(test)]
-pub const CURRENT_ABI_VERSION: u32 = 1;
+pub const CURRENT_ABI_VERSION: u32 = 2;
 
 #[cfg(test)]
 mod tests {

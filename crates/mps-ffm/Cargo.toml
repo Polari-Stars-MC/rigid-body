@@ -8,3 +8,4 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 mps-core = { path = "../mps-core" }
+mps-formula = { path = "../mps-formula" }

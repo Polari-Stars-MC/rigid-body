@@ -18,7 +18,7 @@
 #[cfg(test)]
 pub const ARENA_VERSION_PIN: u32 = 2;
 #[cfg(test)]
-pub const ABI_VERSION_PIN: u32 = 1;
+pub const ABI_VERSION_PIN: u32 = 2;
 
 #[cfg(test)]
 mod tests {
