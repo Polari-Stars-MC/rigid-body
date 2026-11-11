@@ -23,7 +23,7 @@ version = "0.1.4"
 edition = "2024"
 
 [workspace.dependencies]
-rapier3d = { package = "rapier3d-f64", path = "rapier/crates/rapier3d-f64", features = ["parallel"] }
+rapier3d = { package = "rapier3d-f64", path = "rapier/crates/rapier3d-f64", features = ["parallel", "enhanced-determinism"] }
 ljni = { version = "0.21.0", package = "jni" }
 parking_lot = "0.12.5"
 hashbrown = "0.17.1"

@@ -228,16 +228,40 @@ pub fn lense_thirring_precession_rate(
     Some(2.0 * g * j / (c * c * radius_m * radius_m * radius_m))
 }
 
+/// [`radiation_absorbed_dose`] 的 checked 变体：显式域校验（质量必须为正，
+/// 品质因子非负），结果非有限同样报错。
+pub fn radiation_absorbed_dose_checked(
+    energy_joules: f64,
+    mass_kg: f64,
+    quality_factor: f64,
+) -> Result<f64, crate::FormulaError> {
+    use crate::FormulaError;
+    if !energy_joules.is_finite() {
+        return Err(FormulaError::NonFiniteInput {
+            parameter: "energy_joules",
+        });
+    }
+    if mass_kg <= 0.0 || !mass_kg.is_finite() {
+        return Err(FormulaError::OutOfDomain {
+            parameter: "mass_kg",
+            requirement: "> 0 kg",
+        });
+    }
+    if quality_factor < 0.0 || !quality_factor.is_finite() {
+        return Err(FormulaError::OutOfDomain {
+            parameter: "quality_factor",
+            requirement: ">= 0 (dimensionless)",
+        });
+    }
+    crate::domain::finite_result(energy_joules / mass_kg * quality_factor, "absorbed dose")
+}
+
 pub fn radiation_absorbed_dose(
     energy_joules: f64,
     mass_kg: f64,
     quality_factor: f64,
 ) -> Option<f64> {
-    if !finite(&[energy_joules, mass_kg, quality_factor]) || mass_kg <= 0.0 || quality_factor < 0.0
-    {
-        return None;
-    }
-    Some(energy_joules / mass_kg * quality_factor)
+    radiation_absorbed_dose_checked(energy_joules, mass_kg, quality_factor).ok()
 }
 
 /// Schwarzschild ISCO: r_isco = 6GM/c² (already in relativity, keep here for convenience).

@@ -974,6 +974,191 @@ pub extern "C" fn voxel_build_stats(
     })
 }
 
+/// Deterministic full-3D greedy box bake: merges every solid cell into the
+/// smallest possible list of axis-aligned boxes (x → y → z sweep, single pass,
+/// generation-counter visited mask shared with the collider builders).
+///
+/// This is the pure "compound baker" half of the voxel pipeline: bake once per
+/// chunk on the Java side, cache the box list, and hand the cached min/max
+/// boxes to [`crate::rapier::collider::collider_builder_create_compound_boxes`]
+/// to rebuild the collider without re-running the merge (or re-uploading the
+/// voxel grid).
+///
+/// Boxes are emitted in sweep order (z, then y, then x), deterministic for a
+/// given grid. Returns `None` on index overflow; the FFI wrapper maps that to
+/// `ERR_INTERNAL`.
+pub fn bake_voxel_boxes(grid: &VoxelGrid<'_>) -> Option<Vec<[f64; 6]>> {
+    let cell_count = grid.voxels.len();
+    let mut visited: Vec<u32> = vec![0; cell_count];
+    const GENERATION: u32 = 1;
+    let mut boxes = Vec::new();
+
+    for z in 0..grid.size_z {
+        for y in 0..grid.size_y {
+            for x in 0..grid.size_x {
+                let start = grid.index(x, y, z)?;
+                if visited[start] == GENERATION || !grid.is_solid(x, y, z) {
+                    continue;
+                }
+
+                // Identical sweep to `build_greedy_cuboids_y_range` minus the
+                // y-range clamp (bake is single-threaded over the whole grid).
+                let mut max_x = x + 1;
+                while max_x < grid.size_x {
+                    let i = grid.index(max_x, y, z)?;
+                    if visited[i] == GENERATION || !grid.is_solid(max_x, y, z) {
+                        break;
+                    }
+                    max_x += 1;
+                }
+
+                let mut max_y = y + 1;
+                'expand_y: while max_y < grid.size_y {
+                    for xx in x..max_x {
+                        let i = grid.index(xx, max_y, z)?;
+                        if visited[i] == GENERATION || !grid.is_solid(xx, max_y, z) {
+                            break 'expand_y;
+                        }
+                    }
+                    max_y += 1;
+                }
+
+                let mut max_z = z + 1;
+                'expand_z: while max_z < grid.size_z {
+                    for yy in y..max_y {
+                        for xx in x..max_x {
+                            let i = grid.index(xx, yy, max_z)?;
+                            if visited[i] == GENERATION || !grid.is_solid(xx, yy, max_z) {
+                                break 'expand_z;
+                            }
+                        }
+                    }
+                    max_z += 1;
+                }
+
+                for zz in z..max_z {
+                    for yy in y..max_y {
+                        for xx in x..max_x {
+                            let i = grid.index(xx, yy, zz)?;
+                            visited[i] = GENERATION;
+                        }
+                    }
+                }
+
+                let min = grid.cell_min(x, y, z);
+                let max = grid.cell_min(max_x, max_y, max_z);
+                boxes.push([min.x, min.y, min.z, max.x, max.y, max.z]);
+            }
+        }
+    }
+
+    Some(boxes)
+}
+
+/// Number of f64 values `voxel_bake_boxes` writes per baked box (min/max).
+const BAKE_BOX_STRIDE: usize = 6;
+
+/// Bakes a voxel grid into a deterministic axis-aligned box list (the
+/// "compound baker" FFI entry).
+///
+/// Merges every solid cell into the fewest axis-aligned boxes via a full-3D
+/// greedy sweep, then writes `count * 6` f64 values to `out_boxes` (min_x,
+/// min_y, min_z, max_x, max_y, max_z per box, world coordinates) and returns
+/// the box count. Java caches this list per chunk and rebuilds colliders from
+/// the cached boxes with `collider_builder_create_compound_boxes` — no voxel
+/// re-upload, no re-merge.
+///
+/// Pass `out_boxes = null` (with any `out_count`) to only query the count and
+/// size the buffer; a buffer holding fewer than `count * 6` f64s fails with
+/// `ERR_CAPACITY` and nothing is written.
+///
+/// # Safety
+///
+/// `voxels` must point to at least `size_x*size_y*size_z` readable bytes;
+/// `out_boxes` must be null or point to at least `out_count` writable f64s.
+#[unsafe(no_mangle)]
+pub extern "C" fn voxel_bake_boxes(
+    voxels: *const u8,
+    size_x: u32,
+    size_y: u32,
+    size_z: u32,
+    voxel_size_x: f64,
+    voxel_size_y: f64,
+    voxel_size_z: f64,
+    origin: Vec3,
+    out_boxes: *mut f64,
+    out_count: u32,
+) -> u32 {
+    ffi_guard(0, || {
+        if voxels.is_null() {
+            set_error(ERR_NULL_POINTER, "voxels is null");
+            return 0;
+        }
+        if size_x == 0
+            || size_y == 0
+            || size_z == 0
+            || !voxel_size_x.is_finite()
+            || voxel_size_x <= 0.0
+            || !voxel_size_y.is_finite()
+            || voxel_size_y <= 0.0
+            || !voxel_size_z.is_finite()
+            || voxel_size_z <= 0.0
+            || !origin.x.is_finite()
+            || !origin.y.is_finite()
+            || !origin.z.is_finite()
+        {
+            set_error(ERR_INVALID_ARGUMENT, "invalid voxel grid arguments");
+            return 0;
+        }
+        let Some(xy) = (size_x as usize).checked_mul(size_y as usize) else {
+            set_error(ERR_CAPACITY, "voxel grid size overflow");
+            return 0;
+        };
+        let Some(len) = xy.checked_mul(size_z as usize) else {
+            set_error(ERR_CAPACITY, "voxel grid size overflow");
+            return 0;
+        };
+        if len > MAX_VOXEL_CELLS {
+            set_error(ERR_CAPACITY, "voxel grid too large");
+            return 0;
+        }
+
+        let voxels = unsafe { slice::from_raw_parts(voxels, len) };
+        let grid = VoxelGrid {
+            voxels,
+            size_x: size_x as usize,
+            size_y: size_y as usize,
+            size_z: size_z as usize,
+            voxel_size_x,
+            voxel_size_y,
+            voxel_size_z,
+            origin,
+        };
+        let Some(boxes) = bake_voxel_boxes(&grid) else {
+            set_error(ERR_INTERNAL, "voxel bake failed");
+            return 0;
+        };
+
+        if out_boxes.is_null() {
+            // Count-only query.
+            return usize_to_u32(boxes.len());
+        }
+        let needed = boxes.len().saturating_mul(BAKE_BOX_STRIDE);
+        if (out_count as usize) < needed {
+            set_error(ERR_CAPACITY, "bake box buffer too small");
+            return 0;
+        }
+        unsafe {
+            for (i, b) in boxes.iter().enumerate() {
+                for (j, v) in b.iter().enumerate() {
+                    out_boxes.add(i * BAKE_BOX_STRIDE + j).write_unaligned(*v);
+                }
+            }
+        }
+        usize_to_u32(boxes.len())
+    })
+}
+
 /// Computes build statistics for a voxelized AABB without building a collider.
 ///
 /// # Safety

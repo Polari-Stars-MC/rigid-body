@@ -525,6 +525,20 @@ impl KahanVec3 {
         self.sum = Vec3::default();
         self.compensation = Vec3::default();
     }
+
+    /// Overwrite the compensated sum, clearing the compensation term.
+    ///
+    /// Floating-origin recentering uses this to translate the accumulator's
+    /// baseline after the world moves: the accumulated *increments* stay valid
+    /// (they are frame-independent), but their running base must be re-anchored
+    /// to the new origin, and the old large-magnitude compensation becomes
+    /// meaningless at the new origin — resetting it is exactly the point of
+    /// recentering.
+    #[inline]
+    pub fn set_value(&mut self, value: Vec3) {
+        self.sum = value;
+        self.compensation = Vec3::default();
+    }
 }
 
 // ---------------------------------------------------------------------------

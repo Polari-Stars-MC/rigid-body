@@ -33,32 +33,93 @@ pub fn ballistic_coefficient_checked(
 
 /// Bi-elliptic transfer total delta-V for triple-impulse maneuver.
 /// Efficient when r2/r1 > 11.94 for coplanar transfers.
+/// `hohmann_transfer` 的 checked 变体：逐参数域校验并拒绝非有限中间量。
+pub fn hohmann_transfer_checked(
+    mu: f64,
+    radius1: f64,
+    radius2: f64,
+) -> Result<HohmannTransfer, FormulaError> {
+    domain::positive(mu, "mu")?;
+    domain::positive(radius1, "radius1")?;
+    domain::positive(radius2, "radius2")?;
+    let transfer_a = 0.5 * (radius1 + radius2);
+    let circular1 = domain::sqrt(mu / radius1)?;
+    let circular2 = domain::sqrt(mu / radius2)?;
+    let transfer_periapsis = domain::sqrt(mu * (2.0 / radius1 - 1.0 / transfer_a))?;
+    let transfer_apoapsis = domain::sqrt(mu * (2.0 / radius2 - 1.0 / transfer_a))?;
+    let delta_v1 = transfer_periapsis - circular1;
+    let delta_v2 = circular2 - transfer_apoapsis;
+    Ok(HohmannTransfer {
+        delta_v1,
+        delta_v2,
+        total_delta_v: delta_v1.abs() + delta_v2.abs(),
+        transfer_time: PI * domain::sqrt(transfer_a.powi(3) / mu)?,
+    })
+}
+
+pub fn hohmann_transfer(mu: f64, radius1: f64, radius2: f64) -> Option<HohmannTransfer> {
+    hohmann_transfer_checked(mu, radius1, radius2).ok()
+}
+
+/// `bi_elliptic_transfer_delta_v` 的 checked 变体。
+pub fn bi_elliptic_transfer_delta_v_checked(
+    mu: f64,
+    r1: f64,
+    r2: f64,
+    r_intermediate: f64,
+) -> Result<(f64, f64, f64, f64), FormulaError> {
+    domain::positive(mu, "mu")?;
+    domain::positive(r1, "r1")?;
+    domain::positive(r2, "r2")?;
+    domain::positive(r_intermediate, "r_intermediate")?;
+    let vc1 = domain::sqrt(mu / r1)?;
+    let vc2 = domain::sqrt(mu / r2)?;
+    let a1 = 0.5 * (r1 + r_intermediate);
+    let a2 = 0.5 * (r_intermediate + r2);
+    let vp1 = domain::sqrt(mu * (2.0 / r1 - 1.0 / a1))?;
+    let va1 = domain::sqrt(mu * (2.0 / r_intermediate - 1.0 / a1))?;
+    let vp2 = domain::sqrt(mu * (2.0 / r_intermediate - 1.0 / a2))?;
+    let va2 = domain::sqrt(mu * (2.0 / r2 - 1.0 / a2))?;
+    let dv1 = vp1 - vc1;
+    let dv2 = vp2 - va1;
+    let dv3 = vc2 - va2;
+    Ok((dv1, dv2, dv3, dv1.abs() + dv2.abs() + dv3.abs()))
+}
+
 pub fn bi_elliptic_transfer_delta_v(
     mu: f64,
     r1: f64,
     r2: f64,
     r_intermediate: f64,
 ) -> Option<(f64, f64, f64, f64)> {
-    if !finite(&[mu, r1, r2, r_intermediate])
-        || mu <= 0.0
-        || r1 <= 0.0
-        || r2 <= 0.0
-        || r_intermediate <= 0.0
-    {
-        return None;
+    bi_elliptic_transfer_delta_v_checked(mu, r1, r2, r_intermediate).ok()
+}
+
+/// `combined_maneuver_delta_v` 的 checked 变体。
+pub fn combined_maneuver_delta_v_checked(
+    mu: f64,
+    r1: f64,
+    r2: f64,
+    inclination_change: f64,
+) -> Result<(f64, f64, f64), FormulaError> {
+    domain::positive(mu, "mu")?;
+    domain::positive(r1, "r1")?;
+    domain::positive(r2, "r2")?;
+    domain::finite(inclination_change, "inclination_change")?;
+    if inclination_change < 0.0 {
+        return Err(FormulaError::OutOfDomain {
+            parameter: "inclination_change",
+            requirement: ">= 0 rad",
+        });
     }
-    let vc1 = (mu / r1).sqrt();
-    let vc2 = (mu / r2).sqrt();
-    let a1 = 0.5 * (r1 + r_intermediate);
-    let a2 = 0.5 * (r_intermediate + r2);
-    let vp1 = (mu * (2.0 / r1 - 1.0 / a1)).sqrt();
-    let va1 = (mu * (2.0 / r_intermediate - 1.0 / a1)).sqrt();
-    let vp2 = (mu * (2.0 / r_intermediate - 1.0 / a2)).sqrt();
-    let va2 = (mu * (2.0 / r2 - 1.0 / a2)).sqrt();
-    let dv1 = vp1 - vc1;
-    let dv2 = vp2 - va1;
-    let dv3 = vc2 - va2;
-    Some((dv1, dv2, dv3, dv1.abs() + dv2.abs() + dv3.abs()))
+    let v1 = domain::sqrt(mu / r1)?;
+    let v2 = domain::sqrt(mu / r2)?;
+    let at = 0.5 * (r1 + r2);
+    let vp = domain::sqrt(mu * (2.0 / r1 - 1.0 / at))?;
+    let va = domain::sqrt(mu * (2.0 / r2 - 1.0 / at))?;
+    let dv1 = vp - v1;
+    let dv_plane = domain::sqrt(va * va + v2 * v2 - 2.0 * va * v2 * inclination_change.cos())?;
+    Ok((dv1, dv_plane, dv1.abs() + dv_plane))
 }
 
 pub fn combined_maneuver_delta_v(
@@ -67,22 +128,7 @@ pub fn combined_maneuver_delta_v(
     r2: f64,
     inclination_change: f64,
 ) -> Option<(f64, f64, f64)> {
-    if !finite(&[mu, r1, r2, inclination_change])
-        || mu <= 0.0
-        || r1 <= 0.0
-        || r2 <= 0.0
-        || inclination_change < 0.0
-    {
-        return None;
-    }
-    let v1 = (mu / r1).sqrt();
-    let v2 = (mu / r2).sqrt();
-    let at = 0.5 * (r1 + r2);
-    let vp = (mu * (2.0 / r1 - 1.0 / at)).sqrt();
-    let va = (mu * (2.0 / r2 - 1.0 / at)).sqrt();
-    let dv1 = vp - v1;
-    let dv_plane = (va * va + v2 * v2 - 2.0 * va * v2 * inclination_change.cos()).sqrt();
-    Some((dv1, dv_plane, dv1.abs() + dv_plane))
+    combined_maneuver_delta_v_checked(mu, r1, r2, inclination_change).ok()
 }
 
 pub fn elements_to_state(elements: OrbitalElements, mu: f64) -> Option<StateVector> {
@@ -153,25 +199,6 @@ pub fn equilibrium_glide_ld(mu: f64, radius: f64, velocity: f64) -> Option<f64> 
         return None;
     }
     Some((g - centripetal) / g)
-}
-
-pub fn hohmann_transfer(mu: f64, radius1: f64, radius2: f64) -> Option<HohmannTransfer> {
-    if !finite(&[mu, radius1, radius2]) || mu <= 0.0 || radius1 <= 0.0 || radius2 <= 0.0 {
-        return None;
-    }
-    let transfer_a = 0.5 * (radius1 + radius2);
-    let circular1 = (mu / radius1).sqrt();
-    let circular2 = (mu / radius2).sqrt();
-    let transfer_periapsis = (mu * (2.0 / radius1 - 1.0 / transfer_a)).sqrt();
-    let transfer_apoapsis = (mu * (2.0 / radius2 - 1.0 / transfer_a)).sqrt();
-    let delta_v1 = transfer_periapsis - circular1;
-    let delta_v2 = circular2 - transfer_apoapsis;
-    Some(HohmannTransfer {
-        delta_v1,
-        delta_v2,
-        total_delta_v: delta_v1.abs() + delta_v2.abs(),
-        transfer_time: PI * (transfer_a.powi(3) / mu).sqrt(),
-    })
 }
 
 pub fn kepler_period(mu: f64, semi_major_axis: f64) -> Option<f64> {

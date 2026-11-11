@@ -26,6 +26,10 @@ const MAX_ZONAL: usize = 5;
 #[derive(Clone, Copy)]
 pub struct CelestialSource {
     pub body: &'static CelestialBody,
+    /// 天体质心的世界坐标（米）。历史行为：锚定世界原点（`ZERO`）。浮动原点
+    /// 重定心（`CosmosWorld::recenter`）会随刚体一起平移此位置——引力只依赖
+    /// 相对位矢 `position - self.position`，整体平移下物理不变。
+    pub position: Vector,
     /// 球谐模型最高阶（受 `body.max_degree` 上限约束）。
     pub max_sh_degree: u32,
     /// 是否启用本天体的引力（关闭则贡献为 0）。
@@ -54,6 +58,7 @@ impl CelestialSource {
         }
         Self {
             body,
+            position: Vector::ZERO, // 历史行为：天体锚定世界原点
             max_sh_degree,
             enabled: true,
             j_zonal_zonals: zonal,
@@ -178,6 +183,8 @@ pub fn celestial_acceleration(position: Vector, source: &CelestialSource) -> Vec
         return Vector::ZERO;
     }
 
+    // 相对位矢：天体质心不再硬编码世界原点（浮动原点重定心会平移源位置）。
+    let position = position - source.position;
     let gm = source.body.gm;
     let r_eq = source.body.equatorial_radius;
     if r_eq <= 0.0 {

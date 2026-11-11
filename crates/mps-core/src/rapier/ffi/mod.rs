@@ -6,8 +6,10 @@ pub use convert::*;
 pub use force_queue::*;
 pub use types::*;
 
+use std::panic::{AssertUnwindSafe, catch_unwind};
+
 use crate::rapier::error::{
-    ERR_INVALID_ARGUMENT, ERR_NULL_POINTER, ERR_OK, clear_error, set_error,
+    ERR_INTERNAL, ERR_INVALID_ARGUMENT, ERR_NULL_POINTER, ERR_OK, clear_error, set_error,
 };
 
 /// Common body for the *pure calculator* FFI wrappers.
@@ -35,19 +37,27 @@ where
         set_error(ERR_NULL_POINTER, "output pointer is null");
         return Bool::FALSE;
     }
-    match f() {
-        Some(v) => {
+    // Panic barrier (BOUNDARY.md "每个 extern "C" 入口走 ffi_guard"): the ~180
+    // scalar wrappers call straight into this helper, so a panic in the formula
+    // layer would unwind across the C ABI and abort the host JVM. Report
+    // ERR_INTERNAL and leave the caller's buffer untouched instead.
+    match catch_unwind(AssertUnwindSafe(f)) {
+        Ok(Some(v)) => {
             unsafe { *out = v };
             clear_error();
             Bool::TRUE
         }
-        None => {
+        Ok(None) => {
             if mps_formula::error::error_code() == ERR_OK {
                 set_error(
                     ERR_INVALID_ARGUMENT,
                     "input rejected by the formula domain checks",
                 );
             }
+            Bool::FALSE
+        }
+        Err(_) => {
+            set_error(ERR_INTERNAL, "panic caught in scalar FFI wrapper");
             Bool::FALSE
         }
     }

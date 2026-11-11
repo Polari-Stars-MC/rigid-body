@@ -12,9 +12,7 @@ use crate::rapier::ffi::{
 };
 use rapier3d::math::{Pose, Rotation, Vector};
 use rapier3d::na::Unit;
-use rapier3d::prelude::{
-    Array2, CoefficientCombineRule, ColliderBuilder, SharedShape, TypedShape,
-};
+use rapier3d::prelude::{Array2, CoefficientCombineRule, ColliderBuilder, SharedShape, TypedShape};
 
 // Side-channel that carries a voxel source grid from `collider_builder_build`
 // to the immediately-following `world_insert_collider*` call on the same

@@ -254,6 +254,44 @@ pub fn spherical_harmonics_acceleration(
     }
 }
 
+/// [`spherical_harmonics_acceleration`] 的 checked 变体：显式暴露"天体内部"
+/// 的静默截断——`|position| < 1 m`（原点母点，无物理意义）时返回
+/// [`FormulaError::OutOfDomain`] 而不是静默零矢量；球谐输入非有限或
+/// `ref_radius` 非正同样显式报错。正常轨道高度下与原函数逐位一致。
+pub fn spherical_harmonics_acceleration_checked(
+    position: Vec3,
+    body: &CelestialBody,
+    max_degree: u32,
+) -> Result<Vec3, crate::FormulaError> {
+    use crate::FormulaError;
+    if !position.x.is_finite() || !position.y.is_finite() || !position.z.is_finite() {
+        return Err(FormulaError::NonFiniteInput {
+            parameter: "position",
+        });
+    }
+    if body.ref_radius <= 0.0 || body.ref_radius.is_nan() {
+        return Err(FormulaError::OutOfDomain {
+            parameter: "body.ref_radius",
+            requirement: "> 0 m",
+        });
+    }
+    let radius =
+        (position.x * position.x + position.y * position.y + position.z * position.z).sqrt();
+    if radius < 1.0 {
+        return Err(FormulaError::OutOfDomain {
+            parameter: "position (|r| < 1 m, inside the body)",
+            requirement: "|r| >= 1 m",
+        });
+    }
+    let accel = spherical_harmonics_acceleration(position, body, max_degree);
+    if !accel.x.is_finite() || !accel.y.is_finite() || !accel.z.is_finite() {
+        return Err(FormulaError::NonFiniteResult {
+            quantity: "spherical harmonics acceleration",
+        });
+    }
+    Ok(accel)
+}
+
 // ---------------------------------------------------------------------------
 // Ellipsoid gravity — exact solution via Carlson elliptic integrals
 // ---------------------------------------------------------------------------

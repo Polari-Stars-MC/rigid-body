@@ -51,6 +51,10 @@ use std::collections::HashSet;
 /// precomputed at bind time, so the per-step skinning is just
 /// `Σ w_k · (boneRot_k · local_k + boneTrans_k)`.
 #[derive(Clone)]
+// Written by `soft_body_set_vertex_weights` (and mirrored into
+// `soft_data::VertexSkin`), consumed once the LBS skinning pass in the solver
+// lands — fields intentionally retained until then.
+#[allow(dead_code)]
 pub(crate) struct VertexSkin {
     pub bone_idx: [u32; 4],
     pub weight: [f64; 4],

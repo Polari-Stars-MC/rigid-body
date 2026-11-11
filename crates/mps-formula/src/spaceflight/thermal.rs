@@ -10,6 +10,25 @@
 //! downstream `mps-core::rapier::spaceflight::*` path stable.
 
 use super::*;
+use crate::domain::{self, FormulaError};
+
+/// `heat_pipe_thermal_resistance` 的 checked 变体：逐项有限性校验，
+/// 失败时返回带参数名的 [`FormulaError`]。
+pub fn heat_pipe_thermal_resistance_checked(
+    evaporator_resistance: f64,
+    vapor_resistance: f64,
+    condenser_resistance: f64,
+    wick_resistance: f64,
+) -> Result<f64, FormulaError> {
+    domain::finite(evaporator_resistance, "evaporator_resistance")?;
+    domain::finite(vapor_resistance, "vapor_resistance")?;
+    domain::finite(condenser_resistance, "condenser_resistance")?;
+    domain::finite(wick_resistance, "wick_resistance")?;
+    domain::finite_result(
+        evaporator_resistance + vapor_resistance + condenser_resistance + wick_resistance,
+        "total thermal resistance",
+    )
+}
 
 pub fn heat_pipe_thermal_resistance(
     evaporator_resistance: f64,
@@ -17,15 +36,34 @@ pub fn heat_pipe_thermal_resistance(
     condenser_resistance: f64,
     wick_resistance: f64,
 ) -> Option<f64> {
-    if !finite(&[
+    heat_pipe_thermal_resistance_checked(
         evaporator_resistance,
         vapor_resistance,
         condenser_resistance,
         wick_resistance,
-    ]) {
-        return None;
-    }
-    Some(evaporator_resistance + vapor_resistance + condenser_resistance + wick_resistance)
+    )
+    .ok()
+}
+
+/// `radiator_power` 的 checked 变体。
+pub fn radiator_power_checked(
+    area: f64,
+    emissivity: f64,
+    temperature: f64,
+    sink_temperature: f64,
+    absorbed_power: f64,
+) -> Result<RadiatorPower, FormulaError> {
+    domain::nonnegative(area, "area")?;
+    domain::nonnegative(emissivity, "emissivity")?;
+    domain::nonnegative(temperature, "temperature")?;
+    domain::nonnegative(sink_temperature, "sink_temperature")?;
+    domain::finite(absorbed_power, "absorbed_power")?;
+    let emitted =
+        emissivity * SIGMA * area * (temperature.powi(4) - sink_temperature.powi(4)).max(0.0);
+    Ok(RadiatorPower {
+        emitted_power: emitted,
+        net_power: emitted - absorbed_power,
+    })
 }
 
 pub fn radiator_power(
@@ -35,25 +73,39 @@ pub fn radiator_power(
     sink_temperature: f64,
     absorbed_power: f64,
 ) -> Option<RadiatorPower> {
-    if !finite(&[
+    radiator_power_checked(
         area,
         emissivity,
         temperature,
         sink_temperature,
         absorbed_power,
-    ]) || area < 0.0
-        || emissivity < 0.0
-        || temperature < 0.0
-        || sink_temperature < 0.0
-    {
-        return None;
+    )
+    .ok()
+}
+
+/// `reentry_peak_g_load` 的 checked 变体。
+pub fn reentry_peak_g_load_checked(
+    beta: f64,
+    entry_velocity: f64,
+    entry_angle: f64,
+    scale_height: f64,
+) -> Result<f64, FormulaError> {
+    domain::positive(beta, "beta")?;
+    domain::positive(entry_velocity, "entry_velocity")?;
+    domain::finite(entry_angle, "entry_angle")?;
+    domain::positive(scale_height, "scale_height")?;
+    let sin_gamma = entry_angle.sin().abs();
+    if sin_gamma < EPS {
+        return Err(FormulaError::OutOfDomain {
+            parameter: "entry_angle",
+            requirement: "sin(angle) >= EPS (entry must not be near-grazing)",
+        });
     }
-    let emitted =
-        emissivity * SIGMA * area * (temperature.powi(4) - sink_temperature.powi(4)).max(0.0);
-    Some(RadiatorPower {
-        emitted_power: emitted,
-        net_power: emitted - absorbed_power,
-    })
+    domain::finite_result(
+        entry_velocity * entry_velocity * sin_gamma
+            / (2.0 * std::f64::consts::E * beta * 9.80665 * scale_height),
+        "peak g-load",
+    )
 }
 
 /// Re-entry deceleration (g-load) for ballistic entry.
@@ -63,21 +115,28 @@ pub fn reentry_peak_g_load(
     entry_angle: f64,
     scale_height: f64,
 ) -> Option<f64> {
-    if !finite(&[beta, entry_velocity, entry_angle, scale_height])
-        || beta <= 0.0
-        || entry_velocity <= 0.0
-        || scale_height <= 0.0
-    {
-        return None;
-    }
-    let sin_gamma = entry_angle.sin().abs();
-    if sin_gamma < EPS {
-        return None;
-    }
-    Some(
-        entry_velocity * entry_velocity * sin_gamma
-            / (2.0 * std::f64::consts::E * beta * 9.80665 * scale_height),
-    )
+    reentry_peak_g_load_checked(beta, entry_velocity, entry_angle, scale_height).ok()
+}
+
+/// `single_phase_loop_heat_transfer` 的 checked 变体。
+pub fn single_phase_loop_heat_transfer_checked(
+    mass_flow_rate: f64,
+    specific_heat: f64,
+    inlet_temperature: f64,
+    heat_input: f64,
+) -> Result<FluidLoopHeatTransfer, FormulaError> {
+    domain::positive(mass_flow_rate, "mass_flow_rate")?;
+    domain::positive(specific_heat, "specific_heat")?;
+    domain::finite(inlet_temperature, "inlet_temperature")?;
+    domain::finite(heat_input, "heat_input")?;
+    let outlet = domain::finite_result(
+        inlet_temperature + heat_input / (mass_flow_rate * specific_heat),
+        "outlet_temperature",
+    )?;
+    Ok(FluidLoopHeatTransfer {
+        heat_rate: heat_input,
+        outlet_temperature: outlet,
+    })
 }
 
 pub fn single_phase_loop_heat_transfer(
@@ -86,16 +145,28 @@ pub fn single_phase_loop_heat_transfer(
     inlet_temperature: f64,
     heat_input: f64,
 ) -> Option<FluidLoopHeatTransfer> {
-    if !finite(&[mass_flow_rate, specific_heat, inlet_temperature, heat_input])
-        || mass_flow_rate <= 0.0
-        || specific_heat <= 0.0
-    {
-        return None;
-    }
-    Some(FluidLoopHeatTransfer {
-        heat_rate: heat_input,
-        outlet_temperature: inlet_temperature + heat_input / (mass_flow_rate * specific_heat),
-    })
+    single_phase_loop_heat_transfer_checked(
+        mass_flow_rate,
+        specific_heat,
+        inlet_temperature,
+        heat_input,
+    )
+    .ok()
+}
+
+/// `sutton_graves_heat_rate` 的 checked 变体。
+pub fn sutton_graves_heat_rate_checked(
+    density: f64,
+    velocity: f64,
+    nose_radius: f64,
+    planet_k: f64,
+) -> Result<f64, FormulaError> {
+    domain::nonnegative(density, "density")?;
+    domain::nonnegative(velocity, "velocity")?;
+    domain::positive(nose_radius, "nose_radius")?;
+    domain::positive(planet_k, "planet_k")?;
+    let q = planet_k * (density / nose_radius).sqrt() * velocity.powi(3);
+    domain::finite_result(q, "heat rate")
 }
 
 /// Sutton-Graves convective heating rate (stagnation point).
@@ -107,15 +178,32 @@ pub fn sutton_graves_heat_rate(
     nose_radius: f64,
     planet_k: f64,
 ) -> Option<f64> {
-    if !finite(&[density, velocity, nose_radius, planet_k])
-        || density < 0.0
-        || velocity < 0.0
-        || nose_radius <= 0.0
-        || planet_k <= 0.0
-    {
-        return None;
-    }
-    Some(planet_k * (density / nose_radius).sqrt() * velocity.powi(3))
+    sutton_graves_heat_rate_checked(density, velocity, nose_radius, planet_k).ok()
+}
+
+/// `thermal_balance` 的 checked 变体。
+pub fn thermal_balance_checked(
+    absorbed_power: f64,
+    internal_power: f64,
+    emitted_area: f64,
+    emissivity: f64,
+) -> Result<ThermalBalance, FormulaError> {
+    domain::finite(absorbed_power, "absorbed_power")?;
+    domain::finite(internal_power, "internal_power")?;
+    domain::positive(emitted_area, "emitted_area")?;
+    domain::positive(emissivity, "emissivity")?;
+    let net = absorbed_power + internal_power;
+    let equilibrium_temperature = if net > 0.0 {
+        (net / (emissivity * SIGMA * emitted_area)).powf(0.25)
+    } else {
+        0.0
+    };
+    let equilibrium_temperature =
+        domain::finite_result(equilibrium_temperature, "equilibrium_temperature")?;
+    Ok(ThermalBalance {
+        net_power: net,
+        equilibrium_temperature,
+    })
 }
 
 pub fn thermal_balance(
@@ -124,20 +212,5 @@ pub fn thermal_balance(
     emitted_area: f64,
     emissivity: f64,
 ) -> Option<ThermalBalance> {
-    if !finite(&[absorbed_power, internal_power, emitted_area, emissivity])
-        || emitted_area <= 0.0
-        || emissivity <= 0.0
-    {
-        return None;
-    }
-    let net = absorbed_power + internal_power;
-    let equilibrium_temperature = if net > 0.0 {
-        (net / (emissivity * SIGMA * emitted_area)).powf(0.25)
-    } else {
-        0.0
-    };
-    Some(ThermalBalance {
-        net_power: net,
-        equilibrium_temperature,
-    })
+    thermal_balance_checked(absorbed_power, internal_power, emitted_area, emissivity).ok()
 }

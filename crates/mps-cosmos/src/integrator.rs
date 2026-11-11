@@ -753,13 +753,28 @@ pub fn verlet_step(
 /// 构造 `O(n)`，之后 n-body 互引力查询 `O(1)`，替代
 /// `Vec<(handle,pos)> + find` 的 `O(n²)`。
 ///
+/// Number of slots the snapshot buffers must cover: **max slot index + 1**, not
+/// `bodies.len()`. Rapier's `Arena::remove` leaves a tombstone and reuses the
+/// slot later, so `len()` is the *occupied* count while a surviving body's
+/// `into_raw_parts().0` can be anywhere below the arena's *capacity* (max slot
+/// ever allocated). Callers index these buffers with that raw slot via
+/// `get_unchecked`, so sizing them to `len()` would be an out-of-bounds read
+/// after any body removal.
+pub(crate) fn arena_slot_extent(bodies: &RigidBodySet) -> usize {
+    bodies
+        .iter()
+        .map(|(h, _)| h.into_raw_parts().0 as usize + 1)
+        .max()
+        .unwrap_or(0)
+}
+
 /// 仍保留为测试与外部诊断入口；`CosmosWorld` 内部热路径已改用复用缓冲
 /// （`scratch_source_positions`）直接写入，不经过本函数。
 pub fn snapshot_source_positions(
     bodies: &RigidBodySet,
     n_body_sources: &[NBodySource],
 ) -> Vec<Vector> {
-    let cap = bodies.len();
+    let cap = arena_slot_extent(bodies);
     let mut positions = vec![Vector::ZERO; cap];
     for s in n_body_sources {
         let idx = s.handle.into_raw_parts().0 as usize;

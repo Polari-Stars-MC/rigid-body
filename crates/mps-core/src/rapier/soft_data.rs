@@ -25,7 +25,7 @@
 //! wires `SoftBodySet` into `World` / `PersistentIslands`. Phase 1+ add joint-based
 //! and mass-spring/FEM coupling.
 
-use rapier3d::math::{AngVector, Real, Rotation, Vector};
+use rapier3d::math::{Real, Rotation, Vector};
 use rapier3d::prelude::{RigidBodyHandle, RigidBodySet};
 use std::collections::{HashMap, HashSet};
 use std::vec::Vec;
@@ -607,7 +607,7 @@ impl SoftBody {
     }
 
     pub fn set_self_collision(&mut self, radius: Real, stiffness: Real) -> bool {
-        if !(radius > 0.0) || stiffness < 0.0 {
+        if radius <= 0.0 || radius.is_nan() || stiffness < 0.0 {
             return false;
         }
         self.self_collision = Some(SelfCollisionParams {
@@ -644,7 +644,7 @@ impl SoftBody {
     /// `2·min(radius_a, radius_b)`. Rejects non-positive `radius` or negative
     /// `stiffness`.
     pub fn set_cross_collision(&mut self, radius: Real, stiffness: Real) -> bool {
-        if !(radius > 0.0) || stiffness < 0.0 {
+        if radius <= 0.0 || radius.is_nan() || stiffness < 0.0 {
             return false;
         }
         self.cross_collision = Some(SelfCollisionParams {
@@ -749,7 +749,7 @@ impl SoftBody {
         if !radius.is_finite()
             || !stiffness.is_finite()
             || break_distance.is_nan()
-            || !(radius > 0.0)
+            || radius <= 0.0
             || stiffness < 0.0
             || break_distance <= radius
         {
@@ -1703,10 +1703,7 @@ impl SoftBodySet {
             Some(slot) => slot,
             None => return false,
         };
-        match slot.take() {
-            Some(_) => true,
-            None => false,
-        }
+        slot.take().is_some()
     }
 
     /// Immutable access by id. Returns `None` for an unknown or removed id.

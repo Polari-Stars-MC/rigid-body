@@ -428,8 +428,13 @@ pub struct CosmosWorld {
     arena_idx_map_body_count: usize,
     /// drain 出的 per-arena-index 命令合力（AddForce），按 arena index 存储。
     /// 显式积子路径在 `explicit_substep` 里按 `命令力/质量` 折成附加加速度注入；
-    /// RapierForce 路径直接 `add_force` 消费，不读此缓冲。每条 `step` 尾部清空。
+    /// RapierForce 路径在每个子步 `reset_forces` 之后重新施加（见
+    /// `step_via_rapier_force`），否则命令力只在第一子步生效。每条 `step` 尾部清空。
     arena_cmd_forces: Vec<Option<Vector>>,
+    /// drain 出的命令合力矩（AddTorque），key 与 `arena_cmd_forces` 相同（rapier
+    /// 槽号）。RapierForce 路径每子步重新施加；显式路径不积分角运动，不消费。
+    /// 每条 `step` 尾部清空。
+    arena_cmd_torques: Vec<Option<Vector>>,
 
     /// 可选的星际无线电传播子世界。step 尾部自动推进（直接读本世界刚体位置）。
     radio: Option<crate::radio::RadioWorld>,
@@ -516,6 +521,7 @@ impl CosmosWorld {
             arena_idx_map: Vec::new(),
             arena_idx_map_body_count: 0,
             arena_cmd_forces: Vec::new(),
+            arena_cmd_torques: Vec::new(),
             radio: None,
         }
     }
@@ -586,6 +592,7 @@ impl CosmosWorld {
             arena_idx_map: Vec::new(),
             arena_idx_map_body_count: 0,
             arena_cmd_forces: Vec::new(),
+            arena_cmd_torques: Vec::new(),
             radio: None,
         }
     }
@@ -699,26 +706,40 @@ impl CosmosWorld {
                 // `arena_cmd_forces`，由 `explicit_substep` 折成附加加速度注入
                 // （rapier 的 user_force 在显式路径下不参与积分）。
                 0 => {
-                    if matches!(self.orbit_integration, OrbitIntegration::RapierForce) {
-                        body.add_force(Vector::new(a0, a1, a2), true);
-                    } else {
-                        // Keyed by the rapier slot id, which is what the reader in
-                        // `explicit_substep` uses (`handle.into_raw_parts().0`).
-                        // Keying this by the *arena* index made write and read
-                        // disagree as soon as any body had been removed: the
-                        // accumulated force then landed on a different body or was
-                        // dropped via `get(...) == None`.
-                        let key = h.into_raw_parts().0 as usize;
-                        if key >= self.arena_cmd_forces.len() {
-                            self.arena_cmd_forces.resize_with(key + 1, || None);
-                        }
-                        let existing = self.arena_cmd_forces[key].unwrap_or(Vector::ZERO);
-                        self.arena_cmd_forces[key] = Some(existing + Vector::new(a0, a1, a2));
+                    // Keyed by the rapier slot id, which is what the reader in
+                    // `explicit_substep` uses (`handle.into_raw_parts().0`).
+                    // Keying this by the *arena* index made write and read
+                    // disagree as soon as any body had been removed: the
+                    // accumulated force then landed on a different body or was
+                    // dropped via `get(...) == None`.
+                    //
+                    // Cached in BOTH paths now: the explicit integrators fold it
+                    // into an extra acceleration (`explicit_substep`), and the
+                    // RapierForce path re-applies it after every substep's
+                    // `reset_forces` — otherwise a force written through the
+                    // command ring only survived the first substep (the ring is
+                    // drained once, later substeps reset it away) and was
+                    // silently truncated to 1/N of the intended impulse under
+                    // MC time compression (`cosmosWorldStep(dt > 10s)`).
+                    let key = h.into_raw_parts().0 as usize;
+                    if key >= self.arena_cmd_forces.len() {
+                        self.arena_cmd_forces.resize_with(key + 1, || None);
                     }
+                    let existing = self.arena_cmd_forces[key].unwrap_or(Vector::ZERO);
+                    self.arena_cmd_forces[key] = Some(existing + Vector::new(a0, a1, a2));
                 }
-                // AddTorque — 仅 RapierForce 路径消费（显式路径不积分角运动）。
+                // AddTorque — cached for the RapierForce path (same substep
+                // truncation problem as AddForce); re-applied per substep in
+                // `step_via_rapier_force`. The explicit path ignores torques
+                // (it does not integrate angular motion), so it stays unused
+                // there.
                 1 => {
-                    body.add_torque(Vector::new(a0, a1, a2), true);
+                    let key = h.into_raw_parts().0 as usize;
+                    if key >= self.arena_cmd_torques.len() {
+                        self.arena_cmd_torques.resize_with(key + 1, || None);
+                    }
+                    let existing = self.arena_cmd_torques[key].unwrap_or(Vector::ZERO);
+                    self.arena_cmd_torques[key] = Some(existing + Vector::new(a0, a1, a2));
                 }
                 // SetVelocity
                 2 => {
@@ -954,8 +975,10 @@ impl CosmosWorld {
     /// `RigidBody` 自身不含此信息，**必须由调用方提供**（`secondary_density`，
     /// kg/m³，由您对刚体几何/物质模型的认知决定）。
     ///
-    /// 轨道距离取刚体当前位置到世界原点的模长 —— 与 `celestial_acceleration`
-    /// 把中心天体放在世界原点的约定一致。
+    /// 轨道距离取刚体当前位置到中心天体质心（首个启用且 body 指针匹配的
+    /// `CelestialSource` 的 `position`，默认世界原点）的模长 —— 与
+    /// `celestial_acceleration` 的相对位矢约定一致（浮动原点重定心后随源
+    /// `position` 平移）。
     ///
     /// 返回 `None` 当：
     /// - 未设 `central_body`，或其 `equatorial_radius`/`gm` 非正/退化；
@@ -982,7 +1005,14 @@ impl CosmosWorld {
         let primary_mass = central.gm / G;
         let primary_density =
             primary_mass / ((4.0 / 3.0) * std::f64::consts::PI * primary_radius.powi(3));
-        let orbital_distance = body.translation().length();
+        // 到中心天体质心的距离：取匹配的天体源位置（重定心后不再是原点）；
+        // 没有匹配源时回退历史行为（到世界原点的模长）。
+        let orbital_distance = self
+            .celestials
+            .iter()
+            .find(|s| s.enabled && std::ptr::eq(s.body, central))
+            .map(|s| (body.translation() - s.position).length())
+            .unwrap_or_else(|| body.translation().length());
         roche_limit_report(
             primary_radius,
             primary_density,
@@ -1067,6 +1097,11 @@ impl CosmosWorld {
         // `step_via_rapier_force` 内部、reset 之后（见该函数）。
         let result = match self.orbit_integration {
             OrbitIntegration::RapierForce => {
+                // 命令环 drain 一次（攒进 arena_cmd_forces / arena_cmd_torques），
+                // 随后每个子步在 reset 之后重新施加——见 `step_via_rapier_force`。
+                // 不能在子步循环内 drain：ring 在第一子步就被清空，后续子步拿不到
+                // 命令，而每子步的 `reset_forces` 会把上一子步的力清掉。
+                self.drain_arena_commands();
                 if dt > MAX_STEP_DT {
                     let substeps = (dt / MAX_STEP_DT).ceil() as u32;
                     let sub_dt = dt / substeps as f64;
@@ -1097,8 +1132,11 @@ impl CosmosWorld {
             arena.flush_all_bodies(&self.bodies);
         }
 
-        // 每条 step 尾部清空本步攒下的命令合力（显式路径用），避免泄漏到下步。
+        // 每条 step 尾部清空本步攒下的命令合力/合力矩（命令环 SPSC，单次 drain
+        // 的累积只服务本步；显式路径用 `arena_cmd_forces`，RapierForce 路径两个
+        // 都用），避免泄漏到下步。
         self.arena_cmd_forces.clear();
+        self.arena_cmd_torques.clear();
 
         result
     }
@@ -1286,9 +1324,82 @@ impl CosmosWorld {
         self.n_body_softening_sq
     }
 
-    /// 取太阳位置（光压方向参考）。
+    /// 取太阳位置（光压参考）。
     pub fn sun_position(&self) -> Vector {
         self.sun_position
+    }
+
+    /// 浮动原点重定心：把整个世界平移 `-pivot`，使参考点 `pivot`（通常是主
+    /// 飞船/玩家站的位置）回到原点附近。
+    ///
+    /// # 为什么是安全的（物理不变性）
+    ///
+    /// 本世界的所有力律都只依赖**相对**位置：
+    /// - 天体引力源有世界位置 `CelestialSource::position`（默认锚定原点），
+    ///   `celestial_acceleration` 以 `pos - source.position` 求引力——源与刚体
+    ///   **同时**平移后相对矢量逐位不变；
+    /// - n-body 互引力取 `r_j - pos` 差值——两边同减 offset 后逐位不变；
+    /// - 环境扰动（大气/光压/太阳风）只依赖 `pos - sun_position` 等相对量，
+    ///   `sun_position` 一并平移后不变；
+    /// - 速度、姿态、质量不受平移影响。
+    ///
+    /// # 覆盖的状态
+    ///
+    /// - 全体刚体 `translation`（含 `next_position` 同步，防 rapier
+    ///   `advance_to_final_positions` 用旧大坐标覆盖）；
+    /// - `sun_position`；
+    /// - Kahan 长弧累加态（`*Kahan` 积子模式）：位置累加基线重置为平移后的
+    ///   值、补偿项清零——这正是 recenter 的目的：丢掉大坐标下的旧补偿，
+    ///   从新原点重建短坐标累加基线。速度累加态不动（速度不平移）。
+    ///
+    /// # 何时调用
+    ///
+    /// MC 服务器坐标进入 1e7 m 以上、或刚体位置出现明显精度抖动（broad-phase
+    /// 包围盒抖动、相对矢量相消）时调用。建议以主飞船为 pivot，一次 `step`
+    /// 边界之外调用（不要在 step 中途）。
+    ///
+    /// # 返回
+    ///
+    /// 实际应用的平移量 `offset = -pivot`（所有位置 += offset）。
+    pub fn recenter(&mut self, pivot: Vector) -> Vector {
+        // pivot 非有限时拒绝：平移 NaN/Inf 会把整个世界污染成 NaN。
+        if !pivot.x.is_finite() || !pivot.y.is_finite() || !pivot.z.is_finite() {
+            return Vector::ZERO;
+        }
+        if pivot == Vector::ZERO {
+            return Vector::ZERO; // 无操作：不碰 Kahan 态
+        }
+        let offset = -pivot;
+
+        // 1. 全体刚体：translation（`set_translation` 同时同步 position 与
+        //    next_position，显式积子路径不会被 rapier 用旧大坐标覆盖）。
+        for (_, b) in self.bodies.iter_mut() {
+            b.set_translation(b.translation() + offset, false);
+        }
+
+        // 2. 太阳位置（光压/太阳风方向参考）与天体引力源质心一并平移——引力
+        //    只依赖相对位矢 `pos - source.position`，两边同平移物理不变。
+        self.sun_position += offset;
+        for src in &mut self.celestials {
+            src.position += offset;
+        }
+
+        // 3. Kahan 位置累加基线：重锚到新原点（补偿项清零，见方法文档）。
+        //    缓冲按 rapier 槽号对位，与写入侧 `explicit_substep` 的 key 一致。
+        //    速度累加态不平移（速度是平移不变量），仅重锚基线（值不变 →
+        //    等价于清一次补偿，数值上无跳变）。
+        for (kp, kv) in self.kahan_state.iter_mut().flatten() {
+            let p = kp.value();
+            kp.set_value(mps_formula::ffi::Vec3 {
+                x: p.x + offset.x,
+                y: p.y + offset.y,
+                z: p.z + offset.z,
+            });
+            let v = kv.value();
+            kv.set_value(v);
+        }
+
+        offset
     }
 
     /// 取轨道积分模式（P2.18：clone_shallow 测试需要 introspect）。
@@ -1302,6 +1413,14 @@ impl CosmosWorld {
     }
 
     /// 旧路径：力注入 → rapier 推进。
+    ///
+    /// 子步下的命令力语义：命令环在本子步序列的**第一**次调用前由 `step` drain
+    /// 一遍（`drain_arena_commands` 把 AddForce/AddTorque 攒进 `arena_cmd_forces` /
+    /// `arena_cmd_torques`），随后每个子步在 `reset_forces` 之后、`pipeline.step`
+    /// 之前把缓存力/矩**重新施加**。否则第一子步之后 ring 已空，reset 会把命令力
+    /// 清掉，命令冲量被静默截断到 1/N（MC 时间压缩 `cosmosWorldStep(60.0)` 即
+    /// 触发）。缓存的力视为"该步总冲量"，每子步施加全量会把力变成 F/N·dt 的
+    /// 冲量序列，总冲量仍为 F·dt —— 与单步 `add_force` + 一步 dt 等价。
     fn step_via_rapier_force(&mut self, dt: f64) {
         // 把 integration_parameters.dt 对齐到本次子步实际 dt；rapier.pipeline.step
         // 内部所有积分都读这个值。
@@ -1323,18 +1442,26 @@ impl CosmosWorld {
         self.collect_dynamic_tasks();
         self.refresh_n_body_sources();
         for &(handle, _, _, _, _) in &self.scratch_tasks {
+            // Arena 命令力/矩：`step` 已在本子步序列开始前 drain 进
+            // `arena_cmd_forces` / `arena_cmd_torques`（reset 之前 drain 会被清零，
+            // 见该函数注释）。这里在每个子步 reset 之后**重新施加**缓存力——命令
+            // 力视作"本步持续作用的恒力 F"，每个子步全量施加，总冲量 F·dt 与单步
+            // `add_force(F)` + 一步 dt 严格等价。按 rapier 槽号查缓存（与写侧
+            // `drain_arena_commands` 同 key），handle 用真实代际，删除的体自然 miss。
+            let key = handle.into_raw_parts().0 as usize;
+            let cmd_f = self.arena_cmd_forces.get(key).copied().flatten();
+            let cmd_t = self.arena_cmd_torques.get(key).copied().flatten();
             if let Some(b) = self.bodies.get_mut(handle) {
                 b.reset_forces(false);
                 b.reset_torques(false);
+                if let Some(f) = cmd_f {
+                    b.add_force(f, true);
+                }
+                if let Some(t) = cmd_t {
+                    b.add_torque(t, true);
+                }
             }
         }
-
-        // Arena commands land *after* the reset so they survive into
-        // `pipeline.step`. Draining before the reset (the old order) meant every
-        // AddForce per torque written through the shared-memory command ring was
-        // cleared before the solver ever saw it. Draining per substep is safe:
-        // the ring is emptied by the first substep, later ones see it empty.
-        self.drain_arena_commands();
 
         // 1. 计算并注入每体的合力（天体引力 + n-body + 环境扰动）—— 复用上方已
         //    collected 的 scratch_tasks，不再重调 collect/refresh（L3：子步切分
@@ -1376,7 +1503,25 @@ impl CosmosWorld {
     /// 若未来需要在此路径下处理对接约束，应在此处插入一次 velocity-only 的
     /// 约束求解，避免 advance_to_final_positions 把显式位置覆盖。
     fn step_via_explicit(&mut self, dt: f64) {
-        let substeps = self.verlet_substeps.max(1) as usize;
+        // 自适应子步（`adaptive_substeps=true`）：以中心天体近心点引力放大为
+        // 误差代理。文档承诺（CosmosWorldConfig 文档 + cosmos.h）"近心点
+        // r < 2·r_eq 时按 adaptive_step_size × tolerance 动态加密子步"。此前
+        // 字段只存不读，是死配置——现在按如下模型接线：
+        //
+        //   err ≈ base_err · (2·r_eq / r)²   （r < 2·r_eq 段的引力平方放大，
+        //   base_err 是该积子的每步能量误差量级，与文档数字同源）
+        //
+        //   scale = adaptive_step_size(dt, err, tolerance, order) / dt
+        //   substeps = ceil(verlet_substeps · scale)，上限 64（防误差代理在
+        //   r → 0 时把子步数推到不可行），下限 verlet_substeps。
+        //
+        // 无中心天体或 r ≥ 2·r_eq（远心点）时与原行为完全一致（scale=1 →
+        // substeps = verlet_substeps），近圆轨道零额外开销。
+        let substeps = if self.adaptive_substeps {
+            self.adaptive_substep_count(dt)
+        } else {
+            self.verlet_substeps.max(1) as usize
+        };
         let sub_dt = dt / substeps as f64;
 
         for _ in 0..substeps {
@@ -1384,6 +1529,53 @@ impl CosmosWorld {
         }
 
         self.sync_colliders_after_verlet();
+    }
+
+    /// 自适应子步数：近心点加密的误差代理模型（见 `step_via_explicit` 注释）。
+    /// 返回值恒 ≥ `verlet_substeps`、≤ 64。
+    fn adaptive_substep_count(&self, dt: f64) -> usize {
+        const MAX_ADAPTIVE_SUBSTEPS: usize = 64;
+        let base = self.verlet_substeps.max(1) as usize;
+        let Some(central) = self.central_body else {
+            return base;
+        };
+        // 取全体动态体中最小的中心距（近心点由最近的体决定）。
+        let r_eq = central.equatorial_radius;
+        if r_eq <= 0.0 || !r_eq.is_finite() {
+            return base;
+        }
+        let mut r_min = f64::INFINITY;
+        for (_, b) in self.bodies.iter() {
+            if !b.is_dynamic() {
+                continue;
+            }
+            let r = b.translation().length();
+            if r < r_min {
+                r_min = r;
+            }
+        }
+        if !r_min.is_finite() || r_min >= 2.0 * r_eq {
+            return base; // 远心点/无动态体：不加密
+        }
+        // 每步能量误差量级（与 `OrbitIntegration` 文档的数字同源）+ 阶数。
+        let (base_err, order) = match self.orbit_integration {
+            OrbitIntegration::Verlet => (1e-10, 2),
+            OrbitIntegration::Yoshida4 | OrbitIntegration::Yoshida4Kahan => (1e-14, 4),
+            OrbitIntegration::ForestRuth8 | OrbitIntegration::ForestRuth8Kahan => (1e-16, 8),
+            OrbitIntegration::RapierForce => return base, // 不走显式路径
+        };
+        // 近心点引力放大：误差随 (r_eq/r)² 增长（r ≥ r_eq 段近似；r < r_eq 已在
+        // 天体内部，`celestial_acceleration` 自会截断，这里只关心 2·r_eq ≥ r > 0）。
+        let err = base_err * (2.0 * r_eq / r_min).powi(2);
+        let tolerance = if self.adaptive_tolerance > 0.0 && self.adaptive_tolerance.is_finite() {
+            self.adaptive_tolerance
+        } else {
+            return base;
+        };
+        let dt_next = mps_formula::integrators::adaptive_step_size(dt, err, tolerance, order);
+        let scale = if dt > 0.0 { dt_next / dt } else { 1.0 };
+        let scaled = (base as f64 * scale).ceil() as usize;
+        scaled.clamp(base, MAX_ADAPTIVE_SUBSTEPS)
     }
 
     /// Verlet 路径结束后的 collider 同步：
@@ -1738,29 +1930,34 @@ impl CosmosWorld {
     fn refresh_n_body_sources(&mut self) {
         // P2.15: avoid the previous `clear() + resize(n, ZERO/IDENTITY)` which
         // zeroed the entire buffer every frame. We instead:
-        //   1. `truncate(bodies.len())` — drops the tail when bodies shrank
+        //   1. `truncate(buf_len)` — drops the tail when the arena shrank
         //      (drop happens in-place, no alloc; remaining slots retain last
         //      frame's values which are about to be overwritten below).
-        //   2. `resize_with(bodies.len(), default)` — grows only when bodies
+        //   2. `resize_with(buf_len, default)` — grows only when the arena
         //      grew (zeroes just the *new* tail, not the whole buffer).
         //   3. The `idx < scratch.len()` guard at the write site already covers
         //      removed-source slots — those slots keep their old value but the
         //      source's `gm` was just set to 0 in this same iteration, so the
         //      stale position data is never read (downstream `celestial_*` /
         //      `n_body_*` multiply by `gm`).
-        // On a stable or shrinking `bodies.len()` (steady state — the common
-        // case), neither truncate nor resize_with does any element writes: the
-        // previous full-buffer `clear()+resize(n)` zero-fill is eliminated.
-        let bodies_len = self.bodies.len();
-        self.scratch_source_positions.truncate(bodies_len);
-        if self.scratch_source_positions.len() < bodies_len {
+        // `buf_len` is the arena *slot extent* (max slot index + 1, see
+        // `arena_slot_extent`), NOT `bodies.len()`: `Arena::remove` leaves a
+        // tombstone, so after any removal a surviving body's slot index can be
+        // >= `len()`, and the hot path reads these buffers with
+        // `get_unchecked(src_idx)` — sizing to `len()` would be an OOB read.
+        let buf_len = crate::integrator::arena_slot_extent(&self.bodies);
+        // Sized by arena *capacity* (max slot + 1), not occupied `len()`: after a
+        // body removal a surviving slot index can be >= `len()`, and the hot path
+        // below reads these buffers with `get_unchecked(src_idx)`.
+        self.scratch_source_positions.truncate(buf_len);
+        if self.scratch_source_positions.len() < buf_len {
             self.scratch_source_positions
-                .resize_with(bodies_len, || Vector::ZERO);
+                .resize_with(buf_len, || Vector::ZERO);
         }
-        self.scratch_source_rotations.truncate(bodies_len);
-        if self.scratch_source_rotations.len() < bodies_len {
+        self.scratch_source_rotations.truncate(buf_len);
+        if self.scratch_source_rotations.len() < buf_len {
             self.scratch_source_rotations
-                .resize_with(bodies_len, || Rotation::IDENTITY);
+                .resize_with(buf_len, || Rotation::IDENTITY);
         }
         // B1: 源之间完全独立（各写自己 idx 槽、只读 bodies）。拆成两段并行：
         //   Pass 1 —— `par_iter_mut` 刷新每个源的 `gm` 与 `points` 缩放（拆开
@@ -2156,6 +2353,7 @@ impl Clone for CosmosWorld {
             arena_idx_map: Vec::new(),
             arena_idx_map_body_count: 0,
             arena_cmd_forces: Vec::new(),
+            arena_cmd_torques: Vec::new(),
             radio: None,
         }
     }
