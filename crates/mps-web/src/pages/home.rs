@@ -71,6 +71,7 @@ use crate::pages::cosmos_gravity::CosmosGravity;
 use crate::pages::cosmos_integrator::CosmosIntegrator;
 use crate::pages::cosmos_orbit::CosmosOrbit;
 use crate::pages::cosmos_world::CosmosWorld;
+use crate::pages::debug_replay::DebugReplay;
 use crate::pages::disasters::Disasters;
 use crate::pages::events::Events;
 use crate::pages::ffm::Ffm;
@@ -165,6 +166,7 @@ pub fn Home() -> Element {
             CosmosOrbit {}
             CosmosFlight {}
             CosmosArena {}
+            DebugReplay {}
             Jni {}
             Ffm {}
             Api {}

@@ -100,6 +100,7 @@ pub fn Sidebar() -> Element {
                 details { class: "nav-group", open: true,
                     summary { class: "nav-group-title", { t!("nav-group-jni") } }
                     a { class: "nav-link", href: "#sec-jni", { t!("nav-jni") } }
+                    a { class: "nav-link", href: "#sec-debug-replay", { t!("nav-debug-replay") } }
                 }
                 details { class: "nav-group", open: true,
                     summary { class: "nav-group-title", { t!("nav-group-ffm") } }

@@ -11,6 +11,7 @@ pub mod cosmos_gravity;
 pub mod cosmos_integrator;
 pub mod cosmos_orbit;
 pub mod cosmos_world;
+pub mod debug_replay;
 pub mod disasters;
 pub mod events;
 pub mod ffm;
