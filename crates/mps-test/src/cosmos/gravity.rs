@@ -62,3 +62,58 @@ fn n_body_excludes_self_and_points_toward_source() {
     assert!((acc.x - 1.0).abs() < 1e-12);
     assert!(acc.y.abs() < 1e-12 && acc.z.abs() < 1e-12);
 }
+
+/// 近场 Plummer 软化取代旧 1 m 硬截止：r < 1 m 时加速度有限且随距离
+/// 单调衰减到 0（不再跳变归零）；r ≥ 1 m 分支数值与旧公式一致。
+#[test]
+fn near_field_uses_plummer_softening_instead_of_hard_cutoff() {
+    let gm = 1.0;
+
+    // r < 1 m：有限且随 r → 0 衰减（旧实现返回 0 的区域）。
+    let a_05 = point_mass_acceleration(Vector::new(0.5, 0.0, 0.0), gm).length();
+    let a_02 = point_mass_acceleration(Vector::new(0.2, 0.0, 0.0), gm).length();
+    assert!(a_05 > 0.0 && a_05.is_finite(), "0.5 m no longer zeroed");
+    assert!(a_02 > 0.0 && a_02.is_finite(), "0.2 m no longer zeroed");
+    assert!(a_02 < a_05, "monotonically decays toward origin (Plummer)");
+
+    // Plummer 闭式核对：a(r) = gm·r/(r²+ε²)^{3/2}，ε = 1。
+    let expected_05 = gm * 0.5 / (0.25_f64 + 1.0).powf(1.5);
+    assert!(
+        (a_05 - expected_05).abs() < 1e-12,
+        "Plummer closed form at r=0.5"
+    );
+
+    // r = 1 m 恰在边界：走原始公式分支（(1²)^{3/2}=1 → a = gm）。
+    let a_1 = point_mass_acceleration(Vector::new(1.0, 0.0, 0.0), gm).length();
+    assert!(
+        (a_1 - gm).abs() < 1e-12,
+        "r=1 keeps the original inverse-square value"
+    );
+
+    // r ≥ 1：原公式逐位不变（守「原方法不变」）。
+    let a_4 = point_mass_acceleration(Vector::new(4.0, 0.0, 0.0), gm).length();
+    assert!((a_4 - gm / 16.0).abs() < 1e-12, "far field unchanged");
+
+    // n_body 近场同样软化：dist < 1 m 的源贡献有限且连续。
+    let handle_other = RigidBodyHandle::from_raw_parts(1, 0);
+    let sources = vec![NBodySource::monopole(handle_other, gm)];
+    let acc = n_body_acceleration(
+        Vector::new(0.5, 0.0, 0.0),
+        &sources,
+        RigidBodyHandle::from_raw_parts(u32::MAX, u32::MAX),
+        |h| {
+            if h == handle_other {
+                Vector::ZERO
+            } else {
+                Vector::ZERO
+            }
+        },
+        |_| Rotation::IDENTITY,
+        0.0,
+    );
+    let expected = gm * 0.5 / (0.25_f64 + 1.0).powf(1.5);
+    assert!(
+        (acc.length() - expected).abs() < 1e-12,
+        "n_body near field softened (was skipped entirely)"
+    );
+}

@@ -1995,3 +1995,56 @@ fn recenter_rejects_non_finite_pivot() {
     );
     assert_eq!(world.sun_position(), sun_before, "sun untouched");
 }
+
+/// `auto_recenter`：阈值内不触发；超阈值触发且等价于手动 recenter；
+/// 非法 threshold / 无效 pivot 不触发也不 panic。
+#[test]
+fn auto_recenter_threshold_semantics() {
+    let mut world = CosmosWorld::new(CosmosWorldConfig {
+        gravity: Vector::ZERO,
+        dt: 1.0,
+        solver_iterations: 4,
+        ccd_substeps: 0,
+        n_body_softening_sq: 0.0,
+        central_body: None,
+        orbit_integration: OrbitIntegration::default(),
+        verlet_substeps: 1,
+        adaptive_substeps: false,
+        adaptive_tolerance: 1e-9,
+        relativistic_correction: mps_cosmos::world::RelativisticCorrection::None,
+    });
+    let sat = world.insert_body(satellite_builder(
+        1.0,
+        Vector::new(5.0e6, 0.0, 0.0),
+        Vector::ZERO,
+        0.1,
+    ));
+    let missing = RigidBodyHandle::from_raw_parts(999, 0);
+
+    // 距离 5e6 < 1e7：不触发。
+    let (executed, offset) = world.auto_recenter(sat, 1.0e7);
+    assert!(!executed, "below threshold: no recenter");
+    assert_eq!(offset, Vector::ZERO);
+
+    // 距离 5e6 >= 4e6：触发，且 offset = -pivot（与手动 recenter 一致）。
+    let (executed, offset) = world.auto_recenter(sat, 4.0e6);
+    assert!(executed, "above threshold: recenter fired");
+    assert_eq!(offset, Vector::new(-5.0e6, 0.0, 0.0));
+    assert_eq!(
+        world.body_translation(sat),
+        Some(Vector::ZERO),
+        "pivot at origin"
+    );
+
+    // 非法 threshold：不触发。
+    for bad in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        let (executed, offset) = world.auto_recenter(sat, bad);
+        assert!(!executed, "threshold {bad} rejected");
+        assert_eq!(offset, Vector::ZERO);
+    }
+
+    // 无效 pivot：不触发。
+    let (executed, offset) = world.auto_recenter(missing, 1.0);
+    assert!(!executed, "missing pivot is a no-op");
+    assert_eq!(offset, Vector::ZERO);
+}

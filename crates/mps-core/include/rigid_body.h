@@ -4153,6 +4153,18 @@ uint32_t debug_recording_frame(struct WorldHandle *world,
                                uint32_t out_len);
 
 /**
+ * Enable (or disable) the v2 event section: subsequent captures record this
+ * step's collision start/stop and contact-force events into the frame tail
+ * and stamp frames with the `MPSDR02` magic. Frames captured while disabled
+ * carry the `MPSDR01` magic and no event section — both old and new viewers
+ * decode either layout via the magic check.
+ *
+ * # Safety
+ * `world` must be a valid world pointer (or null).
+ */
+uint32_t debug_recording_enable_events(struct WorldHandle *world, struct Bool enable);
+
+/**
  * Register a tropical cyclone (typhoon / hurricane — the same model covers
  * both regional names; use `spin = -1` for the southern hemisphere).
  *

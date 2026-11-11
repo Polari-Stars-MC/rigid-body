@@ -136,7 +136,11 @@ pub extern "C" fn cosmos_satellite_builder(
 
 /// 构造固定（静态）刚体 builder —— 适合做 n-body 引力源中心本体。
 #[unsafe(no_mangle)]
-pub extern "C" fn cosmos_fixed_body_builder(px: f64, py: f64, pz: f64) -> *mut CosmosRigidBodyBuilder {
+pub extern "C" fn cosmos_fixed_body_builder(
+    px: f64,
+    py: f64,
+    pz: f64,
+) -> *mut CosmosRigidBodyBuilder {
     ffi_guard(std::ptr::null_mut(), || {
         if !finite(&[px, py, pz]) {
             set_error(ERR_INVALID_ARGUMENT, "position must be finite");
@@ -371,7 +375,10 @@ pub extern "C" fn cosmos_world_add_n_body(world: *mut CosmosWorld, body: u64, ma
             None => return 0,
         };
         if !mass.is_finite() || mass <= 0.0 {
-            set_error(ERR_INVALID_ARGUMENT, "n-body mass must be finite and positive");
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "n-body mass must be finite and positive",
+            );
             return 0;
         }
         w.add_n_body(unpack_handle(body), mass);
@@ -464,7 +471,10 @@ pub extern "C" fn cosmos_world_set_perturbation(
             friction_background_density,
             friction_coulomb_log,
         ]) {
-            set_error(ERR_INVALID_ARGUMENT, "perturbation parameters must be finite");
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "perturbation parameters must be finite",
+            );
             return 0;
         }
         w.set_perturbation(
@@ -1086,5 +1096,51 @@ pub extern "C" fn cosmos_world_radio_step(world: *mut CosmosWorld) -> u8 {
         }
         w.radio_step();
         1
+    })
+}
+
+/// 自动 recenter：仅当 `pivot` 刚体距世界原点超过 `threshold` 米时，以
+/// pivot 位置为参考执行浮动原点重定位（见 `CosmosWorld::recenter`）。
+///
+/// 返回 1 = 已执行 recenter，`out_offset`（3×f64，24 字节）收到实际平移量；
+/// 返回 0 = 未触发（距离未超阈值 / pivot 无效 / threshold 非法）或 world
+/// 为 null——未触发不是错误，不写错误槽。`threshold <= 0` 视为非法配置，
+/// 写 `ERR_INVALID_ARGUMENT`。
+///
+/// # Safety
+/// `world` 必须是 `cosmos_world_create` 返回的指针（或 null）；`out_offset`
+/// 为 null 时允许（调用方只要布尔结果），非 null 必须指向 3 个可写 f64。
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn cosmos_world_auto_recenter(
+    world: *mut CosmosWorld,
+    pivot: u64,
+    threshold: f64,
+    out_offset: *mut f64,
+) -> u8 {
+    ffi_guard(0, || {
+        let Some(w) = (unsafe { world.as_mut() }) else {
+            set_error(ERR_NULL_POINTER, "cosmos world is null");
+            return 0;
+        };
+        if !threshold.is_finite() || threshold <= 0.0 {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "threshold must be finite and positive",
+            );
+            return 0;
+        }
+        let (executed, offset) = w.auto_recenter(unpack_handle(pivot), threshold);
+        if executed {
+            if let Some(out) = unsafe { out_offset.as_mut() }
+                .map(|s| unsafe { std::slice::from_raw_parts_mut(s, 3) })
+            {
+                out[0] = offset.x;
+                out[1] = offset.y;
+                out[2] = offset.z;
+            }
+            1
+        } else {
+            0
+        }
     })
 }

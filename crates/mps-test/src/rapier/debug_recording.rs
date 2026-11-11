@@ -209,4 +209,85 @@ mod tests {
         assert_eq!(debug_recording_start(world, 60), ERR_OK, "valid capacity");
         world_destroy(world);
     }
+
+    // v2 事件段：enable_events 后帧尾追加碰撞/接触力事件，magic 变 MPSDR02；
+    // v1 帧仍为 MPSDR01 且无事件段（按 magic 区分，新旧查看器互不误读）。
+    #[test]
+    fn recording_v2_event_section_decode() {
+        let (world, _final) = falling_world(0);
+        assert_eq!(debug_recording_start(world, 8), ERR_OK);
+        // 未开事件段：v1 magic。
+        world_step(world, 1.0 / 60.0);
+        debug_recording_capture(world);
+        assert_eq!(debug_recording_stop(world), 1);
+        let needed = debug_recording_export(world, std::ptr::null_mut(), 0);
+        let mut blob = vec![0f64; needed as usize];
+        let written = debug_recording_export(world, blob.as_mut_ptr(), blob.len() as u32);
+        assert_eq!(
+            blob[2].to_bits(),
+            0x4d50_5344_5230_3131,
+            "v1 magic when events disabled"
+        );
+        assert_eq!(written, needed);
+
+        // 开启事件段后重录：先启用碰撞事件（否则 world 不产事件），下落体
+        // 在数步内与地面碰撞 → 至少一个 started 事件。
+        mps_core::rapier::world::world_apply_runtime_settings(world, 4, 0, 1, 0, 0, 1);
+        debug_recording_drop(world);
+        assert_eq!(debug_recording_start(world, 64), ERR_OK);
+        assert_eq!(
+            mps_core::rapier::debug_recording::debug_recording_enable_events(
+                world,
+                mps_core::rapier::ffi::Bool::TRUE
+            ),
+            ERR_OK
+        );
+        let mut saw_v2 = false;
+        for _ in 0..90 {
+            world_step(world, 1.0 / 60.0);
+            debug_recording_capture(world);
+        }
+        assert_eq!(debug_recording_stop(world), 64);
+        let needed = debug_recording_export(world, std::ptr::null_mut(), 0);
+        let mut blob2 = vec![0f64; needed as usize];
+        let written2 = debug_recording_export(world, blob2.as_mut_ptr(), blob2.len() as u32);
+        assert_eq!(written2, needed);
+
+        // 逐帧解码：验证至少一帧 v2 且带事件段（count slot + 5 槽/事件）。
+        let mut i = 2usize;
+        let mut frames_seen = 0usize;
+        while i < written2 as usize {
+            let magic = blob2[i].to_bits();
+            let body_count = blob2[i + 1] as usize;
+            let _dt = blob2[i + 2];
+            i += 3 + body_count * 14;
+            if magic == 0x4d50_5344_5230_3231 {
+                saw_v2 = true;
+                let event_count = blob2[i] as usize;
+                assert!(event_count >= 1, "v2 frame with enabled events has events");
+                i += 1 + event_count * 5;
+            }
+            frames_seen += 1;
+        }
+        assert!(saw_v2, "at least one frame carries the v2 event magic");
+        assert!(frames_seen >= 60, "all 64 frames decoded");
+        assert_eq!(debug_recording_drop(world), ERR_OK);
+        world_destroy(world);
+    }
+
+    #[test]
+    fn recording_enable_events_requires_active_recording() {
+        let world = world_create(Vec3::default());
+        clear_error();
+        assert_eq!(
+            mps_core::rapier::debug_recording::debug_recording_enable_events(
+                world,
+                mps_core::rapier::ffi::Bool::TRUE
+            ),
+            0,
+            "no recording yet"
+        );
+        assert_eq!(last_error_code(), ERR_UNSUPPORTED);
+        world_destroy(world);
+    }
 }

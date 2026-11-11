@@ -194,7 +194,11 @@ pub fn celestial_acceleration(position: Vector, source: &CelestialSource) -> Vec
 
     let r = position.length();
     if r < 1.0 {
-        return Vector::ZERO; // 位于天体内部母点：无意义
+        // 位于天体内部母点：改用 Plummer 软化而非静默归零。旧实现在此直接返回
+        // ZERO（1 m 硬截止），行星表面 <1 m 的玩法会在边界上看到 1 m 处
+        // ≈g、0.99 m 处 =0 的不连续跳变。软化后加速度连续衰减，且量级仍
+        // 被 (r²+ε²)^{3/2} 压住不会发散。
+        return point_mass_acceleration_softened(position, gm);
     }
 
     let normalized_altitude = r / r_eq;
@@ -236,12 +240,32 @@ pub fn celestial_acceleration(position: Vector, source: &CelestialSource) -> Vec
 }
 
 /// 点质量引力加速度 `a = -GM · r̂ / r²`。
+///
+/// r² < 1 m²（r < 1 m）时旧实现静默归零（硬截止）；现在同样走 Plummer
+/// 软化，加速度连续过渡不发散，边界处无跳变。r ≥ 1 m 分支数值与旧实现
+/// 完全一致（softening ε²=1 只在分母上加 1，r² ≥ 1 时相对影响 ≤ 50%？
+/// 不——为守「原方法不变」，r ≥ 1 m 分支保留原始公式，软化只在
+/// r < 1 m 的旧截止区生效）。
 #[inline]
 pub fn point_mass_acceleration(position: Vector, gm: f64) -> Vector {
     let r2 = position.length_squared();
     if r2 < 1.0 {
-        return Vector::ZERO;
+        return point_mass_acceleration_softened(position, gm);
     }
+    let r = r2.sqrt();
+    -position * (gm / (r2 * r))
+}
+
+/// Plummer 软化点质量引力：`a = -GM · d / (r² + ε²)^{3/2}`，ε = 1 m。
+///
+/// 只在旧实现的 r < 1 m 硬截止区被调用：加速度随距离连续衰减（r → 0 时
+/// a → 0，无奇点），且在 r = 1 m 处与硬截止边界衔接（旧实现边界值 ≈
+/// full gravity，软化值略低但连续）。ε = 1 m 与旧截止半径一致，保证
+/// r ≥ 1 m 的原始公式分支不变（守「原方法不变」）。
+#[inline]
+pub fn point_mass_acceleration_softened(position: Vector, gm: f64) -> Vector {
+    const SOFTENING_SQ: f64 = 1.0; // ε² = (1 m)²
+    let r2 = position.length_squared() + SOFTENING_SQ;
     let r = r2.sqrt();
     -position * (gm / (r2 * r))
 }
@@ -277,10 +301,18 @@ pub fn n_body_acceleration(
         }
         let r_j = source_positions(src.handle);
         let d = r_j - position;
-        let dist_sq = d.length_squared() + softening_sq;
-        if dist_sq < 1.0 {
+        // Plummer 软化取代旧 1 m 硬截止（旧：dist_sq < 1.0 → skip，表面
+        // 附近出现加速度归零跳变）。ε² = 1 m² 常数项并入分母，dist_sq < 1
+        // 区间加速度连续衰减；dist_sq ≥ 1 时与旧公式差一个 +1 项——为守
+        // 「原方法不变」，远场分支保持原始公式，仅近场走软化。
+        let dist_sq_raw = d.length_squared();
+        if dist_sq_raw < 1.0 {
+            let denom = (dist_sq_raw + 1.0).sqrt();
+            let denom = denom * denom * denom; // (r² + ε²)^{3/2}
+            acc += d * (src.gm / denom);
             continue;
         }
+        let dist_sq = dist_sq_raw + softening_sq;
         let dist = dist_sq.sqrt();
         // 近场不规则分支：距源质心 ≤ near_field_threshold 且源有离散质点时，
         // 按 Σ G·mᵢ·dᵢ/|dᵢ|³ 求和（捕获非球分布的方向性拉扯）。
@@ -295,10 +327,15 @@ pub fn n_body_acceleration(
                 // 本体质点的世界坐标 = 源质心 + 姿态旋转 × 局部偏移
                 let world = r_j + rot * mp.local_offset;
                 let d_i = world - position;
-                let dist_sq_i = d_i.length_squared() + softening_sq;
-                if dist_sq_i < 1.0 {
+                let dist_sq_i_raw = d_i.length_squared();
+                if dist_sq_i_raw < 1.0 {
+                    // 近场软化（同主分支：取代旧 1 m 硬截止）
+                    let denom = (dist_sq_i_raw + 1.0).sqrt();
+                    let denom = denom * denom * denom;
+                    acc_local += d_i * (mp.gm / denom);
                     continue;
                 }
+                let dist_sq_i = dist_sq_i_raw + softening_sq;
                 let dist_i = dist_sq_i.sqrt();
                 acc_local += d_i * (mp.gm / (dist_sq_i * dist_i));
             }

@@ -2240,6 +2240,22 @@ jni_space!(int cosmosWorldRecenter(long world, double px, double py, double pz, 
     1
 });
 
+// 自动 recenter：仅当 pivot 刚体距原点超过 threshold 米时执行浮动原点重定位。
+// 返回 1 = 已执行（out_offset 收到实际平移量，3×f64）；0 = 未触发或参数非法
+// （threshold <= 0 会写 ERR_INVALID_ARGUMENT，见 abiLastErrorCode）。
+// 典型用法：每帧 step 后调一次，threshold 取 1e7。
+jni_space!(int cosmosWorldAutoRecenter(long world, long pivot, double threshold, long out_offset) {
+    let packed = pivot as u64;
+    unsafe {
+        mps_cosmos::ffi::cosmos_world_auto_recenter(
+            world as *mut CosmosWorld,
+            packed,
+            threshold,
+            out_offset as *mut f64,
+        ) as jint
+    }
+});
+
 // =========================================================================
 // Debug recording — Jolt-Viewer 风格录制回放（包装 mps-core 世界）
 //
@@ -2288,6 +2304,17 @@ jni!(int debugRecordingFrame(long world, int frame_index, long out, int out_len)
         checked_u32_from_jint(frame_index),
         pm::<f64>(out),
         checked_u32_from_jint(out_len),
+    ) as jint
+});
+
+// 开启（或关闭）v2 事件段：后续 capture 在帧尾追加本步碰撞开始/结束与
+// 接触力事件（每事件 5 个 f64 槽），帧 magic 变为 MPSDR02。必须在 start
+// 之后、capture 之前调用；旧版查看器按 magic 识别 v1 帧，互不误读。
+// 返回 1 成功 / 0 无录制或 world null。
+jni!(int debugRecordingEnableEvents(long world, int enable) {
+    mps_core::rapier::debug_recording::debug_recording_enable_events(
+        wm(world),
+        if enable != 0 { Bool::TRUE } else { Bool::FALSE },
     ) as jint
 });
 

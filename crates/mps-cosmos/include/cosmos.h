@@ -509,6 +509,24 @@ uint32_t cosmos_world_radio_take_results(struct CosmosWorld *world, double *out,
  */
 uint8_t cosmos_world_radio_step(struct CosmosWorld *world);
 
+/**
+ * 自动 recenter：仅当 `pivot` 刚体距世界原点超过 `threshold` 米时，以
+ * pivot 位置为参考执行浮动原点重定位（见 `CosmosWorld::recenter`）。
+ *
+ * 返回 1 = 已执行 recenter，`out_offset`（3×f64，24 字节）收到实际平移量；
+ * 返回 0 = 未触发（距离未超阈值 / pivot 无效 / threshold 非法）或 world
+ * 为 null——未触发不是错误，不写错误槽。`threshold <= 0` 视为非法配置，
+ * 写 `ERR_INVALID_ARGUMENT`。
+ *
+ * # Safety
+ * `world` 必须是 `cosmos_world_create` 返回的指针（或 null）；`out_offset`
+ * 为 null 时允许（调用方只要布尔结果），非 null 必须指向 3 个可写 f64。
+ */
+uint8_t cosmos_world_auto_recenter(struct CosmosWorld *world,
+                                   uint64_t pivot,
+                                   double threshold,
+                                   double *out_offset);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus

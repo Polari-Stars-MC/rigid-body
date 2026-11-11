@@ -1402,6 +1402,32 @@ impl CosmosWorld {
         offset
     }
 
+    /// 自动 recenter：以 `pivot`（通常是主飞船）当前位置为参考，仅当距世界
+    /// 原点超过 `threshold` 时执行 [`Self::recenter`]。
+    ///
+    /// 返回 `(是否执行, offset)`：`executed = false` 时 offset 为 ZERO，
+    /// 世界未动。`threshold <= 0` 或 pivot 无句柄/位置非有限时返回
+    /// `(false, ZERO)`——调用方无需预检。
+    ///
+    /// 典型接法：每帧 step 之后调一次，threshold 取 1e7 m（f64 坐标精度
+    /// 在 1e7 m 之外开始吃紧，见 `recenter` 方法文档）。
+    pub fn auto_recenter(&mut self, pivot: RigidBodyHandle, threshold: f64) -> (bool, Vector) {
+        if !threshold.is_finite() || threshold <= 0.0 {
+            return (false, Vector::ZERO);
+        }
+        let Some(p) = self.body_translation(pivot) else {
+            return (false, Vector::ZERO);
+        };
+        if !p.x.is_finite() || !p.y.is_finite() || !p.z.is_finite() {
+            return (false, Vector::ZERO);
+        }
+        if p.length() <= threshold {
+            return (false, Vector::ZERO);
+        }
+        let offset = self.recenter(p);
+        (true, offset)
+    }
+
     /// 取轨道积分模式（P2.18：clone_shallow 测试需要 introspect）。
     pub fn orbit_integration(&self) -> OrbitIntegration {
         self.orbit_integration
@@ -1612,7 +1638,13 @@ impl CosmosWorld {
         // （守「原方法不变」）。
         macro_rules! profile_phase {
             ($name:expr, $body:block) => {{
-                if std::env::var("COSMOS_PROFILE").as_deref() == Ok("1") {
+                // OnceLock 缓存 env 判定：`std::env::var` 每次调用都有分配 +
+                // 系统调用开销，而 `COSMOS_PROFILE` 在进程生命周期内不变。
+                // 首次评估后热路径只剩一次原子 load。
+                static PROFILE_ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+                if *PROFILE_ENABLED
+                    .get_or_init(|| std::env::var("COSMOS_PROFILE").as_deref() == Ok("1"))
+                {
                     let _t0 = std::time::Instant::now();
                     let _r = $body;
                     crate::__cosmos_profile_record($name, _t0.elapsed());
