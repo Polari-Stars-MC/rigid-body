@@ -410,6 +410,52 @@ fn engine_benchmark_vs_jolt_protocol() {
     std::fs::write(root.join("engine-compare-mps.csv"), csv).unwrap();
 }
 
+/// 轻量性能回归守门（CI 默认跑，非 `#[ignore]`）。
+///
+/// 与 `world_step_performance_matrix`（release 手动跑）互补：这个小场景在
+/// debug profile 下也能跑，不追求绝对数字，只守**结构性回归**——
+/// 某次改动若让步进变慢超过阈值倍数，或让 step 变成 O(n²)（随体数超线性
+/// 爆炸），这里直接红。倍数阈值放宽到 8×：debug 噪声大、CI 机器负载不均，
+/// 只抓数量级回归（例如某人往 per-body 热路径里塞了每步分配）。
+///
+/// 校准锚：小场景 32 体 × 20 步对 128 体 × 20 步的工作量比应为 ~4×；
+/// 若真实倍数 > 8×，说明出现了超线性（通常是 per-step 全量重建）。
+#[test]
+fn performance_smoke_guard_step_cost_scales_linearly() {
+    let steps = 20;
+    let (t_small, _) = {
+        let world = scene(32, Config::default());
+        let start = Instant::now();
+        for _ in 0..steps {
+            world_step(world.0, 1.0 / 60.0);
+        }
+        (start.elapsed().as_secs_f64(), world)
+    };
+    let (t_large, _world) = {
+        let world = scene(128, Config::default());
+        let start = Instant::now();
+        for _ in 0..steps {
+            world_step(world.0, 1.0 / 60.0);
+        }
+        (start.elapsed().as_secs_f64(), world)
+    };
+    // 体数 4×：工作量 ≈ 4×（碰撞对还更少，立方堆叠只有邻接接触）。
+    // 允许到 8× —— 超过说明出现超线性回归。
+    let ratio = t_large / t_small.max(1e-9);
+    assert!(
+        ratio < 8.0,
+        "step cost scaled super-linearly: 32→128 bodies gave {ratio:.1}x (expected < 8x); \
+         suspect a per-step O(n²) rebuild or per-body allocation in the hot path"
+    );
+    // 绝对下限守门：128 体 20 步在 debug 下通常 ~0.2s；> 8s 说明有病态
+    // 回归（debug 波动大，阈值极宽——只抓数量级劣化）。
+    assert!(
+        t_large < 8.0,
+        "128 bodies × 20 steps took {t_large:.2}s in debug; a pathological regression \
+         (per-step allocation or accidental O(n²)) is likely"
+    );
+}
+
 #[test]
 fn runtime_settings_validate_before_mutation() {
     let world = scene(2, Config::default());

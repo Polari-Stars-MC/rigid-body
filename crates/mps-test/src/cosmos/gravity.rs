@@ -101,13 +101,8 @@ fn near_field_uses_plummer_softening_instead_of_hard_cutoff() {
         Vector::new(0.5, 0.0, 0.0),
         &sources,
         RigidBodyHandle::from_raw_parts(u32::MAX, u32::MAX),
-        |h| {
-            if h == handle_other {
-                Vector::ZERO
-            } else {
-                Vector::ZERO
-            }
-        },
+        // 源质心在原点（body 0.5 m，dist < 1 m 触发软化分支）。
+        |_| Vector::ZERO,
         |_| Rotation::IDENTITY,
         0.0,
     );

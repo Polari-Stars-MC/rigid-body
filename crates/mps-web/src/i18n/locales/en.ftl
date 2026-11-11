@@ -542,6 +542,16 @@ replay-java-note = The example keeps only poses for rendering; keep the velocity
 replay-recenter-title = Floating origin interaction
 replay-recenter-lead = A long-haul flight recentering shifts every body by the same offset; recorded frame coordinates jump by that offset exactly once.
 replay-recenter-note = Render relative-to-pivot instead of absolute coordinates and the jump disappears from the picture. cosmosWorldRecenter must be called between steps, never mid-step.
+replay-viz-title = Trajectory viewer
+replay-viz-lead = Paste an exported blob as a comma-separated f64 list and this page decodes it server-side into per-body XZ trajectories (top-down orthographic, one polyline per handle, dot = start, ring = end).
+replay-viz-hint = Accepts both MPSDR01 (v1) and MPSDR02 (v2, with event sections) frames; event sections are skipped in trajectory mode.
+replay-viz-note = The decoder is the same layout contract as the Java sample above — this page is the reference implementation of the format, in Rust, next to the C ABI that writes it.
+replay-events-title = v2 event section
+replay-events-lead = Collision start/stop and contact-force events can be recorded into the frame tail. Enable with debugRecordingEnableEvents after start; frames then carry the MPSDR02 magic and an event section.
+replay-events-note = Backward-compatible by design: the magic slot identifies the version, so v1 viewers stop at the body table and v2 viewers skip the event section on MPSDR01 frames. kind: 1 = collision-start, 2 = collision-stop, 3 = contact-force (5 f64 slots per event).
+replay-auto-title = Auto recenter
+replay-auto-lead = Instead of deciding when to recenter on the Java side, call cosmosWorldAutoRecenter after each step: it recenters onto the pivot body only when the distance from the origin exceeds the threshold.
+replay-auto-note = Returns 1 when the world actually moved (offset written), 0 when untouched. Invalid thresholds (<= 0, NaN) are rejected with ERR_INVALID_ARGUMENT; a missing pivot is a silent no-op.
 # ---- FFM page ----
 ffm-tag = // MPS
 ffm-title = Java FFM Bindings

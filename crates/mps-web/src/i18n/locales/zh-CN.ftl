@@ -542,6 +542,16 @@ replay-java-note = 示例只保留渲染所需的位姿；需要运动矢量或�
 replay-recenter-title = 浮动原点交互
 replay-recenter-lead = 长距航线 recenter 会把所有体平移同一偏移；录制帧坐标恰好跳变一次。
 replay-recenter-note = 以 pivot 相对坐标渲染，跳变在画面上不可见。cosmosWorldRecenter 必须在两次 step 之间调用，绝不能在 step 中途。
+replay-viz-title = 轨迹查看器
+replay-viz-lead = 把导出 blob 以逗号分隔的 f64 列表粘贴进来，本页在服务端解码为每体 XZ 俯视轨迹（每条 handle 一条折线，圆点 = 起点，圆环 = 终点）。
+replay-viz-hint = 同时接受 MPSDR01（v1）与 MPSDR02（v2 含事件段）帧；轨迹模式下事件段被跳过。
+replay-viz-note = 这里的解码器与上方 Java 示例是同一份布局契约——本页就是该格式的 Rust 参考实现，与写出它的 C ABI 紧挨着维护。
+replay-events-title = v2 事件段
+replay-events-lead = 碰撞开始/结束与接触力事件可以录进帧尾。start 之后调用 debugRecordingEnableEvents 开启；之后的帧带 MPSDR02 magic 与事件段。
+replay-events-note = 设计上向后兼容：magic 槽标识版本，v1 查看器停在 body 表尾，v2 查看器对 MPSDR01 帧跳过事件段。kind：1 = 碰撞开始、2 = 碰撞结束、3 = 接触力（每事件 5 个 f64 槽）。
+replay-auto-title = 自动 recenter
+replay-auto-lead = 不用在 Java 侧自己判断时机：每帧 step 后调一次 cosmosWorldAutoRecenter，距原点超过阈值才以 pivot 刚体为参考重定位。
+replay-auto-note = 返回 1 = 本次真的平移了（offset 已写入），0 = 未触发。非法 threshold（<= 0、NaN）报 ERR_INVALID_ARGUMENT；pivot 不存在是静默 no-op。
 # ---- FFM page ----
 ffm-tag = // MPS
 ffm-title = Java FFM 绑定
