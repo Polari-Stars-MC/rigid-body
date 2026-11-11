@@ -43,6 +43,7 @@ pub mod rapier {
     pub mod cosmology;
     pub mod crbtree;
     pub mod cross_validate;
+    pub mod debug_recording;
     pub mod disasters;
     pub mod disciplines;
     pub mod domain;
@@ -128,3 +129,6 @@ pub mod rapier {
     // mps-web metrics.rs ↔ source counts 同步 (OPTIMIZATION.md §N3)。
     pub mod verify_metrics_sync;
 }
+
+// mps-ffm 探针库契约守门（公式层 JNI/FFM 兼容性）——不属于 rapier 镜像树。
+pub mod ffm_probe;

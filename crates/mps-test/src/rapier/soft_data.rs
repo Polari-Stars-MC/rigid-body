@@ -52,7 +52,10 @@ mod tests {
         body.particles[b].vel = Vector::new(2.0, 0.0, 0.0);
 
         let energy = body.kinetic_energy();
-        assert!(energy.is_finite() && energy > 0.0, "moving particle has energy");
+        assert!(
+            energy.is_finite() && energy > 0.0,
+            "moving particle has energy"
+        );
         assert_eq!(
             body.kinetic_energy(),
             energy,

@@ -98,17 +98,6 @@ fn jb(value: jint) -> Bool {
     Bool((value != 0) as u8)
 }
 
-/// Legacy catch-all `jint` → `u32`. Negative inputs silently become `0` — do
-/// NOT use this for anything where `0` is a live key (entity ids / collection
-/// indices) or a real capacity: a negative id would alias the live entity `0`
-/// and a negative capacity would alias "write nothing" without any error.
-/// Kept only for the legacy `cosmosWorld*` radio JNI block below (owned
-/// elsewhere). New call sites must pick a categorized helper:
-/// [`id_from_jint`] / [`enum_from_jint`] / [`checked_u32_from_jint`].
-fn u32_from_jint(value: jint) -> u32 {
-    u32::try_from(value).unwrap_or(0)
-}
-
 /// Entity-id / per-entity collection-index conversion: a **wrapping** cast on
 /// purpose. A negative `jint` becomes `u32::MAX` — the established
 /// "not found" sentinel (same convention as `granular_id as u32`,
@@ -1896,10 +1885,10 @@ jni!(boolean spaceApplyGravityGradientTorqueToBody(long world, long body, double
 //                     在 ABI 上对齐（后者也是单 u64）。
 // =========================================================================
 use mps_cosmos::gravity::CelestialSource;
-use mps_cosmos::{RigidBodyBuilder, RigidBodyHandle, Vector};
 use mps_cosmos::world::{
     CosmosWorld, CosmosWorldConfig, OrbitIntegration, StepResult, StepSkipReason,
 };
+use mps_cosmos::{RigidBodyBuilder, RigidBodyHandle, Vector};
 
 /// `RigidBodyHandle` ↔ `jlong` 打包。高 32 位存 index，低 32 位存
 /// generation —— 与 `RigidBodyHandle::into_raw_parts()` 顺序一致。
@@ -2227,7 +2216,78 @@ jni_space!(int cosmosWorldDynamicBodySnapshot(
         world as isize as *const CosmosWorld,
         out_handles as isize as *mut u64,
         out_values as isize as *mut f64,
-        u32_from_jint(capacity),
+        checked_u32_from_jint(capacity),
+    ) as jint
+});
+
+// =========================================================================
+// Floating origin — 浮动原点重定位（MC 服务器长距航线精度保障）
+//
+// 坐标进入 1e7 m 以上或出现精度抖动时，Java 侧以主飞船位置为 pivot 调用。
+// 返回 1 成功并把实际平移量写入 out_offset（3×f64，24 字节 native 缓冲）；
+// world null 返回 0。pivot 非有限或为原点时无操作（偏移 0，见
+// `CosmosWorld::recenter`）。必须在两次 `cosmosWorldStep` 之间调用。
+// =========================================================================
+jni_space!(int cosmosWorldRecenter(long world, double px, double py, double pz, long out_offset) {
+    let w = unsafe { (world as *mut CosmosWorld).as_mut() };
+    let Some(w) = w else { return 0; };
+    let offset = w.recenter(Vector::new(px, py, pz));
+    if let Some(out) = unsafe { pm::<Vec3>(out_offset).as_mut() } {
+        out.x = offset.x;
+        out.y = offset.y;
+        out.z = offset.z;
+    }
+    1
+});
+
+// =========================================================================
+// Debug recording — Jolt-Viewer 风格录制回放（包装 mps-core 世界）
+//
+// 录制环形缓冲 + 逐帧 13-lane 快照（pos3+quat4+linvel3+angvel3）。Java 侧
+// 典型循环：start(容量) → 每帧 step 后 capture() → stop() → export/frame
+// 读回。capture 在未录制时是静默 no-op，热路径可无条件调用。
+// =========================================================================
+
+// 开始录制。max_frames = 环容量（1..=MAX_OUTPUT_CAPACITY），溢出覆盖最旧帧。
+// 返回 1 成功 / 0 参数非法或 world null（错误码见 abiLastErrorCode）。
+jni!(int debugRecordingStart(long world, int max_frames) {
+    mps_core::rapier::debug_recording::debug_recording_start(wm(world), checked_u32_from_jint(max_frames)) as jint
+});
+
+// 捕获一帧（通常在 worldStep 后调用）。未录制时静默成功。
+jni!(int debugRecordingCapture(long world) {
+    mps_core::rapier::debug_recording::debug_recording_capture(wm(world)) as jint
+});
+
+// 停止录制，返回保留帧数（0 = 未在录制，错误码 ERR_UNSUPPORTED）。
+jni!(int debugRecordingStop(long world) {
+    mps_core::rapier::debug_recording::debug_recording_stop(wm(world)) as jint
+});
+
+// 丢弃保留的录制（释放内存）。恒返回 ERR_OK。
+jni!(int debugRecordingDrop(long world) {
+    mps_core::rapier::debug_recording::debug_recording_drop(wm(world)) as jint
+});
+
+// 导出整段录制（两段式：先以 out=0 调用拿总 f64 槽数，再分配缓冲调用）。
+// blob：[frame_count, dropped, 逐帧 (magic, count, dt, 逐体 handle+13 lanes)]。
+// 返回写入槽数 / 0（缓冲不足或无录制）。
+jni!(int debugRecordingExport(long world, long out, int out_len) {
+    mps_core::rapier::debug_recording::debug_recording_export(
+        wm(world),
+        pm::<f64>(out),
+        checked_u32_from_jint(out_len),
+    ) as jint
+});
+
+// 读一帧（0 = 最旧保留帧）。布局 [count, dt, 逐体 handle+13 lanes]。
+// 返回槽数 / 0（越界或缓冲不足）。
+jni!(int debugRecordingFrame(long world, int frame_index, long out, int out_len) {
+    mps_core::rapier::debug_recording::debug_recording_frame(
+        wm(world),
+        checked_u32_from_jint(frame_index),
+        pm::<f64>(out),
+        checked_u32_from_jint(out_len),
     ) as jint
 });
 
@@ -2276,7 +2336,7 @@ jni_space!(int cosmosWorldRadioSubmitNodes(long world, long values, int count) {
     let w = unsafe { (world as isize as *mut CosmosWorld).as_mut() };
     let Some(w) = w else { return 0; };
     let ptr = values as isize as *const f64;
-    let n = u32_from_jint(count) as usize;
+    let n = checked_u32_from_jint(count) as usize;
     let nodes = if n > 0 && !ptr.is_null() {
         let slice = unsafe { std::slice::from_raw_parts(ptr, n * 18) };
         slice
@@ -2313,7 +2373,7 @@ jni_space!(int cosmosWorldRadioSubmitSignals(long world, long values, int count)
     let w = unsafe { (world as isize as *mut CosmosWorld).as_mut() };
     let Some(w) = w else { return 0; };
     let ptr = values as isize as *const f64;
-    let n = u32_from_jint(count) as usize;
+    let n = checked_u32_from_jint(count) as usize;
     if n == 0 || ptr.is_null() {
         return 0;
     }
@@ -2409,9 +2469,20 @@ pub extern "system" fn cosmosWorldGetArenaDirectByteBuffer(
 ) -> ljni::sys::jobject {
     catch_unwind(AssertUnwindSafe(|| {
         let world = world as isize as *mut CosmosWorld;
+        if world.is_null() {
+            er::set_error(
+                er::ERR_NULL_POINTER,
+                "cosmosWorldGetArenaDirectByteBuffer: null world",
+            );
+            return std::ptr::null_mut();
+        }
         let addr = mps_cosmos::ffi::cosmos_world_get_shared_arena_address(world);
         let size = mps_cosmos::ffi::cosmos_world_get_shared_arena_size(world);
         if addr == 0 || size == 0 {
+            er::set_error(
+                er::ERR_INVALID_ARGUMENT,
+                "cosmosWorldGetArenaDirectByteBuffer: no shared arena",
+            );
             return std::ptr::null_mut();
         }
         let env_raw: *mut JNIEnv = &raw const env as *mut _;

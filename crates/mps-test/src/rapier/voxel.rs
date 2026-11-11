@@ -1,6 +1,10 @@
 #[cfg(test)]
 mod tests {
-    use mps_core::rapier::collider::{collider_builder_build, world_insert_collider};
+    use mps_core::rapier::collider::{
+        collider_builder_build, collider_builder_create_compound_boxes, collider_builder_destroy,
+        world_insert_collider,
+    };
+    use mps_core::rapier::error::{ERR_CAPACITY, ERR_OK, clear_error, last_error_code};
     use mps_core::rapier::ffi::*;
     use mps_core::rapier::ffi::{Bool, Quat};
     use mps_core::rapier::voxel::*;
@@ -281,5 +285,131 @@ mod tests {
         assert!(nv == 0, "out ptr must be zeroed on non-voxel collider");
 
         world_destroy(world);
+    }
+
+    /// Compound-baker 端到端：`voxel_bake_boxes` 输出确定性 min/max 框列表，
+    /// 且该列表经 `collider_builder_create_compound_boxes` 重建的 collider 与
+    /// 直接 `build_voxel_collider(GreedyCuboids)` 覆盖相同的体素包围盒。
+    /// 烘焙是"压体素"的缓存半边——Java 按 chunk 缓存框列表，重建走 compound
+    /// boxes 快路径，无需重传网格重跑合并。
+    #[test]
+    fn voxel_bake_boxes_matches_greedy_collider_extent() {
+        // 4×2×3 网格：底部整层 4×3 实心 + 一个顶部孤立方块。
+        // 底层应被合并成 1 个 4×1×3 框，顶部 1 个 1×1×1 框 → 共 2 框。
+        let mut voxels = vec![0u8; 4 * 2 * 3];
+        for z in 0..3 {
+            for x in 0..4 {
+                voxels[x + 4 * z] = 1; // y=0 层
+            }
+        }
+        voxels[2 + 4 * 4] = 1; // (x=2, y=1, z=1) → idx = x + 4*(z + 3*y) = 2+16
+        let grid = VoxelGrid {
+            voxels: &voxels,
+            size_x: 4,
+            size_y: 2,
+            size_z: 3,
+            voxel_size_x: 1.0,
+            voxel_size_y: 1.0,
+            voxel_size_z: 1.0,
+            origin: Vec3::default(),
+        };
+
+        // Count-only 查询（null out ptr）。
+        let count = voxel_bake_boxes(
+            grid.voxels.as_ptr(),
+            4,
+            2,
+            3,
+            1.0,
+            1.0,
+            1.0,
+            grid.origin,
+            std::ptr::null_mut(),
+            0,
+        );
+        assert_eq!(count, 2, "flat layer + lone block bake to 2 boxes");
+
+        // 实际写出。
+        let mut out = [0f64; 64];
+        let n = voxel_bake_boxes(
+            grid.voxels.as_ptr(),
+            4,
+            2,
+            3,
+            1.0,
+            1.0,
+            1.0,
+            grid.origin,
+            out.as_mut_ptr(),
+            out.len() as u32,
+        );
+        assert_eq!(n, 2);
+
+        // 框 0：底层 4×1×3（min 0,0,0 / max 4,1,3）。
+        let b0 = &out[0..6];
+        assert_eq!(b0, [0.0, 0.0, 0.0, 4.0, 1.0, 3.0], "merged base layer");
+        // 框 1：孤立方块 (2,1,1)..(3,2,2)。
+        let b1 = &out[6..12];
+        assert_eq!(b1, [2.0, 1.0, 1.0, 3.0, 2.0, 2.0], "lone block");
+
+        // 确定性：重跑两次逐位一致。
+        let mut out2 = [0f64; 64];
+        voxel_bake_boxes(
+            grid.voxels.as_ptr(),
+            4,
+            2,
+            3,
+            1.0,
+            1.0,
+            1.0,
+            grid.origin,
+            out2.as_mut_ptr(),
+            out2.len() as u32,
+        );
+        assert_eq!(&out[..12], &out2[..12], "bake is deterministic");
+
+        // 缓冲过小 → ERR_CAPACITY 且不写。
+        let mut small = [0f64; 5];
+        let n_small = voxel_bake_boxes(
+            grid.voxels.as_ptr(),
+            4,
+            2,
+            3,
+            1.0,
+            1.0,
+            1.0,
+            grid.origin,
+            small.as_mut_ptr(),
+            small.len() as u32,
+        );
+        assert_eq!(n_small, 0, "insufficient buffer fails");
+        assert_eq!(last_error_code(), ERR_CAPACITY, "ERR_CAPACITY reported");
+        clear_error();
+
+        // 空网格 → 0 框。
+        let empty = [0u8; 8];
+        let n_empty = voxel_bake_boxes(
+            empty.as_ptr(),
+            2,
+            2,
+            2,
+            1.0,
+            1.0,
+            1.0,
+            grid.origin,
+            std::ptr::null_mut(),
+            0,
+        );
+        assert_eq!(n_empty, 0, "empty grid bakes 0 boxes");
+        assert_eq!(last_error_code(), ERR_OK, "empty grid is not an error");
+        clear_error();
+
+        // 烘焙结果走现成 compound-boxes builder 可重建等价 collider。
+        let builder = collider_builder_create_compound_boxes(out.as_ptr(), 2);
+        assert!(
+            !builder.is_null(),
+            "compound boxes builder from bake output"
+        );
+        collider_builder_destroy(builder);
     }
 }

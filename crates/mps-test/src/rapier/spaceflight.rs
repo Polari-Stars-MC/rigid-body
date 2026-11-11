@@ -1801,4 +1801,167 @@ mod tests {
 
         mps_core::rapier::world::world_destroy(world);
     }
+
+    /// `_checked` 公式迁移守门：checked 变体与 `Option` 包装对合法输入**逐位
+    /// 一致**；域违例返回携带参数名的 `FormulaError`，不再是无差别的 `None`。
+    #[test]
+    fn checked_formula_variants_match_option_wrappers_and_report_domains() {
+        use mps_formula::FormulaError;
+        use mps_formula::spaceflight::debris::{
+            radiation_absorbed_dose, radiation_absorbed_dose_checked,
+        };
+        use mps_formula::spaceflight::kepler::{
+            bi_elliptic_transfer_delta_v, bi_elliptic_transfer_delta_v_checked,
+            combined_maneuver_delta_v, combined_maneuver_delta_v_checked, hohmann_transfer,
+            hohmann_transfer_checked,
+        };
+        use mps_formula::spaceflight::thermal::{
+            heat_pipe_thermal_resistance, heat_pipe_thermal_resistance_checked, radiator_power,
+            radiator_power_checked, reentry_peak_g_load, reentry_peak_g_load_checked,
+            single_phase_loop_heat_transfer, single_phase_loop_heat_transfer_checked,
+            sutton_graves_heat_rate, sutton_graves_heat_rate_checked, thermal_balance,
+            thermal_balance_checked,
+        };
+
+        let mu = 3.986_004_418e14;
+
+        // --- 合法输入：checked 与 Option 包装逐位一致 ---
+        let (dv1, dv2) = {
+            let h = hohmann_transfer(mu, 7.0e6, 4.2164e7).unwrap();
+            let hc = hohmann_transfer_checked(mu, 7.0e6, 4.2164e7).unwrap();
+            assert_eq!(hc.delta_v1, h.delta_v1);
+            assert_eq!(hc.delta_v2, h.delta_v2);
+            assert_eq!(hc.total_delta_v, h.total_delta_v);
+            assert_eq!(hc.transfer_time, h.transfer_time);
+            (h.delta_v1, h.delta_v2)
+        };
+        assert!(dv1 > 0.0 && dv2 > 0.0, "raising orbit: both burns prograde");
+
+        let be = bi_elliptic_transfer_delta_v(mu, 7.0e6, 4.2164e7, 8.0e7).unwrap();
+        let bec = bi_elliptic_transfer_delta_v_checked(mu, 7.0e6, 4.2164e7, 8.0e7).unwrap();
+        assert_eq!((be.0, be.1, be.2, be.3), bec);
+
+        let cm = combined_maneuver_delta_v(mu, 7.0e6, 4.2164e7, 0.1).unwrap();
+        let cmc = combined_maneuver_delta_v_checked(mu, 7.0e6, 4.2164e7, 0.1).unwrap();
+        assert_eq!(cm, cmc);
+
+        let hp = heat_pipe_thermal_resistance(0.1, 0.2, 0.3, 0.05).unwrap();
+        assert_eq!(
+            hp,
+            heat_pipe_thermal_resistance_checked(0.1, 0.2, 0.3, 0.05).unwrap()
+        );
+
+        let rp = radiator_power(2.0, 0.85, 300.0, 3.0, 50.0).unwrap();
+        let rpc = radiator_power_checked(2.0, 0.85, 300.0, 3.0, 50.0).unwrap();
+        assert_eq!(rp.emitted_power, rpc.emitted_power);
+        assert_eq!(rp.net_power, rpc.net_power);
+
+        let gl = reentry_peak_g_load(100.0, 7800.0, -0.05, 8500.0).unwrap();
+        assert_eq!(
+            gl,
+            reentry_peak_g_load_checked(100.0, 7800.0, -0.05, 8500.0).unwrap()
+        );
+
+        let lp = single_phase_loop_heat_transfer(0.5, 4180.0, 293.0, 1000.0).unwrap();
+        let lpc = single_phase_loop_heat_transfer_checked(0.5, 4180.0, 293.0, 1000.0).unwrap();
+        assert_eq!(lp.heat_rate, lpc.heat_rate);
+        assert_eq!(lp.outlet_temperature, lpc.outlet_temperature);
+
+        let sg = sutton_graves_heat_rate(1e-4, 7800.0, 0.5, 1.83e-4).unwrap();
+        assert_eq!(
+            sg,
+            sutton_graves_heat_rate_checked(1e-4, 7800.0, 0.5, 1.83e-4).unwrap()
+        );
+
+        let tb = thermal_balance(800.0, 100.0, 4.0, 0.9).unwrap();
+        let tbc = thermal_balance_checked(800.0, 100.0, 4.0, 0.9).unwrap();
+        assert_eq!(tb.net_power, tbc.net_power);
+        assert_eq!(tb.equilibrium_temperature, tbc.equilibrium_temperature);
+
+        let dose = radiation_absorbed_dose_checked(10.0, 2.0, 1.0).unwrap();
+        assert_eq!(dose, 5.0);
+
+        // --- 域违例：报错携带参数名（不是笼统 None）---
+        // Hohmann：半径非正。
+        match hohmann_transfer_checked(mu, 0.0, 4.2164e7) {
+            Err(FormulaError::OutOfDomain { parameter, .. }) => {
+                assert_eq!(parameter, "radius1");
+            }
+            other => panic!("expected OutOfDomain(radius1), got {other:?}"),
+        }
+        // 双椭圆：mu 非有限。
+        assert!(matches!(
+            bi_elliptic_transfer_delta_v_checked(f64::NAN, 1.0, 1.0, 1.0),
+            Err(FormulaError::NonFiniteInput { parameter: "mu" })
+        ));
+        // 组合机动：倾角变化为负。
+        assert!(matches!(
+            combined_maneuver_delta_v_checked(mu, 7.0e6, 4.2164e7, -0.1),
+            Err(FormulaError::OutOfDomain {
+                parameter: "inclination_change",
+                ..
+            })
+        ));
+        // 再入 g 载：近掠入射角（sin γ < EPS）。
+        assert!(matches!(
+            reentry_peak_g_load_checked(100.0, 7800.0, 1e-15, 8500.0),
+            Err(FormulaError::OutOfDomain {
+                parameter: "entry_angle",
+                ..
+            })
+        ));
+        // 吸收剂量：质量非正。
+        assert!(matches!(
+            radiation_absorbed_dose_checked(10.0, 0.0, 1.0),
+            Err(FormulaError::OutOfDomain {
+                parameter: "mass_kg",
+                ..
+            })
+        ));
+        // Option 包装在这些输入下仍然返回 None（行为不变）。
+        assert!(hohmann_transfer(mu, 0.0, 4.2164e7).is_none());
+        assert!(radiation_absorbed_dose(10.0, 0.0, 1.0).is_none());
+    }
+
+    /// 球谐 checked 变体守门：天体内部（|r| < 1 m）显式报错而不是静默零矢量；
+    /// 轨道高度处与原函数逐位一致。
+    #[test]
+    fn spherical_harmonics_checked_exposes_interior_silence() {
+        use mps_formula::FormulaError;
+        use mps_formula::celestial_data::{CelestialBodyId, get_celestial_body};
+        use mps_formula::ffi::Vec3;
+        use mps_formula::gravitational_models::{
+            spherical_harmonics_acceleration, spherical_harmonics_acceleration_checked,
+        };
+
+        let earth = get_celestial_body(CelestialBodyId::Earth);
+
+        // 轨道高度：与原函数逐位一致。
+        let p = Vec3 {
+            x: 7.0e6,
+            y: 0.0,
+            z: 0.0,
+        };
+        let a = spherical_harmonics_acceleration(p, earth, 2);
+        let ac = spherical_harmonics_acceleration_checked(p, earth, 2).unwrap();
+        assert_eq!(a.x, ac.x);
+        assert_eq!(a.y, ac.y);
+        assert_eq!(a.z, ac.z);
+
+        // 天体内部：checked 报 OutOfDomain，原函数仍静默返回零（行为不变）。
+        let inside = Vec3 {
+            x: 0.1,
+            y: 0.0,
+            z: 0.0,
+        };
+        match spherical_harmonics_acceleration_checked(inside, earth, 2) {
+            Err(FormulaError::OutOfDomain { parameter, .. }) => {
+                assert!(parameter.starts_with("position"), "{parameter}");
+            }
+            other => panic!("expected OutOfDomain for interior point, got {other:?}"),
+        }
+        assert_eq!(spherical_harmonics_acceleration(inside, earth, 2).x, 0.0);
+        assert_eq!(spherical_harmonics_acceleration(inside, earth, 2).y, 0.0);
+        assert_eq!(spherical_harmonics_acceleration(inside, earth, 2).z, 0.0);
+    }
 }

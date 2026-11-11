@@ -64,8 +64,8 @@ jni_e_c!(void collisionEventInstall(long world, long callbackPtr) {{
                             td { "Java_org_polaris2023_mps_rapier_RapierNative_<m>" }
                         }
                         tr {
-                            td { "org.polaris2023.mps_rigid_body.RigidBodyNative" }
-                            td { "Java_org_polaris2023_mps_1rigid_1body_RigidBodyNative_<m>" }
+                            td { "org.cn_grass_block.kelvin.physical.SpaceNative" }
+                            td { "Java_org_cn_1grass_1block_kelvin_physical_SpaceNative_<m>" }
                         }
                     }
                 }

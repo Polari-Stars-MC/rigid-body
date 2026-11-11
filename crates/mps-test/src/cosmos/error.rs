@@ -4,8 +4,8 @@
 #[cfg(test)]
 mod tests {
     use mps_cosmos::error::{
-        ERR_CAPACITY, ERR_INTERNAL, ERR_INVALID_ARGUMENT, ERR_NOT_FOUND, ERR_NULL_POINTER,
-        ERR_OK, ERR_UNSUPPORTED,
+        ERR_CAPACITY, ERR_INTERNAL, ERR_INVALID_ARGUMENT, ERR_NOT_FOUND, ERR_NULL_POINTER, ERR_OK,
+        ERR_UNSUPPORTED,
     };
 
     #[test]
@@ -16,7 +16,10 @@ mod tests {
         // against the formula crate).
         assert_eq!(ERR_OK, mps_formula::error::ERR_OK);
         assert_eq!(ERR_NULL_POINTER, mps_formula::error::ERR_NULL_POINTER);
-        assert_eq!(ERR_INVALID_ARGUMENT, mps_formula::error::ERR_INVALID_ARGUMENT);
+        assert_eq!(
+            ERR_INVALID_ARGUMENT,
+            mps_formula::error::ERR_INVALID_ARGUMENT
+        );
         assert_eq!(ERR_NOT_FOUND, mps_formula::error::ERR_NOT_FOUND);
         assert_eq!(ERR_CAPACITY, mps_formula::error::ERR_CAPACITY);
         assert_eq!(ERR_UNSUPPORTED, mps_formula::error::ERR_UNSUPPORTED);

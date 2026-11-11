@@ -583,3 +583,61 @@ fn snapshot_parallel_branch_matches_world_state() {
         );
     }
 }
+
+/// RapierForce 路径子步下的命令力回归（P0 修复）：`cosmosWorldStep(dt > 10s)`
+/// 拆 N 子步时，命令环里的 AddForce 曾只在第一子步生效（ring 已被 drain 清空，
+/// 后续子步的 `reset_forces` 把力清掉），命令冲量被静默截断到 1/N。修复后命令
+/// 力缓存进 `arena_cmd_forces`，每个子步 reset 之后重新施加，总冲量仍为 F·dt。
+#[test]
+fn arena_add_force_survives_rapier_force_substeps() {
+    let mut world = CosmosWorld::new({
+        CosmosWorldConfig {
+            gravity: Vector::ZERO,
+            dt: 1.0,
+            solver_iterations: 4,
+            ccd_substeps: 0,
+            n_body_softening_sq: 0.0,
+            central_body: None,
+            orbit_integration: OrbitIntegration::RapierForce,
+            verlet_substeps: 1,
+            adaptive_substeps: false,
+            adaptive_tolerance: 1e-9,
+            relativistic_correction: RelativisticCorrection::None,
+        }
+    });
+    // mass = 2 kg，命令力 F = (4,0,0) N → a = 2 m/s²。dt = 30s → 3 子步 × 10s。
+    let _sat = world.insert_body(satellite_builder(
+        2.0,
+        Vector::new(0.0, 0.0, 0.0),
+        Vector::ZERO,
+        0.1,
+    ));
+    assert!(world.create_shared_arena(64, 64));
+
+    let addr = world.shared_arena_address();
+    let base = arena_mut(addr);
+    unsafe {
+        let cmd_ring_base = (base.add(OFF_CMD_RING) as *const u64).read_unaligned() as usize;
+        write_command(base, cmd_ring_base, 0, 0, 0, [4.0, 0.0, 0.0]);
+        (base.add(OFF_CMD_WRITE) as *mut u32).write_unaligned(1);
+    }
+
+    world.step(30.0); // > MAX_STEP_DT(10) → 3 substeps
+
+    // Rapier `add_force` 是持续力：每子步 a·sub_dt，三个子步累计 Δv = a·dt =
+    // 2·30 = 60 m/s。修复前只有第一子步拿到力，Δv ≈ 2·10 = 20 m/s。
+    let vel = world
+        .bodies()
+        .iter()
+        .next()
+        .map(|(_, b)| b.linvel())
+        .expect("satellite body");
+    assert!(
+        (vel.x - 60.0).abs() < 1e-6,
+        "command force truncated across substeps: linvel.x = {} (expected 60)",
+        vel.x
+    );
+    assert!(vel.y.abs() < 1e-6 && vel.z.abs() < 1e-6, "{vel:?}");
+
+    world.destroy_shared_arena();
+}

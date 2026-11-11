@@ -1869,3 +1869,129 @@ fn rapier_force_parallel_inject_is_deterministic_across_runs() {
         );
     }
 }
+
+/// 浮动原点重定心的物理不变性（P1）：`recenter` 只做全体平移，所有力律只依赖
+/// 相对位置，因此重定心前后推同样的 dt，**相对轨迹（体间距、相对速度）必须
+/// 一致**；绝对坐标整体平移，速度逐位不变。
+#[test]
+fn recenter_preserves_relative_dynamics() {
+    // 两个卫星在中心天体（地球）引力下的双体场景。world A 不重定心；world B
+    // 推几步后以卫星 A 为 pivot 重定心，再继续推。对比两者每一步后的
+    // 相对位置/相对速度。
+    let build = || {
+        let mut world = CosmosWorld::new(CosmosWorldConfig {
+            gravity: Vector::ZERO,
+            dt: 1.0,
+            solver_iterations: 4,
+            ccd_substeps: 0,
+            n_body_softening_sq: 0.0,
+            central_body: Some(get_celestial_body(CelestialBodyId::Earth)),
+            orbit_integration: OrbitIntegration::Yoshida4,
+            verlet_substeps: 1,
+            adaptive_substeps: false,
+            adaptive_tolerance: 1e-9,
+            relativistic_correction: mps_cosmos::world::RelativisticCorrection::None,
+        });
+        world.add_celestial(mps_cosmos::gravity::CelestialSource::new(
+            get_celestial_body(CelestialBodyId::Earth),
+            2,
+        ));
+        let sat_a = world.insert_body(satellite_builder(
+            1000.0,
+            Vector::new(7.0e6, 0.0, 0.0),
+            Vector::new(0.0, 7550.0, 0.0),
+            0.1,
+        ));
+        let sat_b = world.insert_body(satellite_builder(
+            1000.0,
+            Vector::new(7.2e6, 0.0, 0.0),
+            Vector::new(0.0, 7400.0, 0.0),
+            0.1,
+        ));
+        (world, sat_a, sat_b)
+    };
+
+    let (mut w1, a1, b1) = build();
+    let (mut w2, a2, _b2) = build();
+
+    // 先各推 3 步到同一状态。
+    for _ in 0..3 {
+        w1.step(1.0);
+        w2.step(1.0);
+    }
+
+    // world2 重定心到卫星 A 原点。断言：pivot 体回到原点、速度不变、
+    // 相对量（A-B 间距）与重定心前逐位一致。
+    let t1a = |w: &CosmosWorld, h| w.body_translation(h).expect("sat a");
+    let v1a = |w: &CosmosWorld, h| w.body_linvel(h).expect("sat a");
+    let pivot_before = t1a(&w2, a2);
+    let offset = w2.recenter(pivot_before);
+    assert_eq!(offset, -pivot_before, "offset = -pivot");
+    assert_eq!(t1a(&w2, a2), Vector::ZERO, "pivot at origin");
+    assert_eq!(
+        v1a(&w2, a2),
+        v1a(&w1, a1),
+        "velocity is translation-invariant"
+    );
+    let rel_before = t1a(&w1, b1) - t1a(&w1, a1);
+    let rel_after = t1a(&w2, _b2) - t1a(&w2, a2);
+    assert_eq!(rel_before, rel_after, "relative position bit-identical");
+    assert_eq!(w2.sun_position(), w1.sun_position() + offset, "sun moved");
+
+    // 再各推 5 步：相对轨迹必须一致（引力只依赖相对位置）。
+    for i in 0..5 {
+        w1.step(1.0);
+        w2.step(1.0);
+        let d1 = t1a(&w1, b1) - t1a(&w1, a1);
+        let d2 = t1a(&w2, _b2) - t1a(&w2, a2);
+        let gap = (d1 - d2).length();
+        assert!(
+            gap < 1e-6,
+            "relative trajectory diverged after recenter (step {i}): gap = {gap}"
+        );
+        let v1 = v1a(&w1, b1) - v1a(&w1, a1);
+        let v2 = v1a(&w2, _b2) - v1a(&w2, a2);
+        assert!(
+            (v1 - v2).length() < 1e-9,
+            "relative velocity diverged (step {i})"
+        );
+    }
+}
+
+/// `recenter` 拒绝非有限 pivot：不污染任何状态，返回零平移。
+#[test]
+fn recenter_rejects_non_finite_pivot() {
+    let mut world = CosmosWorld::new(CosmosWorldConfig {
+        gravity: Vector::ZERO,
+        dt: 1.0,
+        solver_iterations: 4,
+        ccd_substeps: 0,
+        n_body_softening_sq: 0.0,
+        central_body: None,
+        orbit_integration: OrbitIntegration::default(),
+        verlet_substeps: 1,
+        adaptive_substeps: false,
+        adaptive_tolerance: 1e-9,
+        relativistic_correction: mps_cosmos::world::RelativisticCorrection::None,
+    });
+    let _sat = world.insert_body(satellite_builder(
+        1.0,
+        Vector::new(1.0e7, 2.0e7, 0.0),
+        Vector::ZERO,
+        0.1,
+    ));
+    let sun_before = world.sun_position();
+    for bad in [
+        Vector::new(f64::NAN, 0.0, 0.0),
+        Vector::new(0.0, f64::INFINITY, 0.0),
+        Vector::ZERO,
+    ] {
+        assert_eq!(world.recenter(bad), Vector::ZERO, "no-op offset");
+    }
+    assert_eq!(
+        world.body_translation(RigidBodyHandle::from_raw_parts(0, 0)),
+        Some(Vector::new(1.0e7, 2.0e7, 0.0)),
+        "position untouched"
+    );
+    assert_eq!(world.sun_position(), sun_before, "sun untouched");
+}
