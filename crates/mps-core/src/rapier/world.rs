@@ -340,6 +340,10 @@ pub struct PhysicsWorld {
     /// out of any voxel collider spawns one grain at the cell's world centre
     /// into the linked granular body (`id, grain_mass, grain_radius`).
     pub(crate) granular_dig_spawn: Option<(u32, f64, f64)>,
+    /// Debug recording (Jolt-Viewer-style capture): `Some` while frames are
+    /// retained; `debug_recording_*` FFI manages the lifecycle. Absent when
+    /// not recording so the hot path pays nothing.
+    pub(crate) debug_recording: Option<crate::rapier::debug_recording::RecordingBuffer>,
     /// Phase 38 (granular DEM ↔ rigid): per-body collision proxies, mirroring
     /// `fluid_proxies`. When enabled via `granular_enable_collision`, each
     /// particle is backed by a dynamic `RigidBody` (gravity_scale 0 — the DEM
@@ -499,6 +503,7 @@ impl PhysicsWorld {
             granular_proxies: std::collections::HashMap::new(),
             articulations: IdRegistry::new(),
             granular_dig_spawn: None,
+            debug_recording: None,
             fluid_proxies: std::collections::HashMap::new(),
             skin_bindings: std::collections::HashMap::new(),
             character_bodies: IdRegistry::new(),

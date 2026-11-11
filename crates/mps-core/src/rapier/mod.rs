@@ -22,6 +22,7 @@ pub mod character_body;
 pub mod controller;
 pub mod crbtree;
 pub mod cross_validate;
+pub mod debug_recording;
 pub mod disasters;
 pub mod dop;
 pub mod sensor;

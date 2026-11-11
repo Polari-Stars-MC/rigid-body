@@ -4089,6 +4089,70 @@ uint64_t world_get_cross_validate_last_divergence(const struct WorldHandle *worl
 struct CrossValidateGravityConfig world_cross_validate_default_config(void);
 
 /**
+ * Start capturing. Replaces any previous recording. `max_frames` is the ring
+ * capacity; once full, the oldest frame is dropped.
+ *
+ * # Safety
+ * `world` must be a valid world pointer (or null).
+ */
+uint32_t debug_recording_start(struct WorldHandle *world, uint32_t max_frames);
+
+/**
+ * Capture one frame of the current world state. No-op (returns ERR_OK) when
+ * recording is not active — a hot caller can capture unconditionally after
+ * every step without branching on the Java side.
+ *
+ * # Safety
+ * `world` must be a valid world pointer (or null).
+ */
+uint32_t debug_recording_capture(struct WorldHandle *world);
+
+/**
+ * Stop capturing. Returns the retained frame count (oldest-dropped frames
+ * are NOT counted).
+ *
+ * # Safety
+ * `world` must be a valid world pointer (or null).
+ */
+uint32_t debug_recording_stop(struct WorldHandle *world);
+
+/**
+ * Drop the retained recording (frees memory). Returns ERR_OK.
+ *
+ * # Safety
+ * `world` must be a valid world pointer (or null).
+ */
+uint32_t debug_recording_drop(struct WorldHandle *world);
+
+/**
+ * Export the retained recording into `out` (capacity `out_len` f64 slots).
+ * Returns the number of f64 slots written. Blob layout: per frame,
+ * `MPSDR01`-magic slot + body_count + dt + per body (packed handle + 13
+ * lanes). A leading slot carries the frame count so a replay viewer can
+ * allocate: `[frame_count, f64_per_frame_max, ...frames]`.
+ *
+ * # Safety
+ * `world` must be a valid world pointer (or null); `out` must point to
+ * `out_len` writable f64s.
+ */
+uint32_t debug_recording_export(struct WorldHandle *world, double *out, uint32_t out_len);
+
+/**
+ * Read one retained frame (by ring index, 0 = oldest retained) into `out`
+ * (capacity `out_len` f64 slots). Layout: `[body_count, dt, then per body
+ * handle + 13 lanes]`. Returns lanes written or 0 on error / index OOB.
+ * Used by a live viewer to poll frames without exporting the whole blob.
+ *
+ * # Safety
+ * `world` must be a valid world pointer (or null); `out` must point to
+ * `out_len` writable f64s.
+ */
+uint32_t debug_recording_frame(struct WorldHandle *world,
+                               uint32_t frame_index,
+                               double *out,
+                               uint32_t out_len);
+
+/**
  * Register a tropical cyclone (typhoon / hurricane — the same model covers
  * both regional names; use `spin = -1` for the southern hemisphere).
  *
@@ -10927,6 +10991,37 @@ struct VoxelBuildStats voxel_build_stats(const uint8_t *voxels,
                                          double voxel_size_z,
                                          struct Vec3 origin,
                                          struct VoxelColliderOptions options);
+
+/**
+ * Bakes a voxel grid into a deterministic axis-aligned box list (the
+ * "compound baker" FFI entry).
+ *
+ * Merges every solid cell into the fewest axis-aligned boxes via a full-3D
+ * greedy sweep, then writes `count * 6` f64 values to `out_boxes` (min_x,
+ * min_y, min_z, max_x, max_y, max_z per box, world coordinates) and returns
+ * the box count. Java caches this list per chunk and rebuilds colliders from
+ * the cached boxes with `collider_builder_create_compound_boxes` — no voxel
+ * re-upload, no re-merge.
+ *
+ * Pass `out_boxes = null` (with any `out_count`) to only query the count and
+ * size the buffer; a buffer holding fewer than `count * 6` f64s fails with
+ * `ERR_CAPACITY` and nothing is written.
+ *
+ * # Safety
+ *
+ * `voxels` must point to at least `size_x*size_y*size_z` readable bytes;
+ * `out_boxes` must be null or point to at least `out_count` writable f64s.
+ */
+uint32_t voxel_bake_boxes(const uint8_t *voxels,
+                          uint32_t size_x,
+                          uint32_t size_y,
+                          uint32_t size_z,
+                          double voxel_size_x,
+                          double voxel_size_y,
+                          double voxel_size_z,
+                          struct Vec3 origin,
+                          double *out_boxes,
+                          uint32_t out_count);
 
 /**
  * Computes build statistics for a voxelized AABB without building a collider.

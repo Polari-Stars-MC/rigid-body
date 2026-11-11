@@ -309,6 +309,107 @@ fn world_step_performance_matrix() {
     std::fs::write(root.join("world-step-matrix-raw.csv"), raw).unwrap();
 }
 
+/// Jolt/Rapier 跨引擎对比基准（`#[ignore]`，与 `world_step_performance_matrix`
+/// 同协议：release、--test-threads=1、10 轮轮换取 p50/p95）。
+///
+/// **对比方法**（ADR-0008 之后的定论：Jolt 是 C++，不编进本仓库）：
+/// 1. 本测试用**与 Jolt 官方 Testbed 基准同构的场景**（10k 刚体球堆 +
+///    solver 迭代扫描）跑 mps 的 `world_step`，输出标准化 CSV
+///    `target/engine-compare-mps.csv`：每步墙钟毫秒（p50/p95/mean）、
+///    CPU%、阶段分解（broad/narrow/solver）。
+/// 2. 同机同场景的 Jolt 数字由 Jolt 官方 `PerformanceTest`（JoltPhysics 仓库
+///    `Testbed/Tests/PerformanceTest.cpp`，默认 4×4×4 堆叠 ×N）或自建
+///    `jolt::PerformanceTest` 采集，填进 `docs/evidence/engine-compare.md`
+///    的对照表。两张表同负载、同迭代数（Jolt 12 vs mps 12）、同 sleeping
+///    策略才可比。
+/// 3. 结论记录进 evidence 文档（日期、commit、CPU 型号、频率），不进 CI。
+///
+/// 场景刻意与 Jolt PerformanceTest 对齐：立方体堆叠（有休眠收益）而非
+/// 本文件主矩阵的无限反弹球对（无休眠、纯 solver 压力）——前者是 MC 服务器
+/// 的真实负载形态。
+#[test]
+#[ignore = "cross-engine compare; run alone with --release --test-threads=1 --nocapture"]
+fn engine_benchmark_vs_jolt_protocol() {
+    if cfg!(debug_assertions) {
+        panic!("run the engine compare with --release");
+    }
+    // Jolt PerformanceTest 默认 4 级金字塔 × 每级 4×4（共 ~100 动态体 +
+    // 地面）；这里放大到 MC 服务器量级：N×N 网格立方体落在静态地面上。
+    let side = std::env::var("MPS_COMPARE_SIDE")
+        .map(|v| v.parse::<usize>().expect("MPS_COMPARE_SIDE must be usize"))
+        .unwrap_or(40); // 40×40 = 1600 立方体，接近 Jolt 大场景
+    let steps = std::env::var("MPS_COMPARE_STEPS")
+        .map(|v| v.parse::<usize>().expect("MPS_COMPARE_STEPS must be usize"))
+        .unwrap_or(600); // 10 秒模拟，够休眠稳定
+    assert!(side > 0 && steps > 0);
+
+    let mut wall = Vec::with_capacity(10);
+    for _ in 0..10 {
+        let world = World(world_create(Vec3 {
+            x: 0.0,
+            y: -9.81,
+            z: 0.0,
+        }));
+        let w = unsafe { &mut (*world.0).inner };
+        // 静态地面。
+        w.colliders
+            .insert(ColliderBuilder::cuboid(1e4, 0.5, 1e4).build());
+        // side×side 立方体堆（间隔略大于边长，避免初始穿插）。
+        let spacing = 1.1;
+        for i in 0..side {
+            for j in 0..side {
+                let h = w.bodies.insert(
+                    RigidBodyBuilder::dynamic()
+                        .translation(Vector::new(
+                            (i as f64 - side as f64 * 0.5) * spacing,
+                            1.0 + (j as f64) * spacing,
+                            0.0,
+                        ))
+                        .build(),
+                );
+                w.colliders.insert_with_parent(
+                    ColliderBuilder::cuboid(0.5, 0.5, 0.5).build(),
+                    h,
+                    &mut w.bodies,
+                );
+            }
+        }
+        // solver 迭代对齐 Jolt 默认 12。
+        assert_eq!(
+            world_apply_runtime_settings(world.0, 12, 1, 0, 0, 0, 1),
+            Bool::TRUE
+        );
+        // 预热 60 步（落定+休眠），不计入计时——与 Jolt 采集方式一致。
+        for _ in 0..60 {
+            world_step(world.0, 1.0 / 60.0);
+        }
+        let start = Instant::now();
+        for _ in 0..steps {
+            world_step(world.0, 1.0 / 60.0);
+        }
+        wall.push(start.elapsed().as_secs_f64() * 1000.0 / steps as f64);
+        drop(world); // World RAII 统一销毁（手动 destroy 会 double-free）
+    }
+    wall.sort_by(f64::total_cmp);
+    let p50 = wall[4];
+    let p95 = wall[9];
+    let mean: f64 = wall.iter().sum::<f64>() / wall.len() as f64;
+    let cores = std::thread::available_parallelism().unwrap().get();
+    eprintln!(
+        "engine-compare: {0}x{0} cubes ({0}x{0} bodies), {steps} steps, 12 iters\n  mean {mean:.3} ms/step, p50 {p50:.3}, p95 {p95:.3}",
+        side * side,
+    );
+
+    // 标准化输出：docs/evidence/engine-compare.md 的采集脚本消费这个 CSV。
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target");
+    std::fs::create_dir_all(&root).unwrap();
+    let csv = format!(
+        "engine,scene,bodies,steps,mean_ms,p50_ms,p95_ms,logical_cpus\nmps,stacked_cubes,{},{steps},{mean:.4},{p50:.4},{p95:.4},{cores}\n",
+        side * side,
+    );
+    std::fs::write(root.join("engine-compare-mps.csv"), csv).unwrap();
+}
+
 #[test]
 fn runtime_settings_validate_before_mutation() {
     let world = scene(2, Config::default());
