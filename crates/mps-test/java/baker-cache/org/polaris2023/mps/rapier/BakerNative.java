@@ -2,6 +2,7 @@ package org.polaris2023.mps.rapier;
 
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -42,6 +43,43 @@ public final class BakerNative {
             for (int i = 0; i < baked.length; i++) seg.setDouble(8L * i, baked[i]);
             return colliderBuilderCreateCompoundBoxes(seg.address(), baked.length / 6);
         }
+    }
+
+    /**
+     * 生产级 chunk 烘焙缓存：LRU 上限 + 修改计数失效。
+     *
+     * - 失效：put 时带 `revision`（宿主的 chunk 修改计数）；get 校验
+     *   revision 不匹配即视为 miss（block 更新 → revision++ → 自动重烘）。
+     * - LRU：访问顺由 {@code LinkedHashMap.accessOrder=true} 维护；
+     *   超上限逐出最久未用 chunk，防长距离探索内存膨胀。
+     * - 线程：{@code synchronized}——烘焙/重建本身是重活，锁开销可忽略。
+     */
+    static final class VoxelBakeCache2 {
+        private final int maxEntries;
+        private final LinkedHashMap<Long, Entry> lru;
+
+        record Entry(double[] boxes, long revision) {}
+
+        VoxelBakeCache2(int maxEntries) {
+            this.maxEntries = maxEntries;
+            this.lru = new LinkedHashMap<>(16, 0.75f, true) {
+                @Override protected boolean removeEldestEntry(Map.Entry<Long, Entry> e) {
+                    return size() > maxEntries;
+                }
+            };
+        }
+
+        /** 命中返回框列表；miss 或 revision 过期返回 null。 */
+        synchronized double[] get(long chunkKey, long revision) {
+            Entry e = lru.get(chunkKey);
+            return (e != null && e.revision() == revision) ? e.boxes() : null;
+        }
+
+        synchronized void put(long chunkKey, long revision, double[] baked) {
+            lru.put(chunkKey, new Entry(baked, revision));
+        }
+
+        synchronized int size() { return lru.size(); }
     }
 
     private static void check(boolean condition, String message) {
@@ -93,6 +131,29 @@ public final class BakerNative {
             // 缓存命中后不再调 voxelBakeBoxes —— 零重烘、零体素重上传。
             check(cache.get(chunkKey) == boxes, "cache hit returns the same array");
             check(abiLastErrorCode() == 0, "no error leaked");
+
+            // ── VoxelBakeCache2：revision 失效 + LRU 逐出 ──
+            VoxelBakeCache2 cache2 = new VoxelBakeCache2(2);
+            double[] fakeA = {0, 0, 0, 1, 1, 1};
+            double[] fakeB = {1, 0, 0, 2, 1, 1};
+            double[] fakeC = {2, 0, 0, 3, 1, 1};
+            cache2.put(100, 1, fakeA);
+            cache2.put(200, 1, fakeB);
+            check(cache2.get(100, 1) == fakeA, "hit at revision 1");
+
+            // block 更新 → revision++ → 旧缓存视为 miss（触发重烘）。
+            check(cache2.get(100, 2) == null, "revision bump invalidates");
+            cache2.put(100, 2, fakeC);
+            check(cache2.get(100, 2) == fakeC, "re-baked entry cached");
+
+            // LRU：容量 2，访问 100 → 200 变最旧；放入 300 逐出 200。
+            check(cache2.get(200, 1) == fakeB, "200 present before eviction");
+            cache2.get(100, 2);          // touch 100
+            cache2.put(300, 1, fakeA);   // 逐出 200
+            check(cache2.size() == 2, "LRU cap");
+            check(cache2.get(200, 1) == null, "200 evicted (least recently used)");
+            check(cache2.get(100, 2) == fakeC, "100 retained (recently touched)");
+            check(cache2.get(300, 1) == fakeA, "300 present");
 
             System.out.println("JNI compound-baker cache smoke test passed");
         }
