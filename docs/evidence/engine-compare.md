@@ -19,7 +19,15 @@
 | 日期 | mps commit | CPU | 场景 | mps p50 ms/step | Jolt p50 ms/step | 比值 |
 | --- | --- | --- | --- | --- | --- | --- |
 | _待填_ | | | 1600 cubes, 12 iters, sleeping | | | |
+| 2026-11-12 | `edcc8c8` | i7-8750H @ 2.20 GHz（12 线程，boost 默认） | 1600 cubes (40×40), 12 iters, sleeping, 600 steps | 13.608 | _待测_ | — |
 
 ## 采集记录
 
-（每轮对比在下面追加一段：命令、环境、原始 CSV 路径、异常说明。）
+### 2026-11-12 mps 侧首采
+
+- commit：`edcc8c8`（main）
+- 命令：`cargo test -p mps-test --release --lib -- --ignored engine_benchmark_vs_jolt_protocol --test-threads=1 --nocapture`
+- 环境：Windows 11，i7-8750H（笔记本，无频率锁定——p50 跨 10 轮稳定在 13.6 ms，p95 24 ms 反映 boost 波动）。
+- 原始 CSV：`target/engine-compare-mps.csv`
+  `mps,stacked_cubes,1600,600,14.8910,13.6082,24.2184,12`
+- 说明：sleeping 收敛后 p50 ≈ 13.6 ms/step（1600 体）。Jolt 侧待同机采集后填入对照表；同机对比前不得跨机器引用他人数字。
