@@ -109,3 +109,60 @@ jobs:
 
       - name: Run web audit
         run: python3 crates/mps-web/scripts/web_audit.py
+
+  # ==========================================================================
+  # Java JNI smoke: load the real cdylib from a JVM and exercise the ABI.
+  #
+  # Rust 侧守门（cargo test）盖不到两件事：① cdylib 导出表里真的有这些
+  # `Java_org_polaris2023_mps_*` 符号；② 真实 JVM System.load 能解析依赖
+  # 并成功链接。三个 fixture 分别覆盖 rapier 主面、cosmos 浮动原点、
+  # debug-recording 录制契约；mpsun 工具类统一加载 + 找库文件。
+  # ==========================================================================
+
+  jni-smoke:
+    name: Java JNI smoke (ubuntu)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust toolchain (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Set up JDK 21 (FFM-ready)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Build cdylib
+        run: cargo build --release -p mps-jni
+
+      - name: Compile smoke fixtures
+        run: |
+          mkdir -p target/jni-smoke-classes
+          javac -d target/jni-smoke-classes \
+            crates/mps-test/java/collision-mode/org/polaris2023/mps/rapier/RapierNative.java \
+            crates/mps-test/java/cosmos-floating-origin/org/polaris2023/mps/cosmos/CosmosNative.java \
+            crates/mps-test/java/debug-recording/org/polaris2023/mps/rapier/RecordingNative.java \
+            crates/mps-test/java/baker-cache/org/polaris2023/mps/rapier/BakerNative.java
+
+      - name: Run smoke fixtures
+        run: |
+          LIB=$(ls target/release/libmps_rigid_body.so)
+          java -cp target/jni-smoke-classes \
+            -Djava.library.path=$(dirname "$LIB") \
+            org.polaris2023.mps.rapier.RapierNative "$LIB"
+          java -cp target/jni-smoke-classes \
+            -Djava.library.path=$(dirname "$LIB") \
+            org.polaris2023.mps.cosmos.CosmosNative "$LIB"
+          java -cp target/jni-smoke-classes \
+            -Djava.library.path=$(dirname "$LIB") \
+            org.polaris2023.mps.rapier.RecordingNative "$LIB"
+          java -cp target/jni-smoke-classes \
+            -Djava.library.path=$(dirname "$LIB") \
+            org.polaris2023.mps.rapier.BakerNative "$LIB"

@@ -487,6 +487,23 @@ jni!(long colliderBuilderCreateKdop(long points_xyz, int point_count, int preset
 jni!(long colliderBuilderCreateFdh(long points_xyz, int point_count, long directions_xyz, int direction_count) { to_jlong(dop::collider_builder_create_fdh(p::<f64>(points_xyz), checked_u32_from_jint(point_count), p::<f64>(directions_xyz), checked_u32_from_jint(direction_count))) });
 jni!(long colliderBuilderCreateNeuralBounds(double cx, double cy, double cz, double hx, double hy, double hz, double qi, double qj, double qk, double qw, int sample_resolution, int hidden_width, int hidden_layers, int activation, double output_scale, double padding, long weights, int weight_count) { to_jlong(neu::collider_builder_create_neural_bounds(NeuralBoundsDesc { center: v3(cx,cy,cz), half_extents: v3(hx,hy,hz), rotation: qt(qi,qj,qk,qw), sample_resolution: checked_u32_from_jint(sample_resolution), hidden_width: checked_u32_from_jint(hidden_width), hidden_layers: checked_u32_from_jint(hidden_layers), activation: neural_activation(activation), output_scale, padding,}, p::<f64>(weights), checked_u32_from_jint(weight_count))) });
 jni!(long colliderBuilderCreateVoxels(long voxels, int size_x, int size_y, int size_z, double voxel_size_x, double voxel_size_y, double voxel_size_z, double origin_x, double origin_y, double origin_z, int mode, int dynamic_body, int small_voxel_limit, int mesh_voxel_limit) { to_jlong(vx::collider_builder_create_voxels(p::<u8>(voxels), checked_u32_from_jint(size_x), checked_u32_from_jint(size_y), checked_u32_from_jint(size_z), voxel_size_x, voxel_size_y, voxel_size_z, v3(origin_x, origin_y, origin_z), VoxelColliderOptions { mode: voxel_mode(mode), dynamic_body: jb(dynamic_body), small_voxel_limit: checked_u32_from_jint(small_voxel_limit), mesh_voxel_limit: checked_u32_from_jint(mesh_voxel_limit) })) });
+// Compound-baker：把体素栅格确定性烘成 min/max 框列表（每框 6 个 f64，
+// 世界坐标）。两段式：out=0 查询框数，再分配缓冲取框。Java 侧按 chunk
+// 坐标缓存框列表，chunk 重载时用 colliderBuilderCreateCompoundBoxes 从
+// 缓存重建——零体素重上传、零重烘。
+// 返回框数 / 0（参数非法或缓冲不足，错误码见 abiLastErrorCode）。
+jni!(int voxelBakeBoxes(long voxels, int size_x, int size_y, int size_z, double voxel_size_x, double voxel_size_y, double voxel_size_z, double origin_x, double origin_y, double origin_z, long out_boxes, int out_count) {
+    vx::voxel_bake_boxes(
+        p::<u8>(voxels),
+        checked_u32_from_jint(size_x),
+        checked_u32_from_jint(size_y),
+        checked_u32_from_jint(size_z),
+        voxel_size_x, voxel_size_y, voxel_size_z,
+        v3(origin_x, origin_y, origin_z),
+        pm::<f64>(out_boxes),
+        checked_u32_from_jint(out_count),
+    ) as jint
+});
 jni!(long colliderBuilderCreateVoxelsAuto(long voxels, int size_x, int size_y, int size_z, double voxel_size_x, double voxel_size_y, double voxel_size_z, double origin_x, double origin_y, double origin_z, int dynamic_body) { to_jlong(vx::collider_builder_create_voxels_auto(p::<u8>(voxels), checked_u32_from_jint(size_x), checked_u32_from_jint(size_y), checked_u32_from_jint(size_z), voxel_size_x, voxel_size_y, voxel_size_z, v3(origin_x, origin_y, origin_z), jb(dynamic_body))) });
 jni_e_c!(long colliderBuilderCreateVoxelBytes(env _env, class _class, byte_array voxels, int size_x, int size_y, int size_z, double voxel_size_x, double voxel_size_y, double voxel_size_z, double origin_x, double origin_y, double origin_z, int mode, int dynamic_body, int small_voxel_limit, int mesh_voxel_limit) {
     // The C ABI walks size_x*size_y*size_z bytes from the pointer it is given,
