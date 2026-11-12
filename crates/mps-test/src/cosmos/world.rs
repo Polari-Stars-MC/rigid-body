@@ -2048,3 +2048,58 @@ fn auto_recenter_threshold_semantics() {
     assert!(!executed, "missing pivot is a no-op");
     assert_eq!(offset, Vector::ZERO);
 }
+
+/// `auto_recenter_report`：结构化回执——执行时 offset/pivot/distance 齐
+/// 全；未执行时 pivot_position/distance 仍可用于诊断。
+#[test]
+fn auto_recenter_report_carries_diagnostics() {
+    let mut world = CosmosWorld::new(CosmosWorldConfig {
+        gravity: Vector::ZERO,
+        dt: 1.0,
+        solver_iterations: 4,
+        ccd_substeps: 0,
+        n_body_softening_sq: 0.0,
+        central_body: None,
+        orbit_integration: OrbitIntegration::default(),
+        verlet_substeps: 1,
+        adaptive_substeps: false,
+        adaptive_tolerance: 1e-9,
+        relativistic_correction: mps_cosmos::world::RelativisticCorrection::None,
+    });
+    let sat = world.insert_body(satellite_builder(
+        1.0,
+        Vector::new(5.0e6, 0.0, 0.0),
+        Vector::ZERO,
+        0.1,
+    ));
+
+    // 未触发（距离 5e6 < 1e7）：executed=false，但诊断字段有效。
+    let r = world.auto_recenter_report(sat, 1.0e7);
+    assert!(!r.executed);
+    assert_eq!(r.offset, Vector::ZERO);
+    assert_eq!(
+        r.pivot_position,
+        Vector::new(5.0e6, 0.0, 0.0),
+        "pivot pos valid when not fired"
+    );
+    assert!(
+        (r.distance - 5.0e6).abs() < 1e-6,
+        "distance valid when not fired"
+    );
+    let (idx, generation) = sat.into_raw_parts();
+    assert_eq!(
+        r.pivot_handle,
+        ((idx as u64) << 32) | generation as u64,
+        "packed handle"
+    );
+
+    // 触发：offset = -pivot，报告距离 = 触发前的距离。
+    let r = world.auto_recenter_report(sat, 4.0e6);
+    assert!(r.executed);
+    assert_eq!(r.offset, Vector::new(-5.0e6, 0.0, 0.0));
+    assert!(
+        (r.distance - 5.0e6).abs() < 1e-6,
+        "distance is pre-recenter value"
+    );
+    assert_eq!(r.pivot_position, Vector::new(5.0e6, 0.0, 0.0));
+}

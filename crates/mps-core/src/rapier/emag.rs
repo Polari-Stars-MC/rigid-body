@@ -211,17 +211,17 @@ pub extern "C" fn electromagnetism_transmission_line_input_impedance(
     out_real: *mut f64,
     out_imag: *mut f64,
 ) -> Bool {
-    let Some((real, imag)) =
+    let a = ffi_scalar(out_real, || -> Option<f64> {
         transmission_line_input_impedance(z0, z_load_real, z_load_imag, phase_constant, length)
-    else {
-        return Bool::FALSE;
-    };
-    if out_real.is_null() || out_imag.is_null() {
-        return Bool::FALSE;
+            .map(|(re, _)| re)
+    });
+    let b = ffi_scalar(out_imag, || -> Option<f64> {
+        transmission_line_input_impedance(z0, z_load_real, z_load_imag, phase_constant, length)
+            .map(|(_, im)| im)
+    });
+    if a == Bool::TRUE && b == Bool::TRUE {
+        Bool::TRUE
+    } else {
+        Bool::FALSE
     }
-    unsafe {
-        *out_real = real;
-        *out_imag = imag;
-    }
-    Bool::TRUE
 }

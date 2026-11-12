@@ -249,18 +249,17 @@ pub extern "C" fn astrophysics_roche_limit(
     out_fluid: *mut f64,
     out_rigid: *mut f64,
 ) -> Bool {
-    let Some((fluid, rigid)) = roche_limit(primary_radius, primary_density, secondary_density)
-    else {
-        return Bool::FALSE;
-    };
-    if out_fluid.is_null() || out_rigid.is_null() {
-        return Bool::FALSE;
+    let a = ffi_scalar(out_fluid, || -> Option<f64> {
+        roche_limit(primary_radius, primary_density, secondary_density).map(|(f, _)| f)
+    });
+    let b = ffi_scalar(out_rigid, || -> Option<f64> {
+        roche_limit(primary_radius, primary_density, secondary_density).map(|(_, r)| r)
+    });
+    if a == Bool::TRUE && b == Bool::TRUE {
+        Bool::TRUE
+    } else {
+        Bool::FALSE
     }
-    unsafe {
-        *out_fluid = fluid;
-        *out_rigid = rigid;
-    }
-    Bool::TRUE
 }
 
 /// Habitable-zone inner/outer radii. Writes (inner, outer) into `out_inner` /
@@ -271,15 +270,15 @@ pub extern "C" fn astrophysics_habitable_zone_boundaries(
     out_inner: *mut f64,
     out_outer: *mut f64,
 ) -> Bool {
-    let Some((inner, outer)) = habitable_zone_boundaries(star_luminosity_solar) else {
-        return Bool::FALSE;
-    };
-    if out_inner.is_null() || out_outer.is_null() {
-        return Bool::FALSE;
+    let a = ffi_scalar(out_inner, || -> Option<f64> {
+        habitable_zone_boundaries(star_luminosity_solar).map(|(i, _)| i)
+    });
+    let b = ffi_scalar(out_outer, || -> Option<f64> {
+        habitable_zone_boundaries(star_luminosity_solar).map(|(_, o)| o)
+    });
+    if a == Bool::TRUE && b == Bool::TRUE {
+        Bool::TRUE
+    } else {
+        Bool::FALSE
     }
-    unsafe {
-        *out_inner = inner;
-        *out_outer = outer;
-    }
-    Bool::TRUE
 }

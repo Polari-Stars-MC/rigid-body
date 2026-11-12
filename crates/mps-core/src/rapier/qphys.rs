@@ -232,17 +232,17 @@ pub extern "C" fn quantum_degenerate_perturbation_2x2(
     out_e1: *mut f64,
     out_e2: *mut f64,
 ) -> Bool {
-    let Some((e1, e2)) = degenerate_perturbation_2x2(h11, h12, h22) else {
-        return Bool::FALSE;
-    };
-    if out_e1.is_null() || out_e2.is_null() {
-        return Bool::FALSE;
+    let a = ffi_scalar(out_e1, || -> Option<f64> {
+        degenerate_perturbation_2x2(h11, h12, h22).map(|(e1, _)| e1)
+    });
+    let b = ffi_scalar(out_e2, || -> Option<f64> {
+        degenerate_perturbation_2x2(h11, h12, h22).map(|(_, e2)| e2)
+    });
+    if a == Bool::TRUE && b == Bool::TRUE {
+        Bool::TRUE
+    } else {
+        Bool::FALSE
     }
-    unsafe {
-        *out_e1 = e1;
-        *out_e2 = e2;
-    }
-    Bool::TRUE
 }
 
 /// Time-evolution phase factor e^{-iEt/ℏ}. Writes (real, imag) into
@@ -254,15 +254,15 @@ pub extern "C" fn quantum_time_evolution_phase(
     out_real: *mut f64,
     out_imag: *mut f64,
 ) -> Bool {
-    let Some((real, imag)) = time_evolution_phase(energy, time) else {
-        return Bool::FALSE;
-    };
-    if out_real.is_null() || out_imag.is_null() {
-        return Bool::FALSE;
+    let a = ffi_scalar(out_real, || -> Option<f64> {
+        time_evolution_phase(energy, time).map(|(re, _)| re)
+    });
+    let b = ffi_scalar(out_imag, || -> Option<f64> {
+        time_evolution_phase(energy, time).map(|(_, im)| im)
+    });
+    if a == Bool::TRUE && b == Bool::TRUE {
+        Bool::TRUE
+    } else {
+        Bool::FALSE
     }
-    unsafe {
-        *out_real = real;
-        *out_imag = imag;
-    }
-    Bool::TRUE
 }

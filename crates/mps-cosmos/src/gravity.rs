@@ -241,11 +241,10 @@ pub fn celestial_acceleration(position: Vector, source: &CelestialSource) -> Vec
 
 /// 点质量引力加速度 `a = -GM · r̂ / r²`。
 ///
-/// r² < 1 m²（r < 1 m）时旧实现静默归零（硬截止）；现在同样走 Plummer
-/// 软化，加速度连续过渡不发散，边界处无跳变。r ≥ 1 m 分支数值与旧实现
-/// 完全一致（softening ε²=1 只在分母上加 1，r² ≥ 1 时相对影响 ≤ 50%？
-/// 不——为守「原方法不变」，r ≥ 1 m 分支保留原始公式，软化只在
-/// r < 1 m 的旧截止区生效）。
+/// r² < `NEAR_FIELD_SOFTENING_SQ`（r < 1 m）时旧实现静默归零（硬截止）；
+/// 现在走 Plummer 软化，加速度连续过渡不发散，边界处无跳变。r ≥ 1 m
+/// 分支数值与旧实现逐位一致（守「原方法不变」）。需要自定义 ε 走
+/// [`point_mass_acceleration_with_softening`]。
 #[inline]
 pub fn point_mass_acceleration(position: Vector, gm: f64) -> Vector {
     let r2 = position.length_squared();
@@ -256,6 +255,15 @@ pub fn point_mass_acceleration(position: Vector, gm: f64) -> Vector {
     -position * (gm / (r2 * r))
 }
 
+/// 近场 Plummer 软化 ε²（单位 m²）。默认 1 m 与旧硬截止半径一致——
+/// r < ε 区域加速度连续衰减（取代旧「r<1 → ZERO」跳变），r ≥ ε 分支
+/// 原始公式逐位不变（守「原方法不变」）。
+///
+/// 需要不同尺度的宿主（小行星 vs 大行星）改引用此常量或走
+/// [`point_mass_acceleration_with_softening`] 显式传参；MC 默认场景
+/// 用 [`point_mass_acceleration`] 即可。
+pub const NEAR_FIELD_SOFTENING_SQ: f64 = 1.0; // ε² = (1 m)²
+
 /// Plummer 软化点质量引力：`a = -GM · d / (r² + ε²)^{3/2}`，ε = 1 m。
 ///
 /// 只在旧实现的 r < 1 m 硬截止区被调用：加速度随距离连续衰减（r → 0 时
@@ -264,8 +272,20 @@ pub fn point_mass_acceleration(position: Vector, gm: f64) -> Vector {
 /// r ≥ 1 m 的原始公式分支不变（守「原方法不变」）。
 #[inline]
 pub fn point_mass_acceleration_softened(position: Vector, gm: f64) -> Vector {
-    const SOFTENING_SQ: f64 = 1.0; // ε² = (1 m)²
-    let r2 = position.length_squared() + SOFTENING_SQ;
+    point_mass_acceleration_with_softening(position, gm, NEAR_FIELD_SOFTENING_SQ)
+}
+
+/// 显式 ε² 版本：`ε² <= 0` 时退化为原始反平方公式（调用方自担奇点风险）。
+///
+/// 供需要非默认软化尺度的宿主使用（大行星表面玩法想压低软化影响、
+/// 小卫星近场想加大 ε）。公式层纯输入→输出，不读世界状态。
+#[inline]
+pub fn point_mass_acceleration_with_softening(
+    position: Vector,
+    gm: f64,
+    softening_sq: f64,
+) -> Vector {
+    let r2 = position.length_squared() + softening_sq;
     let r = r2.sqrt();
     -position * (gm / (r2 * r))
 }
@@ -307,7 +327,7 @@ pub fn n_body_acceleration(
         // 「原方法不变」，远场分支保持原始公式，仅近场走软化。
         let dist_sq_raw = d.length_squared();
         if dist_sq_raw < 1.0 {
-            let denom = (dist_sq_raw + 1.0).sqrt();
+            let denom = (dist_sq_raw + NEAR_FIELD_SOFTENING_SQ).sqrt();
             let denom = denom * denom * denom; // (r² + ε²)^{3/2}
             acc += d * (src.gm / denom);
             continue;
@@ -330,7 +350,7 @@ pub fn n_body_acceleration(
                 let dist_sq_i_raw = d_i.length_squared();
                 if dist_sq_i_raw < 1.0 {
                     // 近场软化（同主分支：取代旧 1 m 硬截止）
-                    let denom = (dist_sq_i_raw + 1.0).sqrt();
+                    let denom = (dist_sq_i_raw + NEAR_FIELD_SOFTENING_SQ).sqrt();
                     let denom = denom * denom * denom;
                     acc_local += d_i * (mp.gm / denom);
                     continue;

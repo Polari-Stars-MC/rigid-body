@@ -86,6 +86,17 @@
 #define NEAR_FIELD_FACTOR 8.0
 
 /**
+ * 近场 Plummer 软化 ε²（单位 m²）。默认 1 m 与旧硬截止半径一致——
+ * r < ε 区域加速度连续衰减（取代旧「r<1 → ZERO」跳变），r ≥ ε 分支
+ * 原始公式逐位不变（守「原方法不变」）。
+ *
+ * 需要不同尺度的宿主（小行星 vs 大行星）改引用此常量或走
+ * [`point_mass_acceleration_with_softening`] 显式传参；MC 默认场景
+ * 用 [`point_mass_acceleration`] 即可。
+ */
+#define NEAR_FIELD_SOFTENING_SQ 1.0
+
+/**
  * 最大反射次数
  */
 #define MAX_BOUNCES 3

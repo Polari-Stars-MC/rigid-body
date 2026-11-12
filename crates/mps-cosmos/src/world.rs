@@ -475,6 +475,26 @@ pub enum StepSkipReason {
 /// Verlet 路径由 `verlet_substeps` 控制子步，不受此上限约束。
 const MAX_STEP_DT: f64 = 10.0;
 
+/// [`CosmosWorld::auto_recenter_report`] 的结构化回执。
+///
+/// `executed = false` 时 `offset` 为 ZERO，但 `pivot_position` / `distance`
+/// 仍然有效——宿主可以据此诊断「这次为什么没触发」（距离不够 / pivot
+/// 无效时 pivot_position 为 ZERO、distance 为 0）。`pivot_handle` 是
+/// `(index << 32 | generation)` 打包，与 JNI `long pivot` 约定一致。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AutoRecenterReport {
+    /// 本次是否真的执行了重定位（世界全体平移）。
+    pub executed: bool,
+    /// 执行时的实际平移量（未执行为 ZERO）。所有绝对坐标 += offset。
+    pub offset: Vector,
+    /// pivot 打包句柄（原样带回，便于日志对账）。
+    pub pivot_handle: u64,
+    /// pivot 触发前位置（世界坐标，重定位**前**的值）。
+    pub pivot_position: Vector,
+    /// pivot 距原点距离（重定位**前**的值）。
+    pub distance: f64,
+}
+
 impl CosmosWorld {
     pub fn new(config: CosmosWorldConfig) -> Self {
         let integration_parameters = IntegrationParameters {
@@ -1412,20 +1432,48 @@ impl CosmosWorld {
     /// 典型接法：每帧 step 之后调一次，threshold 取 1e7 m（f64 坐标精度
     /// 在 1e7 m 之外开始吃紧，见 `recenter` 方法文档）。
     pub fn auto_recenter(&mut self, pivot: RigidBodyHandle, threshold: f64) -> (bool, Vector) {
+        let report = self.auto_recenter_report(pivot, threshold);
+        (report.executed, report.offset)
+    }
+
+    /// [`Self::auto_recenter`] 的结构化回执版：除了 `executed`/`offset`，
+    /// 还带 pivot 位置、触发时的距原点距离和打包句柄——宿主同步离线
+    /// 玩家坐标 / 记遥测日志不用再自己查一遍 pivot。
+    ///
+    /// 未触发时 `offset` 为 ZERO、`pivot_position`/`distance` 仍有效
+    /// （诊断「为什么没触发」用），`pivot_handle` 原样带回。
+    pub fn auto_recenter_report(
+        &mut self,
+        pivot: RigidBodyHandle,
+        threshold: f64,
+    ) -> AutoRecenterReport {
+        let mut report = AutoRecenterReport {
+            executed: false,
+            offset: Vector::ZERO,
+            pivot_handle: {
+                let (idx, generation) = pivot.into_raw_parts();
+                ((idx as u64) << 32) | (generation as u64)
+            },
+            pivot_position: Vector::ZERO,
+            distance: 0.0,
+        };
         if !threshold.is_finite() || threshold <= 0.0 {
-            return (false, Vector::ZERO);
+            return report;
         }
         let Some(p) = self.body_translation(pivot) else {
-            return (false, Vector::ZERO);
+            return report;
         };
         if !p.x.is_finite() || !p.y.is_finite() || !p.z.is_finite() {
-            return (false, Vector::ZERO);
+            return report;
         }
-        if p.length() <= threshold {
-            return (false, Vector::ZERO);
+        report.pivot_position = p;
+        report.distance = p.length();
+        if report.distance <= threshold {
+            return report;
         }
-        let offset = self.recenter(p);
-        (true, offset)
+        report.offset = self.recenter(p);
+        report.executed = true;
+        report
     }
 
     /// 取轨道积分模式（P2.18：clone_shallow 测试需要 introspect）。

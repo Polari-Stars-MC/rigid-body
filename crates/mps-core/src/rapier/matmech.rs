@@ -19,6 +19,7 @@
 
 use std::slice;
 
+use crate::rapier::error::{ERR_INVALID_ARGUMENT, ERR_NULL_POINTER, ffi_guard, set_error};
 use crate::rapier::ffi::{Bool, ffi_scalar};
 use mps_formula::material_mechanics::*;
 
@@ -289,18 +290,25 @@ pub extern "C" fn material_mechanics_principal_stresses(
     tzx: f64,
     out: *mut f64,
 ) -> Bool {
-    let Some((s1, s2, s3)) = principal_stresses(sx, sy, sz, txy, tyz, tzx) else {
-        return Bool::FALSE;
-    };
     if out.is_null() {
+        set_error(ERR_NULL_POINTER, "output pointer is null");
         return Bool::FALSE;
     }
-    unsafe {
-        *out = s1;
-        *out.add(1) = s2;
-        *out.add(2) = s3;
+    // 三个分量各走一次 ffi_scalar（panic 屏障 + 错误槽语义统一）。
+    let s1 = ffi_scalar(out, || {
+        principal_stresses(sx, sy, sz, txy, tyz, tzx).map(|(a, _, _)| a)
+    });
+    let s2 = ffi_scalar(unsafe { out.add(1) }, || {
+        principal_stresses(sx, sy, sz, txy, tyz, tzx).map(|(_, b, _)| b)
+    });
+    let s3 = ffi_scalar(unsafe { out.add(2) }, || {
+        principal_stresses(sx, sy, sz, txy, tyz, tzx).map(|(_, _, c)| c)
+    });
+    if s1 == Bool::TRUE && s2 == Bool::TRUE && s3 == Bool::TRUE {
+        Bool::TRUE
+    } else {
+        Bool::FALSE
     }
-    Bool::TRUE
 }
 
 /// Miner's linear damage rule: D = Σ (nᵢ / N_fᵢ). `ratios` points to
@@ -313,12 +321,17 @@ pub extern "C" fn material_mechanics_miners_damage(
     out: *mut f64,
 ) -> Bool {
     if ratios.is_null() || out.is_null() || count == 0 {
+        set_error(ERR_INVALID_ARGUMENT, "ratios/out is null or count is zero");
         return Bool::FALSE;
     }
-    let ratios = unsafe { slice::from_raw_parts(ratios, count as usize) };
-    let Some(d) = miners_damage(ratios) else {
-        return Bool::FALSE;
-    };
-    unsafe { *out = d };
-    Bool::TRUE
+    ffi_guard(Bool::FALSE, || {
+        let ratios = unsafe { slice::from_raw_parts(ratios, count as usize) };
+        match miners_damage(ratios) {
+            Some(d) => {
+                unsafe { *out = d };
+                Bool::TRUE
+            }
+            None => Bool::FALSE,
+        }
+    })
 }

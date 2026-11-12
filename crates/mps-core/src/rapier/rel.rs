@@ -32,17 +32,17 @@ pub extern "C" fn relativity_kerr_horizon_radii(
     out_event: *mut f64,
     out_cauchy: *mut f64,
 ) -> Bool {
-    let Some((event, cauchy)) = kerr_horizon_radii(mass, spin_parameter, g) else {
-        return Bool::FALSE;
-    };
-    if out_event.is_null() || out_cauchy.is_null() {
-        return Bool::FALSE;
+    let a = ffi_scalar(out_event, || -> Option<f64> {
+        kerr_horizon_radii(mass, spin_parameter, g).map(|(e, _)| e)
+    });
+    let b = ffi_scalar(out_cauchy, || -> Option<f64> {
+        kerr_horizon_radii(mass, spin_parameter, g).map(|(_, c)| c)
+    });
+    if a == Bool::TRUE && b == Bool::TRUE {
+        Bool::TRUE
+    } else {
+        Bool::FALSE
     }
-    unsafe {
-        *out_event = event;
-        *out_cauchy = cauchy;
-    }
-    Bool::TRUE
 }
 
 #[unsafe(no_mangle)]
@@ -110,17 +110,17 @@ pub extern "C" fn relativity_reissner_nordstrom_horizons(
     out_outer: *mut f64,
     out_inner: *mut f64,
 ) -> Bool {
-    let Some((outer, inner)) = reissner_nordstrom_horizons(mass, charge, g) else {
-        return Bool::FALSE;
-    };
-    if out_outer.is_null() || out_inner.is_null() {
-        return Bool::FALSE;
+    let a = ffi_scalar(out_outer, || -> Option<f64> {
+        reissner_nordstrom_horizons(mass, charge, g).map(|(o, _)| o)
+    });
+    let b = ffi_scalar(out_inner, || -> Option<f64> {
+        reissner_nordstrom_horizons(mass, charge, g).map(|(_, i)| i)
+    });
+    if a == Bool::TRUE && b == Bool::TRUE {
+        Bool::TRUE
+    } else {
+        Bool::FALSE
     }
-    unsafe {
-        *out_outer = outer;
-        *out_inner = inner;
-    }
-    Bool::TRUE
 }
 
 #[unsafe(no_mangle)]
