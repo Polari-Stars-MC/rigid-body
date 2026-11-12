@@ -68,23 +68,24 @@ mod tests {
             if s % sample_every == 0 {
                 let pe = world.body_state(earth).expect("earth");
                 let pp = world.body_state(probe).expect("probe");
-                // 相对地球的角位置（L4 在地球前进方向 +60° 绝对角 →
-                // 地球→L4 相对矢量方向为 +120°）。
-                let rel = pp.position - pe.position;
-                let ang = rel.y.atan2(rel.x).to_degrees();
-                let dist = rel.length();
-                println!("step {s:>7}: L4 rel-angle={ang:6.2}  dist={dist:.4e} m");
+                // 角分离（L4 契约：探测器与地球对日心的角距恒 60°；取两个
+                // 绝对角的差——世界系里 rel 矢量本身随轨道旋转，不能直接用）。
+                let ae = pe.position.y.atan2(pe.position.x).to_degrees();
+                let ap = pp.position.y.atan2(pp.position.x).to_degrees();
+                let ang = ap - ae;
+                let dist = (pp.position - pe.position).length();
+                println!("step {s:>7}: L4 angle-sep={ang:6.2}  dist={dist:.4e} m");
                 assert!(
-                    (ang - 120.0).abs() < 5.0,
+                    (ang - 60.0).abs() < 5.0,
                     "L4 libration beyond +/-5 deg at step {s}: {ang:.2}"
                 );
             }
         }
         let pe = world.body_state(earth).expect("earth");
         let pp = world.body_state(probe).expect("probe");
-        let rel = pp.position - pe.position;
-        let ang = rel.y.atan2(rel.x).to_degrees();
-        println!("final L4 angle: {ang:.3} deg");
+        let ae = pe.position.y.atan2(pe.position.x).to_degrees();
+        let ap = pp.position.y.atan2(pp.position.x).to_degrees();
+        println!("final L4 angle-sep: {:.3} deg", ap - ae);
     }
 
     /// 基准 2：月式轨道 1M 步根数漂移。

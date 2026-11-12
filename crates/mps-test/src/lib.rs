@@ -91,6 +91,7 @@ pub mod rapier {
     pub mod qphys;
     pub mod quantum;
     pub mod query;
+    pub mod record_replay;
     pub mod registry;
     pub mod rel;
     pub mod relativity;
