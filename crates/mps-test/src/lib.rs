@@ -4,6 +4,7 @@
 pub mod cosmos {
     pub mod arena;
     pub mod bodies;
+    pub mod drift_matrix;
     pub mod error;
     pub mod ffi;
     pub mod flight;
@@ -97,6 +98,7 @@ pub mod rapier {
     pub mod sensor;
     pub mod servo_body;
     pub mod shared_arena;
+    pub mod sleep_wake;
     pub mod soft_body;
     pub mod soft_data;
     pub mod soft_upstream;
