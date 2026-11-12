@@ -349,6 +349,8 @@ pub extern "C" fn granular_enable_collision(
             return Bool::FALSE;
         };
         let body_len = g.len();
+        // DEM Coulomb μ：代理 collider 必须继承它（快照后即弃借用，见下）。
+        let dem_friction = g.params.friction;
         if particle_radius <= 0.0 || !particle_radius.is_finite() {
             set_error(
                 ERR_INVALID_ARGUMENT,
@@ -400,7 +402,15 @@ pub extern "C" fn granular_enable_collision(
                 .linvel(vel)
                 .build();
             let h = world.inner.bodies.insert(rb);
-            let col = ColliderBuilder::ball(particle_radius).density(0.0).build();
+            // 代理 collider 必须继承 DEM 的 Coulomb μ：开代理后 world_step
+            // 先用刚体接触解算粒子姿态再读回，堆形由刚体接触主导——摩擦
+            // 硬编码默认值会淹没 DEM μ 的差异（颗粒-地面/颗粒-颗粒经代理
+            // 的摩擦全部退化为 0.5）。这里从 `granular_create` 的参数取值，
+            // 宿主即可经 DEM friction 入口统一控制颗粒接触摩擦。
+            let col = ColliderBuilder::ball(particle_radius)
+                .density(0.0)
+                .friction(dem_friction)
+                .build();
             world
                 .inner
                 .colliders

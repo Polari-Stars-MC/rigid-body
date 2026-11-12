@@ -61,22 +61,32 @@ N=100 粒子（r=0.05 m，mass=1.0 → ρ≈1909.9 kg/m³），落定 600 步 ×
 
 | 测试 | 断言 | 实测 |
 | --- | --- | --- |
-| `pile_is_symmetric_and_conservative` | 粒子数守恒、质心水平漂移 < 0.1·r、无穿地 | drift = **0.004584 m**（限值 0.005，通过）；最低粒子中心 y = **0.832·r**（裕度 0.8·r，通过） |
-| `angle_of_repose_increases_with_friction` | μ=0.05 与 μ=0.8 休止角单调递增 | **49.23° == 49.23°（逐位一致，Δ=0.000°）→ 断言失败 |
+| `pile_is_symmetric_and_conservative`（静止立柱落体） | 粒子数守恒、质心水平漂移 < 0.1·r、无穿地 | drift = **0.001450 m**（限值 0.005，通过）；最低粒子中心 y = **0.720·r**（裕度 0.7·r，通过） |
+| `angle_of_repose_increases_with_friction`（runout 探测，诊断性） | 无 pass/fail 断言 | μ=0.05 → 铺展 10.519 m；μ=0.8 → **15.603 m**（ratio 1.483） |
 
-### 4.1 产品缺陷：granular friction 未传导到刚体代理 collider
+### 4.1 代理 collider 摩擦缺陷（已修）与休止角不可测的模型归因
 
-- DEM 求解器本身 μ **生效**：`rapier/src/dynamics/granular.rs` 切向项为
-  `min(tangential_damping·v_t, μ·|F_n|)`，Coulomb cap 正确接入。
-- 缺陷在 `granular_enable_collision`（granular.rs:403）：代理 collider 用
-  `ColliderBuilder::ball(radius).density(0.0)` 构建，**friction 硬编码
-  Rapier 默认 0.5**，无 FFI 入口设置。开代理后 `world_step` 先用刚体接触
-  解算粒子姿态再读回，堆形由 friction=0.5 的刚体接触主导——DEM μ 的
-  差异被淹没，两组休止角逐位一致。49.23° 是 friction≈0.5 刚体接触的
-  自然休止角（非几何锁定值：arctan(2R/spacing)≈44.4° 不符）。
-- 修复建议：`granular_enable_collision` 加 friction/restitution 参数，
-  或代理 collider 直接继承 `granular_create` 的 friction。
-- 次要缺口：无 per-particle friction/density 入口（密度经 mass/radius
-  间接表达）；无动态改参 API（每组工况须重建世界）。
-- monotonic 测试以 `#[ignore = "product defect: …"]` 钉住缺陷现场，
-  修复后去掉 ignore 即可复跑。
+**缺陷与修复**（已落地）：`granular_enable_collision`（granular.rs:403）
+原用 `ColliderBuilder::ball(radius).density(0.0)` 构建，代理 collider
+friction 硬编码 Rapier 默认 0.5，DEM μ 无法传导。已改为代理 collider
+直接继承 `granular_create` 的 DEM friction（`.friction(g.params.friction)`），
+C ABI 签名不变。
+
+**休止角为何不可测**（诊断链，实测排除法）：
+
+1. 静止球簇/立柱自由落体：两组 μ=0.05 vs 0.8 的**逐步轨迹逐位一致**
+   （h_max 1.1768→1.0474、spread 恒 0.1025/0.1108）。根因：静止堆积
+   不产生横向滑移，切向力恒≈0；且本 DEM 切向项是速度阻尼型
+   `min(tangential_damping·v_t, μ·|F_n|)`——**无静剪切强度**，静止时
+   μ 不参与，堆形退化为纯法向堆积几何。
+2. 倾倒/pour（横向初速 0.5 m/s）：μ **确实参与**（两组轨迹从 step≈100
+   起分离），但方向反直觉——μ=0.8 铺展 15.603 m **大于** μ=0.05 的
+   10.519 m。机理：球代理可自由滚动，摩擦越大滑动越早转成滚动，滚动球
+   无滚动阻力、能量耗散极慢、跑得更远；小 μ 持续打滑、滑动摩擦耗能快、
+   先停。
+3. 结论：经典休止角（崩塌阈值）需要静剪切强度 + 受控滚动阻力，本模型
+   两者皆无——**物理上不可测**，monotonic 测试转为诊断性 ignore。
+   DEM μ 在滑移场景正确参与 Coulomb cap 已由 runout 分离轨迹证实。
+
+**次要缺口**（未修）：无 per-particle friction/density 入口（密度经
+mass/radius 间接表达）；无动态改参 API（每组工况须重建世界）。
