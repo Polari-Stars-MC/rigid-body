@@ -149,7 +149,8 @@ jobs:
             crates/mps-test/java/collision-mode/org/polaris2023/mps/rapier/RapierNative.java \
             crates/mps-test/java/cosmos-floating-origin/org/polaris2023/mps/cosmos/CosmosNative.java \
             crates/mps-test/java/debug-recording/org/polaris2023/mps/rapier/RecordingNative.java \
-            crates/mps-test/java/baker-cache/org/polaris2023/mps/rapier/BakerNative.java
+            crates/mps-test/java/baker-cache/org/polaris2023/mps/rapier/BakerNative.java \
+            crates/mps-test/java/recording-events/org/polaris2023/mps/rapier/EventsNative.java
 
       - name: Run smoke fixtures
         run: |
@@ -166,3 +167,6 @@ jobs:
           java -cp target/jni-smoke-classes \
             -Djava.library.path=$(dirname "$LIB") \
             org.polaris2023.mps.rapier.BakerNative "$LIB"
+          java -cp target/jni-smoke-classes \
+            -Djava.library.path=$(dirname "$LIB") \
+            org.polaris2023.mps.rapier.EventsNative "$LIB"
