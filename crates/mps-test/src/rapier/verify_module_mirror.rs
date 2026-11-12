@@ -152,6 +152,9 @@ mod tests {
             "performance_matrix",
             "sleep_wake",
             "record_replay",
+            // 真实物理验证系列：摩擦/恢复系数能量学、颗粒休止角
+            "friction_restitution_energy",
+            "granular_repose",
         ]
         .into_iter()
         .map(String::from)
@@ -273,6 +276,9 @@ mod tests {
                     && *n != "central_body_switch"
                     // E2 双世界一致性抽查
                     && *n != "cross_world"
+                    // 真实物理验证系列：大气终端速度、Hohmann 转移闭环
+                    && *n != "drag_terminal_velocity"
+                    && *n != "hohmann_transfer_validation"
             })
             .cloned()
             .collect();
