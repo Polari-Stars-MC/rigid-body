@@ -138,8 +138,9 @@ fn trajectory_svg(tracks: &[(u64, Vec<[f64; 3]>)], events: &[[f64; 5]]) -> Strin
         }
     }
     if !events.is_empty() {
+        // r##"..."##：字符串里有 fill="#…"（"# 会终止 r#"…"#）。
         svg.push_str(&format!(
-            r#"<g font-family="monospace" font-size="13"><rect x="8" y="8" width="188" height="24" rx="4" fill="#000000aa"/><text x="16" y="25" fill="#{TEXT_COLOR}">events: {n_started} started, {n_stopped} stopped</text></g>"#,
+            r##"<g font-family="monospace" font-size="13"><rect x="8" y="8" width="188" height="24" rx="4" fill="#000000aa"/><text x="16" y="25" fill="#{TEXT_COLOR}">events: {n_started} started, {n_stopped} stopped</text></g>"##,
             TEXT_COLOR = "e6edf3"
         ));
     }
