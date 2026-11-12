@@ -13,6 +13,8 @@
 - `rigid_body.h` 与 `cosmos.h` 都由 cbindgen 生成；Linux CI 在 release 构建后 diff 这两份。
 - 文档站是 Dioxus 0.7 单页 SSR，计数由 xtask 生成。
 - 默认碰撞体策略、刚体中心 BVH、`world_step` 性能矩阵已有专题文档和测试入口。
+- 录制回放（`debug_recording_*`）与浮动原点（`cosmosWorldRecenter` / 自动 recenter）有 Rust 守门 + Java JNI 冒烟 fixture，CI 里有 `jni-smoke` job 用真实 JVM 验证导出符号与链接。
+- 引力近场用 Plummer 软化（`NEAR_FIELD_SOFTENING_SQ`）取代旧 1 m 硬截止；`ffi_guard`/`ffi_scalar` 覆盖有守门测试扫描。
 
 ## 还开着
 
@@ -20,7 +22,7 @@
 
 1. **数值域迁移没有铺满。** `FormulaError` 只覆盖 [formula-numeric-domains.md](formula-numeric-domains.md) 里列出的 `_checked` API。其余公式仍是旧的直接返回。新公式走 checked 路径；旧函数只有在不改 C 签名和失败哨兵的前提下才加 checked 变体。
 2. **`anvilkit-bridge` 的测试编译是坏的。** `crates/mps-test/src/rapier/anvilkit.rs` 在 `--all-features` 下有既存错误。默认 CI 不编它。要么修到 feature 自己能 `cargo test -p mps-test --features anvilkit-bridge`，要么在 ADR 里写明这个桥冻结；不要把它放进 `default`。
-3. **Java 声明在仓库外。** `world-collision-mode.md` 仍要求宿主手工补 JNI 声明。`xtask gen-java` 只覆盖带 `#[java_struct]` / `#[java_enum]` 的值类型。JNI 方法清单没有生成进本仓库。在边界稳定之前，不把宿主工程并进来。
+3. **Java 声明在仓库外。** `world-collision-mode.md` 仍要求宿主手工补 JNI 声明。`xtask gen-java` 只覆盖带 `#[java_struct]` / `#[java_enum]` 的值类型。JNI 方法清单没有生成进本仓库。在边界稳定之前，不把宿主工程并进来。（2026-11-12 起有所缓解：`crates/mps-test/java/` 的冒烟 fixture + CI `jni-smoke` job 把高价值 JNI 面锁进了契约；宿主仓库仍需自行声明。）
 
 ## 明确不做
 

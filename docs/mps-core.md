@@ -19,6 +19,7 @@
 - [rigid_body.md](mps-core/rigid_body.md) — `rigid_body.rs`：刚体 builder/创建/位姿/速度/力/脉冲/CCD/sleep 等 `rigid_body_*` 入口。
 - [collider.md](mps-core/collider.md) — `collider.rs`：碰撞体 builder/创建/材质/分组/事件/钩子等 `collider_*` 入口。
 - [events.md](mps-core/events.md) — `events.rs`：碰撞/接触力事件队列 + hooks 回调。
+- [debug_recording.md](mps-core/debug_recording.md) — `debug_recording.rs`：Jolt-Viewer 风格录制回放（环形缓冲、13-lane 帧快照、v2 事件段、`debug_recording_*` 入口）。
 - [forces.md](mps-core/forces.md) — `forces.rs`：力法则注册表、BodyForceLog、ForceFacade。
 - [parallel.md](mps-core/parallel.md) — `parallel.rs`：每帧工作的多线程执行（两段式逐体力填充、chunk-pair 成对引力、并行快照、线程池 FFI）。
 
