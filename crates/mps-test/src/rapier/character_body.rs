@@ -1028,4 +1028,154 @@ mod tests {
         character_body_destroy(world, id);
         world_destroy(world);
     }
+
+    /// B3：移动载具承载角色（「站在移动平台上不滑动」）。
+    ///
+    /// 位置型 kinematic 平台每步前进 +X 5 m/s；角色仅下发零位移移动
+    /// （站着不动）。断言：角色被平台携带随行（相对平台位移 < 0.05 m），
+    /// 且全程 grounded。
+    ///
+    /// 这是「moving ground」回归钉子：若 KCC 的地面碰撞解析丢失平台的
+    /// 运动参照系，角色会留在原地并被平台穿过（相对位移 ≈ 平台位移）。
+    #[test]
+    fn character_carried_by_moving_platform() {
+        use mps_core::rapier::rigid_body::rigid_body_set_next_kinematic_position;
+        let world = make_world();
+
+        // 平台：位置型 kinematic 立方体（顶面 y = 0），每步 +X 5/60 m。
+        let platform_builder = rigid_body_builder_create(BodyStatus::KinematicPositionBased as u32);
+        rigid_body_builder_set_translation(
+            platform_builder,
+            Vec3 {
+                x: 0.0,
+                y: -0.5,
+                z: 0.0,
+            },
+        );
+        let platform = world_insert_rigid_body(world, rigid_body_builder_build(platform_builder));
+        let shape = ShapeDesc {
+            shape_type: ShapeType::Cuboid as u32,
+            a: 2.0,
+            b: 0.5,
+            c: 2.0,
+            ..Default::default()
+        };
+        let collider = collider_builder_build(collider_builder_create_ex(shape));
+        world_insert_collider_with_parent(world, collider, platform);
+
+        // 角色站在平台中心上方。
+        let id = character_body_create(
+            world,
+            ShapeDesc {
+                shape_type: ShapeType::Ball as u32,
+                a: 0.5,
+                ..Default::default()
+            },
+            Vec3 {
+                x: 0.0,
+                y: 0.6,
+                z: 0.0,
+            },
+        );
+        assert_ne!(id, u32::MAX);
+
+        let dt = 1.0 / 60.0;
+        let speed = 5.0; // m/s
+        let steps = 120usize; // 2 秒，平台走 10 m
+
+        // 让角色落到平台（先 prime broad phase）。
+        let mut t = Vec3::default();
+        world_step(world, dt);
+        for _ in 0..180 {
+            let _ = character_body_move(
+                world,
+                id,
+                Vec3 {
+                    x: 0.0,
+                    y: -0.2,
+                    z: 0.0,
+                },
+                dt,
+            );
+            world_step(world, dt);
+        }
+        let _ = character_body_move(
+            world,
+            id,
+            Vec3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            dt,
+        );
+        assert_eq!(
+            character_body_get_translation(world, id, &mut t),
+            Bool::TRUE
+        );
+        // 站稳断言：rest 高度在球面接触范围（fork 的 grounded 标志在
+        // step+move 顺序下不可靠，与 lands_and_grounds_on_floor 同款用位姿）。
+        assert!(
+            t.y > 0.4 && t.y < 0.8,
+            "must rest on platform: y={:.4}",
+            t.y
+        );
+        let rel0 = t.y;
+
+        for s in 1..=steps {
+            // 平台匀速前进。
+            let px = speed * dt * s as f64;
+            assert_eq!(
+                rigid_body_set_next_kinematic_position(
+                    world,
+                    platform,
+                    Vec3 {
+                        x: px,
+                        y: -0.5,
+                        z: 0.0
+                    },
+                ),
+                Bool::TRUE
+            );
+            world_step(world, dt);
+            // 角色不动（零期望位移）。
+            let _ = character_body_move(
+                world,
+                id,
+                Vec3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                dt,
+            );
+            world_step(world, dt);
+        }
+
+        assert!(
+            t.y > 0.4 && t.y < 0.8,
+            "still resting on platform: y={:.4}",
+            t.y
+        );
+        assert_eq!(
+            character_body_get_translation(world, id, &mut t),
+            Bool::TRUE
+        );
+        let expected_x = speed * dt * steps as f64;
+        let rel_x = t.x - expected_x;
+        assert!(
+            rel_x.abs() < 0.05,
+            "character must be carried by platform: rel_x={rel_x:.4} (char x={:.3}, platform x={expected_x:.3})",
+            t.x
+        );
+        // y 不漂移（不被平台顶飞也不下陷）。
+        assert!(
+            (t.y - rel0).abs() < 0.1,
+            "character y must not drift: {} -> {}",
+            rel0,
+            t.y
+        );
+        character_body_destroy(world, id);
+        world_destroy(world);
+    }
 }

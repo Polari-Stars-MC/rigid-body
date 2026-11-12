@@ -148,6 +148,7 @@ mod tests {
             "force_queue",
             "force_queue_integration",
             "performance_matrix",
+            "sleep_wake",
         ]
         .into_iter()
         .map(String::from)
@@ -254,7 +255,9 @@ mod tests {
             .collect();
         let orphans_in_test: std::collections::BTreeSet<String> = test_cosmos
             .keys()
-            .filter(|n| !cosmos_src.contains_key(*n))
+            // test-only adapters (no cosmos submodule): evidence/benchmark-only
+            // test files — same policy as the rapier-side `test_only_extras`.
+            .filter(|n| !cosmos_src.contains_key(*n) && *n != "drift_matrix")
             .cloned()
             .collect();
 

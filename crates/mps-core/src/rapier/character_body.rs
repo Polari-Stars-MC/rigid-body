@@ -216,6 +216,21 @@ pub extern "C" fn character_body_move(
             return EffectiveCharacterMovement::default();
         };
         let current = body_ref.translation();
+        // B3 移动载具承载：站立（零期望位移）时，探测脚下支撑碰撞体的
+        // kinematic 父体速度，把「平台速度 × dt」并入期望位移——KCC 的
+        // move_shape 自身不带地面参照系（standing-on-moving-platform 语义），
+        // 上游 Rapier 把承载留给宿主，我们在这里做（宿主零改动）。
+        // 平台在动而角色命令为零是最常见的 MC 场景（船/矿车/升降梯）。
+        let desired = {
+            let n2 = desired.x * desired.x + desired.y * desired.y + desired.z * desired.z;
+            if n2 < 1.0e-12 {
+                // 站立：并入平台承载位移（kinematic 父体速度 × dt）。
+                let carry = ground_carry_translation(world, current, dt);
+                vec3_to_rapier(desired) + carry
+            } else {
+                vec3_to_rapier(desired)
+            }
+        };
         let mut collected: Vec<CharacterCollision> = Vec::new();
         let movement = {
             let Some(cb) = world.inner.character_bodies.get(id) else {
@@ -234,7 +249,7 @@ pub extern "C" fn character_body_move(
                 &query,
                 shape.as_ref(),
                 &isometry_from_parts(vec3_from_rapier(current), Quat::default()),
-                vec3_to_rapier(desired),
+                desired,
                 |collision| collected.push(collision),
             )
         };
@@ -258,6 +273,51 @@ pub extern "C" fn character_body_move(
         clear_error();
         result
     })
+}
+
+/// B3 地面承载探测：从角色当前脚下向下做一次短程球形投射，命中碰撞体
+/// 的父体若是 kinematic（位置/速度驱动平台），返回其线速度 × dt——站立
+/// 角色应随平台移动的位移。探测距离 1.2 m（60 Hz 下覆盖 5 m/s 平台的
+/// 单步 0.083 m 位移绰绰有余）。动态父体（被推的箱子）**不**承载——
+/// 那是 solve_impulses 的语义。查不到 / 无父体 / 非 kinematic 返回 ZERO
+/// （行为与旧实现一致，原方法不变）。
+fn ground_carry_translation(world: &WorldHandle, current: Vector, dt: f64) -> Vector {
+    use rapier3d::parry::query::details::ShapeCastOptions;
+    use rapier3d::prelude::{Ball, Pose};
+    const CARRY_PROBE_DISTANCE: f64 = 1.2;
+    let query = world.inner.broad_phase.as_query_pipeline(
+        world.inner.narrow_phase.query_dispatcher(),
+        &world.inner.bodies,
+        &world.inner.colliders,
+        QueryFilter::new(),
+    );
+    let probe = Ball::new(0.3);
+    let Some((collider_handle, _hit)) = query.cast_shape(
+        &Pose::from_translation(current),
+        Vector::new(0.0, -1.0, 0.0),
+        &probe,
+        ShapeCastOptions {
+            target_distance: 0.0,
+            stop_at_penetration: false,
+            max_time_of_impact: CARRY_PROBE_DISTANCE,
+            compute_impact_geometry_on_penetration: false,
+        },
+    ) else {
+        return Vector::ZERO;
+    };
+    let Some(collider) = world.inner.colliders.get(collider_handle) else {
+        return Vector::ZERO;
+    };
+    let Some(parent) = collider.parent() else {
+        return Vector::ZERO;
+    };
+    let Some(rb) = world.inner.bodies.get(parent) else {
+        return Vector::ZERO;
+    };
+    if !rb.is_kinematic() {
+        return Vector::ZERO;
+    }
+    rb.linvel() * dt
 }
 
 /// Set the character's up vector (used for slope/ground semantics). Defaults to

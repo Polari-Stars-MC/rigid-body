@@ -14,7 +14,7 @@
 /// Workspace version (from root Cargo.toml), for the footer / brand.
 pub const VERSION: &str = "0.1.4";
 /// Total number of `#[test]` items in `mps-test`.
-pub const TEST_COUNT: &str = "1211";
+pub const TEST_COUNT: &str = "1212";
 /// Total number of `jni!(`/`jni_e_c!(` method entries in `mps-jni`.
 pub const JNI_METHOD_COUNT: &str = "621";
 /// Total number of `pub extern "C" fn` declarations in `mps-core/rapier`.
