@@ -292,6 +292,14 @@ impl Default for FrameWorkBuffers {
 pub struct PhysicsWorld {
     body_spatial_index: parking_lot::Mutex<Option<BodySpatialIndex>>,
     pub(crate) regions: Vec<WorldRegion>,
+    /// B1 体级模拟域：domain_id → 成员刚体集合。域被 `world_set_domain_active`
+    /// 置为 inactive 时，全体成员 `set_enabled(false)`（从 broad phase/island
+    /// 撤出、状态冻结；比 region 的 sleep 更强——disabled 体不参与任何求解，
+    /// 且休眠体内能不被扰动）。重新 active 时 `set_enabled(true)` 恢复。
+    pub(crate) simulation_domains:
+        std::collections::HashMap<u32, std::collections::HashSet<RigidBodyHandle>>,
+    /// 当前被停用的域（inactive 域的 id 集合）。
+    pub(crate) inactive_domains: std::collections::HashSet<u32>,
     pub(crate) region_tick: u64,
     pub(crate) region_version: u64,
     pub(crate) region_order_version: u64,
@@ -473,6 +481,8 @@ impl PhysicsWorld {
         Self {
             body_spatial_index: parking_lot::Mutex::new(None),
             regions: Vec::new(),
+            simulation_domains: std::collections::HashMap::new(),
+            inactive_domains: std::collections::HashSet::new(),
             region_tick: 0,
             region_version: 0,
             region_order_version: u64::MAX,
@@ -1372,6 +1382,131 @@ pub extern "C" fn world_get_region_body_count(
             .len();
         clear_error();
         count as u32
+    })
+}
+
+// ---- B1 体级模拟域（per-body simulation domains）----
+//
+// 语义（ADR 见 docs/adr/）：炮弹/远处结构停在模拟边界外 → 宿主把它们划入
+// 非活动域。inactive 域的成员被 `set_enabled(false)` 完全冻结（从 broad
+// phase/island 撤出、位姿与速度原样保留），active 恢复时 `set_enabled(true)`。
+// 比 region 的 sleep 更强的保证：disabled 体不参与任何求解阶段，也不能被
+// 唤醒。与 region 的分工：region 是空间谓词（每步重算），domain 是显式
+// 成员表（宿主控制成员资格，零每步查询开销）。
+
+/// 把刚体划入模拟域（domain 0 = 无域/默认，调用即从当前域移除并恢复活动）。
+/// 域成员资格在切换时立即生效：若目标域当前 inactive，刚体立即冻结。
+///
+/// # Safety
+/// `world` 必须是 `world_create` 返回的有效指针。
+#[unsafe(no_mangle)]
+pub extern "C" fn rigid_body_set_simulation_domain(
+    world: *mut WorldHandle,
+    handle: RigidBodyHandleRaw,
+    domain: u32,
+) -> Bool {
+    ffi_guard(Bool::FALSE, || {
+        let Some(world) = (unsafe { world.as_mut() }) else {
+            set_error(ERR_NULL_POINTER, "world is null");
+            return Bool::FALSE;
+        };
+        let _lock = world.inner.query_lock.write();
+        let body = crate::rapier::ffi::convert::unpack_rigid_body_handle(handle);
+        // 从旧域移除。
+        for members in world.inner.simulation_domains.values_mut() {
+            members.remove(&body);
+        }
+        if domain == 0 {
+            // 无域：确保恢复活动。
+            if let Some(b) = world.inner.bodies.get_mut(body) {
+                b.set_enabled(true);
+            }
+            clear_error();
+            return Bool::TRUE;
+        }
+        world
+            .inner
+            .simulation_domains
+            .entry(domain)
+            .or_default()
+            .insert(body);
+        // 目标域 inactive → 立即冻结。
+        if world.inner.inactive_domains.contains(&domain)
+            && let Some(b) = world.inner.bodies.get_mut(body)
+        {
+            b.set_enabled(false);
+        }
+        clear_error();
+        Bool::TRUE
+    })
+}
+
+/// 设置域的活动状态。返回状态实际翻转的刚体数。
+///
+/// # Safety
+/// `world` 必须是 `world_create` 返回的有效指针。
+#[unsafe(no_mangle)]
+pub extern "C" fn world_set_domain_active(
+    world: *mut WorldHandle,
+    domain: u32,
+    active: Bool,
+) -> u32 {
+    ffi_guard(0, || {
+        let Some(world) = (unsafe { world.as_mut() }) else {
+            set_error(ERR_NULL_POINTER, "world is null");
+            return 0;
+        };
+        let _lock = world.inner.query_lock.write();
+        if domain == 0 {
+            set_error(ERR_INVALID_ARGUMENT, "domain 0 is reserved (no domain)");
+            return 0;
+        }
+        let Some(members) = world.inner.simulation_domains.get(&domain) else {
+            set_error(ERR_NOT_FOUND, "unknown simulation domain");
+            return 0;
+        };
+        let mut changed = 0u32;
+        let activate = active == Bool::TRUE;
+        for handle in members {
+            if let Some(b) = world.inner.bodies.get_mut(*handle)
+                && activate != b.is_enabled()
+            {
+                b.set_enabled(activate);
+                changed += 1;
+            }
+        }
+        if activate {
+            world.inner.inactive_domains.remove(&domain);
+        } else {
+            world.inner.inactive_domains.insert(domain);
+        }
+        clear_error();
+        changed
+    })
+}
+
+/// 域成员数（含被冻结的成员）。未知域返回 -1。
+///
+/// # Safety
+/// `world` 必须是 `world_create` 返回的有效指针。
+#[unsafe(no_mangle)]
+pub extern "C" fn world_domain_body_count(world: *const WorldHandle, domain: u32) -> i32 {
+    ffi_guard(-1, || {
+        let Some(world) = (unsafe { world.as_ref() }) else {
+            set_error(ERR_NULL_POINTER, "world is null");
+            return -1;
+        };
+        let _lock = world.inner.query_lock.read();
+        match world.inner.simulation_domains.get(&domain) {
+            Some(members) => {
+                clear_error();
+                members.len() as i32
+            }
+            None => {
+                set_error(ERR_NOT_FOUND, "unknown simulation domain");
+                -1
+            }
+        }
     })
 }
 

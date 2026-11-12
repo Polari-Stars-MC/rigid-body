@@ -11434,6 +11434,33 @@ uint32_t world_get_region_body_count(const struct WorldHandle *world,
                                      double radius);
 
 /**
+ * 把刚体划入模拟域（domain 0 = 无域/默认，调用即从当前域移除并恢复活动）。
+ * 域成员资格在切换时立即生效：若目标域当前 inactive，刚体立即冻结。
+ *
+ * # Safety
+ * `world` 必须是 `world_create` 返回的有效指针。
+ */
+struct Bool rigid_body_set_simulation_domain(struct WorldHandle *world,
+                                             RigidBodyHandleRaw handle,
+                                             uint32_t domain);
+
+/**
+ * 设置域的活动状态。返回状态实际翻转的刚体数。
+ *
+ * # Safety
+ * `world` 必须是 `world_create` 返回的有效指针。
+ */
+uint32_t world_set_domain_active(struct WorldHandle *world, uint32_t domain, struct Bool active);
+
+/**
+ * 域成员数（含被冻结的成员）。未知域返回 -1。
+ *
+ * # Safety
+ * `world` 必须是 `world_create` 返回的有效指针。
+ */
+int32_t world_domain_body_count(const struct WorldHandle *world, uint32_t domain);
+
+/**
  * Set integration parameters (dt, solver iterations, CCD substeps).
  *
  * # Safety

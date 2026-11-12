@@ -409,6 +409,9 @@ jni!(int worldWakeRegion(long world, double x, double y, double z, double radius
 jni!(boolean worldSetRegionPriority(long world, double x, double y, double z, double radius, int priority) { wo::world_set_region_priority(wm(world), v3(x, y, z), radius, priority).0 as jbyte });
 jni!(boolean worldInvalidateRegionIndex(long world) { wo::world_invalidate_region_index(wm(world)).0 as jbyte });
 jni!(int worldGetRegionBodyCount(long world, double x, double y, double z, double radius) { wo::world_get_region_body_count(wcp(world), v3(x,y,z), radius) as jint });
+jni!(boolean rigidBodySetSimulationDomain(long world, long body, int domain) { wo::rigid_body_set_simulation_domain(wm(world), body as u64, domain as u32).0 as jbyte });
+jni!(int worldSetDomainActive(long world, int domain, boolean active) { wo::world_set_domain_active(wm(world), domain as u32, if active != 0 { mps_core::rapier::ffi::Bool::TRUE } else { mps_core::rapier::ffi::Bool::FALSE }) as jint });
+jni!(int worldDomainBodyCount(long world, int domain) { wo::world_domain_body_count(wcp(world), domain as u32) as jint });
 
 jni!(void worldSetGravity(long world, double x, double y, double z) { wo::world_set_gravity(wm(world), v3(x, y, z)); });
 

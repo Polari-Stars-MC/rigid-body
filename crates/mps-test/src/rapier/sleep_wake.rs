@@ -77,13 +77,15 @@ mod tests {
     /// # Safety
     /// world 必须是 `build_tower` 返回的有效指针。
     unsafe fn inner(world: &World) -> &mps_core::rapier::world::PhysicsWorld {
-        &(*world.0).inner
+        // SAFETY: 调用契约保证 world 指针有效。
+        unsafe { &(*world.0).inner }
     }
 
     /// # Safety
     /// world 指针必须有效。
-    unsafe fn inner_mut(world: &World) -> &mut mps_core::rapier::world::PhysicsWorld {
-        &mut (*world.0).inner
+    unsafe fn inner_mut(world: &mut World) -> &mut mps_core::rapier::world::PhysicsWorld {
+        // SAFETY: 调用契约保证 world 指针有效且独占。
+        unsafe { &mut (*world.0).inner }
     }
 
     /// 塔状态快照：所有体的 |v| 最大值与位姿有限性。
@@ -92,7 +94,8 @@ mod tests {
     unsafe fn tower_stats(world: &World) -> (f64, bool) {
         let mut max_speed = 0.0f64;
         let mut finite = true;
-        for (_, b) in inner(world).bodies.iter() {
+        // SAFETY: world 指针有效（见上方契约）。
+        for (_, b) in unsafe { inner(world) }.bodies.iter() {
             let v = b.linvel().length();
             max_speed = max_speed.max(v);
             let p = b.translation();
@@ -191,6 +194,7 @@ mod tests {
             let col = 2usize;
             // 每轮记录当前该 (layer, col) 槽位的实际句柄——填回后句柄会变。
             let mut live = layers;
+            let mut world = world;
             for cycle in 0..100 {
                 let layer = cycle % 8;
                 let handle = live[layer][col];
@@ -203,7 +207,7 @@ mod tests {
                 assert!(finite, "NaN in cycle {cycle}");
                 assert!(v <= SPEED_LIMIT, "churn spike {v:.2} in cycle {cycle}");
                 // 填回（重建同位置的体），更新句柄表。
-                let w = inner_mut(&world);
+                let w = inner_mut(&mut world);
                 let h = w.bodies.insert(
                     RigidBodyBuilder::dynamic()
                         .translation(Vector::new(

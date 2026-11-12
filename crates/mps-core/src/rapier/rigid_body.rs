@@ -478,6 +478,11 @@ pub extern "C" fn world_remove_rigid_body(
             set_error(ERR_NOT_FOUND, "body was not found");
             return Bool::FALSE;
         }
+        // B1：被移除的体要从所有模拟域成员表里清掉，避免悬空句柄。
+        let removed_handle = unpack_rigid_body_handle(handle);
+        for members in world.inner.simulation_domains.values_mut() {
+            members.remove(&removed_handle);
+        }
         clear_error();
         Bool::TRUE
     })

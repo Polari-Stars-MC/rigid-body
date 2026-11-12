@@ -69,10 +69,16 @@ mod tests {
                 let pe = world.body_state(earth).expect("earth");
                 let pp = world.body_state(probe).expect("probe");
                 // 角分离（L4 契约：探测器与地球对日心的角距恒 60°；取两个
-                // 绝对角的差——世界系里 rel 矢量本身随轨道旋转，不能直接用）。
+                // 绝对角的差并归一化到 (-180°, 180°]——世界系里 rel 矢量本身
+                // 随轨道旋转，且差值会越过 ±180° 回绕）。
                 let ae = pe.position.y.atan2(pe.position.x).to_degrees();
                 let ap = pp.position.y.atan2(pp.position.x).to_degrees();
-                let ang = ap - ae;
+                let mut ang = (ap - ae) % 360.0;
+                if ang > 180.0 {
+                    ang -= 360.0;
+                } else if ang <= -180.0 {
+                    ang += 360.0;
+                }
                 let dist = (pp.position - pe.position).length();
                 println!("step {s:>7}: L4 angle-sep={ang:6.2}  dist={dist:.4e} m");
                 assert!(

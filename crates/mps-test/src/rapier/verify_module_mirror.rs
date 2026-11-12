@@ -138,6 +138,8 @@ mod tests {
         //                            production side
         //   force_queue_integration— end-to-end arena/force-queue wiring test
         //   performance_matrix     — `#[ignore]`d step benchmark (docs/world-step-benchmarks.md)
+        //   sleep_wake             — A3 挖洞唤醒 + 稳定包络（evidence/numeric-drift.md）
+        //   record_replay          — D2 位级录制重演守门（evidence/record-replay.md）
         let test_only_extras: std::collections::BTreeSet<String> = [
             "ffi",
             "arena_compat",
@@ -149,6 +151,7 @@ mod tests {
             "force_queue_integration",
             "performance_matrix",
             "sleep_wake",
+            "record_replay",
         ]
         .into_iter()
         .map(String::from)
@@ -257,7 +260,20 @@ mod tests {
             .keys()
             // test-only adapters (no cosmos submodule): evidence/benchmark-only
             // test files — same policy as the rapier-side `test_only_extras`.
-            .filter(|n| !cosmos_src.contains_key(*n) && *n != "drift_matrix")
+            .filter(|n| {
+                !cosmos_src.contains_key(*n)
+                    // C1 长期轨道基准（evidence/numeric-drift.md 附表）
+                    && *n != "drift_matrix"
+                    && *n != "long_orbit"
+                    // A2 收敛性扫描 + adaptive 修复证据
+                    && *n != "convergence"
+                    // C3 天体自转表面平衡（evidence/convergence.md）
+                    && *n != "celestial_rotation"
+                    // C2 central_body 切换 SOI 契约（evidence/convergence.md）
+                    && *n != "central_body_switch"
+                    // E2 双世界一致性抽查
+                    && *n != "cross_world"
+            })
             .cloned()
             .collect();
 

@@ -133,10 +133,10 @@ mod tests {
             for _ in 0..steps {
                 assert!(matches!(world.step(dt_of()), StepResult::Stepped(_)));
                 // 近心点段（r < 2·r_eq）采样子步数上限。
-                if let Some(st_now) = world.body_state(sat) {
-                    if st_now.position.length() < 2.0 * BENCH_BODY.equatorial_radius {
-                        substeps_max = substeps_max.max(world.adaptive_substep_count(dt_of()));
-                    }
+                if let Some(st_now) = world.body_state(sat)
+                    && st_now.position.length() < 2.0 * BENCH_BODY.equatorial_radius
+                {
+                    substeps_max = substeps_max.max(world.adaptive_substep_count(dt_of()));
                 }
             }
             let substeps_seen = substeps_max;

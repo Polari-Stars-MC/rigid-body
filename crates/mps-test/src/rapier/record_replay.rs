@@ -81,19 +81,22 @@ mod tests {
     /// # Safety
     /// world 指针必须有效。
     unsafe fn bit_snapshot(world: &World) -> Vec<u64> {
-        let mut bits = Vec::new();
-        for (h, b) in (*world.0).inner.bodies.iter() {
-            bits.push(h.into_raw_parts().0 as u64);
-            let t = b.translation();
-            bits.push(t.x.to_bits());
-            bits.push(t.y.to_bits());
-            bits.push(t.z.to_bits());
-            let v = b.linvel();
-            bits.push(v.x.to_bits());
-            bits.push(v.y.to_bits());
-            bits.push(v.z.to_bits());
+        // SAFETY: 调用契约保证 world 指针有效且独占访问。
+        unsafe {
+            let mut bits = Vec::new();
+            for (h, b) in (*world.0).inner.bodies.iter() {
+                bits.push(h.into_raw_parts().0 as u64);
+                let t = b.translation();
+                bits.push(t.x.to_bits());
+                bits.push(t.y.to_bits());
+                bits.push(t.z.to_bits());
+                let v = b.linvel();
+                bits.push(v.x.to_bits());
+                bits.push(v.y.to_bits());
+                bits.push(v.z.to_bits());
+            }
+            bits
         }
-        bits
     }
 
     fn run_script(steps_total: usize) -> Vec<Vec<u64>> {
@@ -105,8 +108,8 @@ mod tests {
         let mut dug_b = false;
         let mut step_i = 0usize;
         while step_i < steps_total {
+            // SAFETY: scene.world 是本函数独占的有效 world 指针。
             unsafe {
-                let w = &mut (*scene.world.0).inner;
                 // 落定 30 步后执行第一挖。
                 if step_i == 30 && !dug_a {
                     let h = scene.layers[DIG_A.0][DIG_A.1];
