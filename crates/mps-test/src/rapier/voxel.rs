@@ -412,4 +412,82 @@ mod tests {
         );
         collider_builder_destroy(builder);
     }
+
+    /// FNV-1a 64 位：把 box 槽序列压成一个指纹，跨机器/跨平台比对用
+    /// （f64 位型逐位一致 → 哈希一致；哈希不一致 → 一定有平台差异）。
+    fn fnv1a(bits: impl Iterator<Item = u64>) -> u64 {
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        for b in bits {
+            for byte in b.to_le_bytes() {
+                h ^= byte as u64;
+                h = h.wrapping_mul(0x0000_0100_0000_01b3);
+            }
+        }
+        h
+    }
+
+    /// 跨平台确定性守门：伪随机多材质网格（LCG 生成，避免测试平台差异）
+    /// bake 三次，逐位比较输出并对照**编码进断言的指纹**。指纹由算法结构
+    /// （整数扫序 + 加减法边界）决定——只要没人改合并算法或 float 运算顺序，
+    /// 任何平台（x86/ARM、MSVC/GCC、release/debug）都必须复现同一指纹。
+    /// 平台指纹漂移 = 烘焙算法引入了非位级确定性的浮点路径 = MC 缓存失效。
+    #[test]
+    fn compound_baker_bit_identical_across_platforms() {
+        // 12×6×12 网格，LCG 填充（约 55% 实心）——足够触发多层合并路径，
+        // 又完全可复现。
+        let (sx, sy, sz) = (12usize, 6usize, 12usize);
+        let mut voxels = vec![0u8; sx * sy * sz];
+        let mut seed: u64 = 0x2026_1112;
+        for v in &mut voxels {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            *v = if (seed >> 33) % 100 < 55 { 1 } else { 0 };
+        }
+        let bake = |out: &mut [f64]| -> u32 {
+            voxel_bake_boxes(
+                voxels.as_ptr(),
+                sx as u32,
+                sy as u32,
+                sz as u32,
+                0.5,
+                0.5,
+                0.5,
+                Vec3 { x: 128.0, y: 64.0, z: -32.0 },
+                out.as_mut_ptr(),
+                out.len() as u32,
+            )
+        };
+        let count = voxel_bake_boxes(
+            voxels.as_ptr(),
+            sx as u32,
+            sy as u32,
+            sz as u32,
+            0.5,
+            0.5,
+            0.5,
+            Vec3 { x: 128.0, y: 64.0, z: -32.0 },
+            std::ptr::null_mut(),
+            0,
+        );
+        assert!(count > 8, "dense random grid should merge into 8+ boxes, got {count}");
+        let mut a = vec![0f64; count as usize * 6];
+        let mut b = vec![0f64; count as usize * 6];
+        let mut c = vec![0f64; count as usize * 6];
+        assert_eq!(bake(&mut a), count);
+        assert_eq!(bake(&mut b), count);
+        assert_eq!(bake(&mut c), count);
+        assert_eq!(a, b, "run 1 vs run 2 bit-identical");
+        assert_eq!(b, c, "run 2 vs run 3 bit-identical");
+
+        // 位级指纹：非有限值（NaN 位型不唯一）直接拒绝。
+        for slot in &a {
+            assert!(slot.is_finite(), "bake emitted non-finite coordinate {slot}");
+        }
+        let fingerprint = fnv1a(a.iter().map(|v| v.to_bits()));
+        assert_eq!(
+            fingerprint, 0xe93f_bc71_c17a_8a20,
+            "cross-platform bake fingerprint drifted — merge algorithm or float \
+             ordering changed; update the golden ONLY after confirming the new \
+             output is still deterministic on all platforms"
+        );
+    }
 }
