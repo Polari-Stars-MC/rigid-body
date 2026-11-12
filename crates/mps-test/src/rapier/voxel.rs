@@ -439,7 +439,9 @@ mod tests {
         let mut voxels = vec![0u8; sx * sy * sz];
         let mut seed: u64 = 0x2026_1112;
         for v in &mut voxels {
-            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            seed = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             *v = if (seed >> 33) % 100 < 55 { 1 } else { 0 };
         }
         let bake = |out: &mut [f64]| -> u32 {
@@ -451,7 +453,11 @@ mod tests {
                 0.5,
                 0.5,
                 0.5,
-                Vec3 { x: 128.0, y: 64.0, z: -32.0 },
+                Vec3 {
+                    x: 128.0,
+                    y: 64.0,
+                    z: -32.0,
+                },
                 out.as_mut_ptr(),
                 out.len() as u32,
             )
@@ -464,11 +470,18 @@ mod tests {
             0.5,
             0.5,
             0.5,
-            Vec3 { x: 128.0, y: 64.0, z: -32.0 },
+            Vec3 {
+                x: 128.0,
+                y: 64.0,
+                z: -32.0,
+            },
             std::ptr::null_mut(),
             0,
         );
-        assert!(count > 8, "dense random grid should merge into 8+ boxes, got {count}");
+        assert!(
+            count > 8,
+            "dense random grid should merge into 8+ boxes, got {count}"
+        );
         let mut a = vec![0f64; count as usize * 6];
         let mut b = vec![0f64; count as usize * 6];
         let mut c = vec![0f64; count as usize * 6];
@@ -480,7 +493,10 @@ mod tests {
 
         // 位级指纹：非有限值（NaN 位型不唯一）直接拒绝。
         for slot in &a {
-            assert!(slot.is_finite(), "bake emitted non-finite coordinate {slot}");
+            assert!(
+                slot.is_finite(),
+                "bake emitted non-finite coordinate {slot}"
+            );
         }
         let fingerprint = fnv1a(a.iter().map(|v| v.to_bits()));
         assert_eq!(
