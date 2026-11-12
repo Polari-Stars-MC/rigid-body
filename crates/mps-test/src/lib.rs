@@ -5,13 +5,16 @@ pub mod cosmos {
     pub mod arena;
     pub mod bodies;
     pub mod celestial_rotation;
+    pub mod central_body_switch;
     pub mod convergence;
+    pub mod cross_world;
     pub mod drift_matrix;
     pub mod error;
     pub mod ffi;
     pub mod flight;
     pub mod gravity;
     pub mod integrator;
+    pub mod long_orbit;
     pub mod orbit;
     pub mod orbit_diagnostics;
     pub mod perturbation;
