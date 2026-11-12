@@ -47,8 +47,16 @@ jobs:
       - name: Cache Cargo artifacts
         uses: Swatinem/rust-cache@v2
 
+      # 只检查主 workspace 的 10 个 crate。vendored rapier/ 虽被根 Cargo.toml
+      # exclude，但新版 rustfmt 会顺着 path 依赖把 rapier/parry 也卷进 --all，
+      # 而 fork 的格式基线由其自身 rustfmt.toml 锚定（ADR-0008 补丁纪律：
+      # fork 内文件不做服务上层的格式翻新）。逐包 -p 显式圈定范围。
       - name: Check formatting
-        run: cargo fmt --all --check
+        run: >
+          cargo fmt --check
+          -p mps-formula -p mps-core -p mps-cosmos -p mps-jni -p mps-ffm
+          -p mps-test -p mps-web -p mps-build-common -p mps-bindgen-macro
+          -p xtask
 
       - name: Run clippy
         run: cargo clippy --all-targets -- -D warnings
