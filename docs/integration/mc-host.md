@@ -123,3 +123,10 @@ long builder = colliderBuilderCreateCompoundBoxes(pointerTo(cached), cached.leng
 
 宿主侧声明一旦与 fixture 漂移（签名/返回类型不符），`jni-smoke` job 会先红
 ——**fixture 是契约**，不要在本仓库外另起一份没有验证的声明。
+
+## 5. 离线回放工具
+
+`crates/mps-test/java/replay-viewer/ReplayViewer.java` 是独立 Swing 小工具
+（零仓库内依赖）：`java ReplayViewer blob.mpsdr` 加载导出 blob，渲染 XZ
+俯视轨迹 + 事件统计。与 web 文档页的 Rust 解码器同一份布局契约；录制
+导出后直接可视化验证录制是否完整。
