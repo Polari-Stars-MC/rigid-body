@@ -54,7 +54,11 @@ fn parse_blob(slots: &[f64]) -> Result<(Vec<(u64, Vec<[f64; 3]>)>, Vec<[f64; 5]>
                 return Err("truncated event table");
             }
             for e in 0..event_count {
-                events.push(slots[cursor + e * 5..cursor + e * 5 + 5].try_into().unwrap());
+                events.push(
+                    slots[cursor + e * 5..cursor + e * 5 + 5]
+                        .try_into()
+                        .unwrap(),
+                );
             }
             cursor += event_count * 5;
         }
@@ -135,7 +139,8 @@ fn trajectory_svg(tracks: &[(u64, Vec<[f64; 3]>)], events: &[[f64; 5]]) -> Strin
     }
     if !events.is_empty() {
         svg.push_str(&format!(
-            r#"<g font-family="monospace" font-size="13"><rect x="8" y="8" width="188" height="24" rx="4" fill="#000000aa"/><text x="16" y="25" fill="#e6edf3">events: {n_started} started, {n_stopped} stopped</text></g>"#
+            r#"<g font-family="monospace" font-size="13"><rect x="8" y="8" width="188" height="24" rx="4" fill="#000000aa"/><text x="16" y="25" fill="#{TEXT_COLOR}">events: {n_started} started, {n_stopped} stopped</text></g>"#,
+            TEXT_COLOR = "e6edf3"
         ));
     }
     svg.push_str("</svg>");
@@ -153,13 +158,17 @@ fn sample_blob() -> Vec<f64> {
     blob.push(1.0); // body_count
     blob.push(1.0 / 60.0); // dt
     blob.push(handle);
-    blob.extend([0.0, 10.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]);
+    blob.extend([
+        0.0, 10.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0,
+    ]);
     // 帧 1：v2 magic + 事件段（1 started）。
     blob.push(f64::from_bits(0x4d50_5344_5230_3231));
     blob.push(1.0);
     blob.push(1.0 / 60.0);
     blob.push(handle);
-    blob.extend([1.0, 10.0, 0.5, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, -9.0, 1.0, 0.0, 0.0, 0.0]);
+    blob.extend([
+        1.0, 10.0, 0.5, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, -9.0, 1.0, 0.0, 0.0, 0.0,
+    ]);
     blob.push(1.0); // event_count
     blob.extend([1.0, f64::from_bits(7), f64::from_bits(8), 0.0, 0.0]); // started
     blob
