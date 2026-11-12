@@ -46,4 +46,7 @@
 3. **对齐负载**：Jolt 默认 `PerformanceTest` 的金字塔规模与本协议的 1600 立方体平面堆不同构。若默认规模不等效，改用仓库里的 `UnitTests` 中堆叠场景自建驱动，或临时改 `PerformanceTest.cpp` 的堆层数/宽度让总动态体 ≈ 1600、solver 迭代 12、60 Hz、sleeping 开启。**改动必须记录在本文件**（改了哪个文件、什么规模）。
 4. **计时口径**：与 mps 相同——预热 60 步不计入，之后 600 步取墙钟，重复 10 轮取 p50/p95（Jolt 的 `PerformanceTest` 自带输出，若缺轮次逻辑就包个循环）。
 5. **填表**：把 p50/p95/commit/CPU 频率策略写进对照表，比值 = mps p50 / Jolt p50。
+   合并行可由 `python3 crates/mps-test/scripts/summarize_engine_compare.py
+   target/engine-compare-mps.csv target/engine-compare-jolt.csv` 生成（按
+   bodies/iterations 取匹配行、p50 取中位数、迭代数不一致直接报错不硬比）。
 6. **不做跨机器插值**：Jolt 数字只认同机采集；网上他人的 benchmark 一律不进表。
