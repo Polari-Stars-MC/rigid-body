@@ -8,11 +8,13 @@ pub mod cosmos {
     pub mod central_body_switch;
     pub mod convergence;
     pub mod cross_world;
+    pub mod drag_terminal_velocity;
     pub mod drift_matrix;
     pub mod error;
     pub mod ffi;
     pub mod flight;
     pub mod gravity;
+    pub mod hohmann_transfer_validation;
     pub mod integrator;
     pub mod long_orbit;
     pub mod orbit;
@@ -66,8 +68,12 @@ pub mod rapier {
     pub mod forces;
     pub mod fracture;
     pub mod fracture_mesh;
+    // 真实物理验证系列：摩擦/恢复系数能量学（库仑锥 + 反弹速度比 + 静摩擦保持）
+    pub mod friction_restitution_energy;
     pub mod galactic_dynamics;
     pub mod granular;
+    // 真实物理验证系列：颗粒休止角（摩擦单调性 + 对称/守恒）
+    pub mod granular_repose;
     pub mod gravitational_models;
     pub mod hair;
     pub mod heliophysics;
