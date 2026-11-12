@@ -25,7 +25,8 @@ use crate::rapier::error::{
 };
 use crate::rapier::ffi::{
     Bool, FractureFragmentDesc, FractureMaterial, RigidBodyHandleRaw, Vec3, WorldHandle,
-    pack_rigid_body_handle, shape_from_desc, unpack_rigid_body_handle, vec3_finite, vec3_to_rapier,
+    convert::unpack_collider_handle, pack_rigid_body_handle, shape_from_desc,
+    unpack_rigid_body_handle, vec3_finite, vec3_to_rapier,
 };
 
 const MAX_FRACTURE_MESH_PARTS: u32 = 1024;
@@ -854,6 +855,123 @@ pub(crate) fn accumulate_impact_damage(world: &mut WorldHandle) {
     for id in to_fracture {
         let _ = trigger_fracture_mesh(world, id);
     }
+}
+
+/// B2：把本步的接触力事件转成碎裂应力并触发自动碎裂（closed loop）。
+///
+/// 与 `accumulate_impact_damage`（solver 累计冲量路径，`world_step` 内每步
+/// 自动调用）互补：本入口消费 `contact_force_events`（事件路径，以
+/// `max_force_magnitude` 为应力代理——它反映的是单接触点的峰值法向力，
+/// 更接近断裂力学的应力强度语义）。宿主在 `world_step` 之后调用一次：
+///
+/// 1. 收集本步所有接触力事件，按「事件端点 collider → 所属刚体 → 已注册
+///    的碎裂体」映射，对每个碎裂体取 `max_force_magnitude` 的最大值；
+/// 2. `stress = 峰值力 × scale`，写入 `current_stress_intensity`；
+/// 3. 触发模式为 StressIntensity/Griffith 且应力 ≥ 阈值的碎裂体当场碎裂
+///    （与手动 `fracture_mesh_body_set_stress` 完全同一条触发路径）。
+///
+/// 返回本调用碎裂的碎裂体个数；`out_ids` 非空时写出碎裂体 id（至多
+/// `out_cap` 个）。消费后清空 legacy 接触力事件队列（单消费者语义）。
+///
+/// # Safety
+/// `world` 必须是有效 world 指针；`out_ids`（若非空）必须可写 `out_cap` 个
+/// `u32`。
+#[unsafe(no_mangle)]
+pub extern "C" fn world_auto_fracture_from_contact_forces(
+    world: *mut WorldHandle,
+    scale: f64,
+    out_ids: *mut u32,
+    out_cap: u32,
+) -> u32 {
+    ffi_guard(0, || {
+        let Some(world) = (unsafe { world.as_mut() }) else {
+            set_error(ERR_NULL_POINTER, "world is null");
+            return 0;
+        };
+        if !scale.is_finite() || scale < 0.0 {
+            set_error(ERR_INVALID_ARGUMENT, "invalid stress scale");
+            return 0;
+        }
+
+        // 锁定阶段：事件 → 峰值力 → 应力写入（query_lock 全程持有）。
+        let fractured: Vec<u32> = {
+            let _query_lock = world.inner.query_lock.write();
+
+            // body → 碎裂体 id 表（未碎裂的体）。
+            let mut by_body: std::collections::HashMap<RigidBodyHandle, u32> =
+                std::collections::HashMap::with_capacity(
+                    world.inner.fracture_mesh_bodies.map.len(),
+                );
+            for (id, mesh_body) in world.inner.fracture_mesh_bodies.map.iter() {
+                if !mesh_body.fractured {
+                    by_body.insert(mesh_body.body, *id);
+                }
+            }
+            if by_body.is_empty() {
+                world.inner.events.clear_contact_forces();
+                clear_error();
+                return 0;
+            }
+
+            // 事件扫描：每个碎裂体保留峰值力。
+            let events = world.inner.events.contact_force_event_slice();
+            let mut peak: std::collections::HashMap<u32, f64> = std::collections::HashMap::new();
+            for event in events {
+                let mut consider = |collider: rapier3d::prelude::ColliderHandle| {
+                    let Some(c) = world.inner.colliders.get(collider) else {
+                        return;
+                    };
+                    let Some(parent) = c.parent() else {
+                        return;
+                    };
+                    let Some(id) = by_body.get(&parent).copied() else {
+                        return;
+                    };
+                    let entry = peak.entry(id).or_insert(0.0);
+                    *entry = entry.max(event.max_force_magnitude);
+                };
+                consider(unpack_collider_handle(event.collider1));
+                consider(unpack_collider_handle(event.collider2));
+            }
+            world.inner.events.clear_contact_forces();
+
+            // 应力写入 + 过阈标记。
+            let mut marked: Vec<u32> = Vec::new();
+            for (id, force) in peak {
+                let stress = force * scale;
+                let over = {
+                    let Some(mesh_body) = world.inner.fracture_mesh_bodies.get_mut(id) else {
+                        continue;
+                    };
+                    mesh_body.current_stress_intensity = stress;
+                    match mesh_body.trigger {
+                        FractureTrigger::StressIntensity { threshold }
+                        | FractureTrigger::Griffith { threshold } => stress >= threshold,
+                        _ => false,
+                    }
+                };
+                if over {
+                    marked.push(id);
+                }
+            }
+            marked
+        };
+
+        // 触发阶段（query_lock 已释放；碎裂替换走同一条手动触发路径）。
+        for id in &fractured {
+            let _ = trigger_fracture_mesh(world, *id);
+        }
+        if !out_ids.is_null() {
+            let n = (out_cap as usize).min(fractured.len());
+            for (index, id) in fractured.iter().take(n).enumerate() {
+                unsafe {
+                    *out_ids.add(index) = *id;
+                }
+            }
+        }
+        clear_error();
+        fractured.len() as u32
+    })
 }
 
 /// Link (or unlink) a fracture mesh body's debris routing to a granular body.

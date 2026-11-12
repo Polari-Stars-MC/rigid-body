@@ -20,6 +20,7 @@ public final class RapierNative {
     public static native boolean rigidBodySetSimulationDomain(long world, long body, int domain);
     public static native int worldSetDomainActive(long world, int domain, boolean active);
     public static native int worldDomainBodyCount(long world, int domain);
+    public static native int worldAutoFractureFromContactForces(long world, double scale, long outIds, int outCap);
     public static native int worldGetColliderSetSize(long world);
     public static native long rigidBodyBuilderCreate(int status);
     public static native long rigidBodyBuilderBuild(long builder);
@@ -90,6 +91,8 @@ public final class RapierNative {
             check(worldSetDomainActive(world, 1, false) == 0, "already-active double freeze must be no-op");
             check(rigidBodySetSimulationDomain(world, body, 0), "domain removal failed");
             check(worldDomainBodyCount(world, 1) == 0, "domain count after removal");
+            // B2：接触力→自动碎裂闭环入口（空世界应返回 0 且不报错）。
+            check(worldAutoFractureFromContactForces(world, 1.0, 0, 0) == 0, "auto fracture smoke failed");
             System.out.println("JNI collision mode smoke test passed");
         } finally {
             colliderBuilderDestroy(simple);

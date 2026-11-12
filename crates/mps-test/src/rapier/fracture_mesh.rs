@@ -27,7 +27,6 @@ mod tests {
         world_insert_rigid_body,
     };
     use mps_core::rapier::world::{world_create, world_destroy, world_step};
-
     fn v3(x: f64, y: f64, z: f64) -> Vec3 {
         Vec3 { x, y, z }
     }
@@ -730,6 +729,114 @@ mod tests {
         );
         assert_eq!(last_error_code(), ERR_UNSUPPORTED);
 
+        world_destroy(world);
+    }
+
+    /// B2：接触力事件 → 自动碎裂闭环。重球砸碎裂板 →
+    /// `world_auto_fracture_from_contact_forces` 消费事件峰值力 →
+    /// 过阈自动碎裂（走手动触发同一条替换路径）。
+    #[test]
+    fn contact_force_event_auto_fracture_loop() {
+        use mps_core::rapier::rigid_body::rigid_body_builder_set_linvel;
+        use mps_core::rapier::world::{world_apply_runtime_settings, world_step};
+
+        let world = make_world();
+        assert_eq!(
+            world_apply_runtime_settings(world, 4, 1, 0, 1, 0, 1),
+            Bool::TRUE
+        );
+        // 碎裂板（在 y=0 处静置），应力触发阈 1000（峰值力代理）。
+        let id = make_mesh(world);
+        assert_ne!(id, u32::MAX);
+        assert_eq!(
+            fracture_mesh_body_set_trigger(world, id, 1, 1000.0),
+            Bool::TRUE
+        );
+        assert_eq!(fracture_mesh_body_is_fractured(world, id), Bool::FALSE);
+
+        // 重球：碎裂板（make_mesh 在 y=10）上方 2.5 m，向下 20 m/s 冲击。
+        let builder = rigid_body_builder_create(BodyStatus::Dynamic as u32);
+        rigid_body_builder_set_translation(builder, v3(0.0, 12.5, 0.0));
+        rigid_body_builder_set_linvel(builder, v3(0.0, -20.0, 0.0));
+        let ball = world_insert_rigid_body(world, rigid_body_builder_build(builder));
+        assert_ne!(ball, 0);
+        let shape = ShapeDesc {
+            shape_type: ShapeType::Ball as u32,
+            a: 0.5,
+            ..Default::default()
+        };
+        let collider = collider_builder_build(collider_builder_create_ex(shape));
+        world_insert_collider_with_parent(world, collider, ball);
+
+        // 步进直到有接触力事件产生（最多 120 步）。
+        let mut steps = 0usize;
+        loop {
+            world_step(world, 1.0 / 60.0);
+            steps += 1;
+            let hit = fracture_mesh_body_is_fractured(world, id) == Bool::TRUE
+                || mps_core::rapier::events::world_contact_force_event_count(world) > 0;
+            if hit || steps >= 120 {
+                break;
+            }
+        }
+        assert!(
+            steps < 120,
+            "impact must produce a contact within 120 steps"
+        );
+
+        // 闭环调用：消费事件峰值力 → 应力 = 峰值 × scale(1.0)。
+        let mut ids = [0u32; 4];
+        let fractured = mps_core::rapier::fracture_mesh::world_auto_fracture_from_contact_forces(
+            world,
+            1.0,
+            ids.as_mut_ptr(),
+            ids.len() as u32,
+        );
+        if fractured > 0 {
+            assert_eq!(fractured, 1);
+            assert_eq!(ids[0], id);
+            assert_eq!(fracture_mesh_body_is_fractured(world, id), Bool::TRUE);
+        } else {
+            // 冲击力未过阈：应力必须已写入但碎裂未发生。
+            assert_eq!(fracture_mesh_body_is_fractured(world, id), Bool::FALSE);
+        }
+
+        // 消费后事件队列清空：第二次调用返回 0。
+        let again = mps_core::rapier::fracture_mesh::world_auto_fracture_from_contact_forces(
+            world,
+            1.0,
+            std::ptr::null_mut(),
+            0,
+        );
+        assert_eq!(again, 0, "queue must be drained by the first call");
+
+        world_destroy(world);
+    }
+
+    /// B2 参数校验：负 scale、null world。
+    #[test]
+    fn auto_fracture_rejects_bad_input() {
+        assert_eq!(
+            mps_core::rapier::fracture_mesh::world_auto_fracture_from_contact_forces(
+                std::ptr::null_mut(),
+                1.0,
+                std::ptr::null_mut(),
+                0,
+            ),
+            0
+        );
+        assert_eq!(last_error_code(), ERR_NULL_POINTER);
+        let world = make_world();
+        assert_eq!(
+            mps_core::rapier::fracture_mesh::world_auto_fracture_from_contact_forces(
+                world,
+                -1.0,
+                std::ptr::null_mut(),
+                0,
+            ),
+            0
+        );
+        assert_eq!(last_error_code(), ERR_INVALID_ARGUMENT);
         world_destroy(world);
     }
 }

@@ -5934,6 +5934,32 @@ struct Bool fracture_mesh_body_get_impact_damage(struct WorldHandle *world,
                                                  double *out_damage);
 
 /**
+ * B2：把本步的接触力事件转成碎裂应力并触发自动碎裂（closed loop）。
+ *
+ * 与 `accumulate_impact_damage`（solver 累计冲量路径，`world_step` 内每步
+ * 自动调用）互补：本入口消费 `contact_force_events`（事件路径，以
+ * `max_force_magnitude` 为应力代理——它反映的是单接触点的峰值法向力，
+ * 更接近断裂力学的应力强度语义）。宿主在 `world_step` 之后调用一次：
+ *
+ * 1. 收集本步所有接触力事件，按「事件端点 collider → 所属刚体 → 已注册
+ *    的碎裂体」映射，对每个碎裂体取 `max_force_magnitude` 的最大值；
+ * 2. `stress = 峰值力 × scale`，写入 `current_stress_intensity`；
+ * 3. 触发模式为 StressIntensity/Griffith 且应力 ≥ 阈值的碎裂体当场碎裂
+ *    （与手动 `fracture_mesh_body_set_stress` 完全同一条触发路径）。
+ *
+ * 返回本调用碎裂的碎裂体个数；`out_ids` 非空时写出碎裂体 id（至多
+ * `out_cap` 个）。消费后清空 legacy 接触力事件队列（单消费者语义）。
+ *
+ * # Safety
+ * `world` 必须是有效 world 指针；`out_ids`（若非空）必须可写 `out_cap` 个
+ * `u32`。
+ */
+uint32_t world_auto_fracture_from_contact_forces(struct WorldHandle *world,
+                                                 double scale,
+                                                 uint32_t *out_ids,
+                                                 uint32_t out_cap);
+
+/**
  * Link (or unlink) a fracture mesh body's debris routing to a granular body.
  *
  * Once linked, triggering the fracture (manually or via any auto trigger)

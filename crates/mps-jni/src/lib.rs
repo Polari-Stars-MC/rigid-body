@@ -412,6 +412,7 @@ jni!(int worldGetRegionBodyCount(long world, double x, double y, double z, doubl
 jni!(boolean rigidBodySetSimulationDomain(long world, long body, int domain) { wo::rigid_body_set_simulation_domain(wm(world), body as u64, domain as u32).0 as jbyte });
 jni!(int worldSetDomainActive(long world, int domain, boolean active) { wo::world_set_domain_active(wm(world), domain as u32, if active != 0 { mps_core::rapier::ffi::Bool::TRUE } else { mps_core::rapier::ffi::Bool::FALSE }) as jint });
 jni!(int worldDomainBodyCount(long world, int domain) { wo::world_domain_body_count(wcp(world), domain as u32) as jint });
+jni!(int worldAutoFractureFromContactForces(long world, double scale, long out_ids, int out_cap) { fm::world_auto_fracture_from_contact_forces(wm(world), scale, if out_ids == 0 { std::ptr::null_mut() } else { pm::<u32>(out_ids) }, out_cap as u32) as jint });
 
 jni!(void worldSetGravity(long world, double x, double y, double z) { wo::world_set_gravity(wm(world), v3(x, y, z)); });
 

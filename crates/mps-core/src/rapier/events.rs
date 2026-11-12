@@ -233,6 +233,18 @@ impl CollectingEventHandler {
         count as u32
     }
 
+    /// B2 快照入口：拷贝出当前 legacy 接触力事件队列（供
+    /// `world_auto_fracture_from_contact_forces` 在持有 query_lock 时消费）。
+    pub(crate) fn contact_force_event_slice(&self) -> Vec<ContactForceEventRecord> {
+        self.contact_force_events.lock().clone()
+    }
+
+    /// B2：消费后清空 legacy 接触力事件队列（单消费者语义——由
+    /// `world_auto_fracture_from_contact_forces` 在持锁后调用）。
+    pub(crate) fn clear_contact_forces(&self) {
+        self.contact_force_events.lock().clear();
+    }
+
     pub(crate) fn custom_physics(&self) -> CustomPhysicsState {
         self.custom_physics.read().clone()
     }
