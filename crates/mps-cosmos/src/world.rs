@@ -1607,7 +1607,9 @@ impl CosmosWorld {
 
     /// 自适应子步数：近心点加密的误差代理模型（见 `step_via_explicit` 注释）。
     /// 返回值恒 ≥ `verlet_substeps`、≤ 64。
-    fn adaptive_substep_count(&self, dt: f64) -> usize {
+    /// pub（A2）：收敛性测试/evidence 需要观测「给定 tolerance 会产生
+    /// 多少子步」，宿主诊断同理；不改行为。
+    pub fn adaptive_substep_count(&self, dt: f64) -> usize {
         const MAX_ADAPTIVE_SUBSTEPS: usize = 64;
         let base = self.verlet_substeps.max(1) as usize;
         let Some(central) = self.central_body else {
@@ -1647,8 +1649,16 @@ impl CosmosWorld {
             return base;
         };
         let dt_next = mps_formula::integrators::adaptive_step_size(dt, err, tolerance, order);
+        // 控制器给出的是「想要的整步 dt」。要 dt_next < dt（误差超容忍）时，
+        // 用切分实现：substeps = base / scale（scale<1 → 子步变多）；scale>1
+        // 不放大（整步已经满足容忍，切多只是浪费）。之前直接用 scale 乘
+        // base，误差超容忍时 scale<1 反而把子步压回 base——加密失效。
         let scale = if dt > 0.0 { dt_next / dt } else { 1.0 };
-        let scaled = (base as f64 * scale).ceil() as usize;
+        let scaled = if scale < 1.0 {
+            (base as f64 / scale).ceil() as usize
+        } else {
+            base
+        };
         scaled.clamp(base, MAX_ADAPTIVE_SUBSTEPS)
     }
 

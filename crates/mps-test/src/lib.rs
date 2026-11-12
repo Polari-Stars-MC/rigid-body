@@ -4,6 +4,8 @@
 pub mod cosmos {
     pub mod arena;
     pub mod bodies;
+    pub mod celestial_rotation;
+    pub mod convergence;
     pub mod drift_matrix;
     pub mod error;
     pub mod ffi;
