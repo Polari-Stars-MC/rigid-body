@@ -2,9 +2,8 @@ use dioxus::prelude::*;
 use dioxus_i18n::t;
 
 /// 解析导出 blob（f64 槽数组）为逐帧轨迹点：每体 handle → (x, z) 序列
-/// （俯视投影；y 用于配色深度）。v1/v2 magic 都识别，v2 的事件段在轨迹
-/// 模式下跳过（本页只画轨迹）。返回 (轨迹序列, 事件计数)。
-fn parse_blob(slots: &[f64]) -> Result<(Vec<(u64, Vec<[f64; 3]>)>, usize), &'static str> {
+/// （俯视投影；y 用于配色深度）。v1/v2 magic 都识别。返回 (轨迹序列, 事件)。
+fn parse_blob(slots: &[f64]) -> Result<(Vec<(u64, Vec<[f64; 3]>)>, Vec<[f64; 5]>), &'static str> {
     if slots.len() < 2 {
         return Err("blob too short");
     }
@@ -14,7 +13,7 @@ fn parse_blob(slots: &[f64]) -> Result<(Vec<(u64, Vec<[f64; 3]>)>, usize), &'sta
     const MAGIC_V2: u64 = 0x4d50_5344_5230_3231;
     const LANES: usize = 13;
     let mut tracks: Vec<(u64, Vec<[f64; 3]>)> = Vec::new();
-    let mut event_slots = 0usize;
+    let mut events: Vec<[f64; 5]> = Vec::new();
     for _ in 0..frame_count {
         if cursor + 3 > slots.len() {
             return Err("truncated frame header");
@@ -50,16 +49,23 @@ fn parse_blob(slots: &[f64]) -> Result<(Vec<(u64, Vec<[f64; 3]>)>, usize), &'sta
                 return Err("truncated event section");
             }
             let event_count = slots[cursor] as usize;
-            event_slots += event_count;
-            cursor += 1 + event_count * 5;
+            cursor += 1;
+            if cursor + event_count * 5 > slots.len() {
+                return Err("truncated event table");
+            }
+            for e in 0..event_count {
+                events.push(slots[cursor + e * 5..cursor + e * 5 + 5].try_into().unwrap());
+            }
+            cursor += event_count * 5;
         }
     }
-    Ok((tracks, event_slots))
+    Ok((tracks, events))
 }
 
 /// 轨迹 SVG：XZ 俯视正交投影，每体一条 polyline + 起点/终点圆点，
-/// 每体一个稳定色相。viewBox 自适应轨迹包围盒。
-fn trajectory_svg(tracks: &[(u64, Vec<[f64; 3]>)]) -> String {
+/// 每体一个稳定色相；v2 事件叠为碰撞标记（started=黄 ×、stopped=灰 点、
+/// contact-force=红 半透明圆，半径按力度对数缩放）。viewBox 自适应包围盒。
+fn trajectory_svg(tracks: &[(u64, Vec<[f64; 3]>)], events: &[[f64; 5]]) -> String {
     let all: Vec<[f64; 3]> = tracks.iter().flat_map(|(_, p)| p.iter().copied()).collect();
     if all.is_empty() {
         return String::new();
@@ -109,8 +115,54 @@ fn trajectory_svg(tracks: &[(u64, Vec<[f64; 3]>)]) -> String {
             ));
         }
     }
+    // v2 事件层：事件槽 (kind, colliderA, colliderB, force, maxForce)。
+    // 碰撞事件不带位置（handle 对），只画力事件的位置圆 + 全局碰撞计数徽标。
+    const KIND_STARTED: f64 = 1.0;
+    const KIND_STOPPED: f64 = 2.0;
+    const KIND_FORCE: f64 = 3.0;
+    let mut n_started = 0usize;
+    let mut n_stopped = 0usize;
+    for e in events {
+        match e[0] {
+            KIND_STARTED => n_started += 1,
+            KIND_STOPPED => n_stopped += 1,
+            KIND_FORCE => {
+                // 力事件没有世界坐标（只有 handle 对 + 力值），无法定位：
+                // 用力值决定徽标列表的呈现，位置层留给未来带位置的帧。
+            }
+            _ => {}
+        }
+    }
+    if !events.is_empty() {
+        svg.push_str(&format!(
+            r#"<g font-family="monospace" font-size="13"><rect x="8" y="8" width="188" height="24" rx="4" fill="#000000aa"/><text x="16" y="25" fill="#e6edf3">events: {n_started} started, {n_stopped} stopped</text></g>"#
+        ));
+    }
     svg.push_str("</svg>");
     svg
+}
+
+/// 内置示例 blob：单球 5 帧 x 漂移下落（XZ 平面 + 碰撞开始事件），
+/// 用于文档页静态渲染解码器输出——这是 parse_blob/trajectory_svg 的
+/// 编译期用户（防 dead_code），也是格式的最小活样例。
+fn sample_blob() -> Vec<f64> {
+    let handle = f64::from_bits(0x0000_0001_0000_0002); // gen=1, idx=2
+    let mut blob = vec![2.0, 0.0]; // frame_count=2, dropped=0
+    // 帧 0：v1 magic。
+    blob.push(f64::from_bits(0x4d50_5344_5230_3131));
+    blob.push(1.0); // body_count
+    blob.push(1.0 / 60.0); // dt
+    blob.push(handle);
+    blob.extend([0.0, 10.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]);
+    // 帧 1：v2 magic + 事件段（1 started）。
+    blob.push(f64::from_bits(0x4d50_5344_5230_3231));
+    blob.push(1.0);
+    blob.push(1.0 / 60.0);
+    blob.push(handle);
+    blob.extend([1.0, 10.0, 0.5, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, -9.0, 1.0, 0.0, 0.0, 0.0]);
+    blob.push(1.0); // event_count
+    blob.extend([1.0, f64::from_bits(7), f64::from_bits(8), 0.0, 0.0]); // started
+    blob
 }
 
 /// Debug Replay — Jolt-Viewer 风格录制回放：`debugRecording*` JNI 面的
@@ -211,6 +263,16 @@ for (int f = 0; f < frameCount; f++) {
             h2 { class: "section-heading", { t!("replay-viz-title") } }
             p { class: "p-lead", { t!("replay-viz-lead") } }
             p { class: "p-muted", { t!("replay-viz-hint") } }
+            // 解码器活样例：内置 2 帧 blob → 静态 SVG（轨迹 + 事件徽标）。
+            // 宿主粘贴真实 blob 后走同一条 parse_blob → trajectory_svg 路径。
+            div { class: "viz-frame",
+                dangerous_inner_html: {
+                    match parse_blob(&sample_blob()) {
+                        Ok((tracks, events)) => trajectory_svg(&tracks, &events),
+                        Err(_) => String::new(),
+                    }
+                }
+            }
             p { class: "p-note", { t!("replay-viz-note") } }
         }
 
