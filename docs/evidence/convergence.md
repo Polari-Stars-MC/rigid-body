@@ -42,3 +42,29 @@ Verlet + `verlet_substeps=2`，dt = 1/60 s，20 000 步：
   2→10，漂移 6.24e-11 → 3.77e-12。
 - 语义注意：`central_body` 必须用 `set_central_body(Some(&body))` 设置；
   `add_celestial` 不设置中央天体（自适应与大气阻力都依赖它）。
+
+## 5. 天体自转表面平衡（C3，celestial_rotation）
+
+> 复现：`cargo test -p mps-test --lib -- celestial_rotation --nocapture`
+
+| 断言 | 期望 | 实测 |
+| --- | --- | --- |
+| 地表共转线速度（ω×R） | 465.1 m/s ± 1 | ✓ |
+| 离心/表面引力比 | 3.46e-3 ± 1e-4 | ✓ |
+| 低轨落体向东偏转（科氏项，含大气阻力） | v.y > 0 且 v.x < 0 | ✓ |
+
+## 6. SOI（central_body 切换）影响面（C2）
+
+清点结论（`integrator.rs` 逐条核对）已钉成契约测试
+（`central_body_switch.rs`，非 ignore，每轮全量跑）：
+
+| 通道 | 是否依赖 central_body | 测试 |
+| --- | --- | --- |
+| 基础引力（每源独立累加，integrator.rs:290） | 否 | 切换前后轨迹逐位一致 |
+| 相对论修正叠加对象（integrator.rs:293，按 ptr 判定） | 是 | 1PN 开启时切换产生 cm 级差异 |
+| 大气阻力参考（integrator.rs:329） | 是 | （C3 落体测试覆盖路径） |
+
+## 7. 双世界一致性（E2）与录制重演（D2）
+
+见 `numeric-drift.md` §5/§6（E2 跨世界抽查 3 断言、D2 位级重演
+20/600 步逐位一致）。
