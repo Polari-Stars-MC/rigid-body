@@ -245,4 +245,28 @@ mod tests {
     fn clear_on_null_world_is_safe() {
         world_clear_cross_validate_gravity(std::ptr::null_mut());
     }
+
+    #[test]
+    fn earth_default_gm_matches_earth_constant() {
+        let c = CrossValidateGravityConfig::earth_default();
+        assert!((c.attractor.gm - 3.986004418e14).abs() < 1.0);
+        assert!((c.mond_a_zero - 1.2e-10).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn law_type_is_newtonian_gravity_structure() {
+        use mps_core::rapier::forces::{ForceLaw, ForceLawType};
+        let law = CrossValidationGravityLaw {
+            config: CrossValidateGravityConfig::earth_default(),
+        };
+        assert_eq!(law.law_type(), ForceLawType::NewtonianGravity);
+    }
+
+    #[test]
+    fn aggregation_default_is_newton_anchored() {
+        assert_eq!(
+            CrossValidateAggregation::default(),
+            CrossValidateAggregation::NewtonAnchored
+        );
+    }
 }

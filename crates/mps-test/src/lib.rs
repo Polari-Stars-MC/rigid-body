@@ -151,6 +151,9 @@ pub mod ffm_probe;
 // docs 指针）——不属于 rapier 镜像树。
 pub mod docs_index_consistency;
 
+// ADR-0005 守门：源 crate 不得内联 #[cfg(test)] 模块（测试一律住 mps-test）。
+pub mod no_inline_cfg_test;
+
 // 每个 extern "C" 必须套 ffi_guard/ffi_scalar（AGENTS.md 硬性规定）——
 // 跨整个 rapier 树 + cosmos ffi 的横向审计，不属于镜像树。
 pub mod verify_ffi_guard;

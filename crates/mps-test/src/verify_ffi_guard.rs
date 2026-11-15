@@ -155,4 +155,46 @@ mod tests {
             offenders.join("\n  ")
         );
     }
+
+    /// The formula crate has its own `ffi_guard`
+    /// (`crates/mps-formula/src/error.rs`), which is a separate implementation
+    /// from the one in `mps-core`. AGENTS.md's rule ("every `extern "C"` entry
+    /// is wrapped in `ffi_guard`") therefore applies here too — but this test
+    /// did not exist, so for `mps-formula` the rule was a verbal convention.
+    ///
+    /// It was clean when the check was added (162/162), which is exactly why an
+    /// unguarded entry added tomorrow would have gone unnoticed: nothing was
+    /// looking. The scan is text-based, so it cannot prove the guard is *wired
+    /// up correctly* — only that the identifier appears inside the body. That is
+    /// the same strength the other two scans have.
+    #[test]
+    fn every_formula_extern_c_uses_ffi_guard() {
+        let dir = sibling_crate_dir("mps-formula/src");
+        let mut offenders = Vec::new();
+        let mut checked = 0usize;
+        for path in collect_rs_files(&dir) {
+            for (name, guarded, line) in scan_extern_c(&path) {
+                checked += 1;
+                if !guarded && !FORMULA_ALLOWLIST.contains(&name.as_str()) {
+                    let rel = path.file_name().and_then(|s| s.to_str()).unwrap_or("?");
+                    offenders.push(format!("{rel}:{line} {name}"));
+                }
+            }
+        }
+        assert!(
+            checked > 100,
+            "scan sanity: expected 100+ extern \"C\" defs in mps-formula, got {checked} \
+             (scan broke? fix collect path)"
+        );
+        assert!(
+            offenders.is_empty(),
+            "extern \"C\" fns in mps-formula without ffi_guard (AGENTS.md hard rule):\n  {}",
+            offenders.join("\n  ")
+        );
+    }
+
+    /// Deliberate exceptions for `mps-formula`. Keep empty unless a concrete
+    /// entry genuinely cannot take a guard; every addition needs a reason
+    /// comment here, same policy as `ALLOWLIST`.
+    const FORMULA_ALLOWLIST: &[&str] = &[];
 }

@@ -98,6 +98,17 @@ jobs:
           cargo run -p xtask -- dump-metrics
           git diff --exit-code -- crates/mps-web/src/metrics.rs
 
+      # `docs/CAPABILITY_MAP.md` is derived from the C ABI surface (module →
+      # doc page → test mirror → JNI). It is the map an agent reads before
+      # touching an entry point, so a stale copy actively misleads. The local
+      # `xtask verify` checks it too; this step is what makes CI enforce it,
+      # because a contributor who never runs `verify` would otherwise leave it
+      # drifting. `--check` regenerates in memory and compares — no `git diff`
+      # needed, since the command is the generator.
+      - name: Check generated capability map is up to date
+        if: matrix.os == 'ubuntu-latest'
+        run: cargo run -p xtask -- capability-map --check
+
   # ==========================================================================
   # Web audit: i18n key parity, anchor integrity, stat-num hygiene
   # ==========================================================================

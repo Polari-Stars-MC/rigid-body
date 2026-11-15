@@ -58,7 +58,7 @@ cargo run -p xtask -- verify --keep-going # 一次看到所有失败步骤
 cargo run -p xtask -- verify --skip test  # 长跑时跳过测试重跑
 ```
 
-一共八步：`fmt` / `clippy` / `test` / `build-release` / `headers` / `metrics` / `capability-map` / `web-audit`，对着 `.github/workflows/ci.yml` 的步骤一一实现（`capability-map` 是仓内新增的生成物校验，CI 不跑）。`fmt` 步骤**从根 `Cargo.toml` 的 members 现场解析包名**再逐包 `-p` 圈定——不要改回 `cargo fmt --all --check`：新版 rustfmt 会顺着 path 依赖把 vendored `rapier/`、`parry/` 卷进 `--all`，按本仓库的 `rustfmt.toml` 重排 fork 代码，破坏 ADR-0008 的补丁纪律（提交 `52a4b59` 就是在修这个）。`headers` / `metrics` / `capability-map` 三处生成物都要求与生成器一致。
+一共八步：`fmt` / `clippy` / `test` / `build-release` / `headers` / `metrics` / `capability-map` / `web-audit`，对着 `.github/workflows/ci.yml` 的步骤一一实现。`fmt` 步骤**从根 `Cargo.toml` 的 members 现场解析包名**再逐包 `-p` 圈定——不要改回 `cargo fmt --all --check`：新版 rustfmt 会顺着 path 依赖把 vendored `rapier/`、`parry/` 卷进 `--all`，按本仓库的 `rustfmt.toml` 重排 fork 代码，破坏 ADR-0008 的补丁纪律（提交 `52a4b59` 就是在修这个）。`headers` / `metrics` / `capability-map` 三处生成物都要求与生成器一致。
 
 定位问题时才单跑某一条：
 
@@ -81,6 +81,7 @@ CI（`.github/workflows/ci.yml`）在 Ubuntu / Windows / macOS 上跑同一套�
 
 - 不要把 `rapier/` 并进本 workspace，也不要改它来迁就上层，除非任务明确是修 vendored fork。
 - 不要手改 `include/*.h`、`metrics.rs`、xtask 生成的 Java。
-- 不要静默 `error_consistency`、`verify_module_mirror`、`verify_metrics_sync`、`arena_compat`、`version_consistency`、`verify_ffi_guard`、`docs_index_consistency`。
+- 不要静默 `error_consistency`、`verify_module_mirror`、`verify_metrics_sync`、`arena_compat`、`version_consistency`、`verify_ffi_guard`、`docs_index_consistency`、`no_inline_cfg_test`。
+- 不要在源 crate 里写 `#[cfg(test)]` 内联测试。全部集成测试放 `mps-test` 并按源模块镜像；搬不动就把被测项改成 `pub` 并注明理由（`registry.rs` 是范例）。`no_inline_cfg_test` 会红；唯一豁免是 `mps-web`（文档站不依赖 `mps-test`，理由写在该测试的 ALLOWED 表里）。
 - 新增文档时，在拥有它的那份索引里加一行（`docs/README.md` / `docs/adr/README.md` / `docs/evidence/README.md` / `docs/mps-core.md`），不要把文件放进目录就算完——`docs_index_consistency` 会红。
 - 不要把提交信息写成 Conventional Commits。本仓库用日期戳（如 `2026.8.11.20.8`）或一句短描述。

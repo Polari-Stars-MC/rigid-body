@@ -87,7 +87,9 @@ rapier3d-f64 ← 只有 mps-core 与 mps-cosmos
 ## 测试边界
 
 - 集成测试只放 `mps-test`，目录与源模块镜像。守门：`verify_module_mirror`。
-- 源 crate 不放 `#[cfg(test)]` 模块来代替镜像。
+- 源 crate 不放 `#[cfg(test)]` 模块来代替镜像。守门：`no_inline_cfg_test`。
+  - 被测项不是 `pub` 时，把它改成 `pub` 并注明「仅为 `mps-test` 可测」，不要就地写内联测试。`registry.rs` 与 `cross_validate.rs` 是范例：只在 crate 内可见的项不进 C 头文件，改成 `pub` 不动 ABI 面。
+  - 唯一豁免是 `mps-web`（文档站的 i18n 守卫要读自身 locale 目录，而文档站不依赖 `mps-test`）。理由写在该测试的 `ALLOWED` 表里，不是散落的 `#[allow]`。
 - 守门测试失败时修产生漂移的那一侧，不要 `#[ignore]`、不要放宽断言来让 CI 绿。
 - 性能矩阵是 `#[ignore]`，不进默认 `cargo test`。跑法见 [world-step-benchmarks.md](world-step-benchmarks.md)。
 

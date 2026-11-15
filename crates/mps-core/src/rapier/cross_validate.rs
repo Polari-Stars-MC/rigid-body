@@ -292,8 +292,12 @@ const LINE_NAMES: [&str; NUM_LINES] = ["Newton", "J2", "Quadrupole", "MOND", "Re
 /// Registered via `world_set_cross_validate_gravity` FFI.  Stored by value
 /// inside `Box<dyn ForceLaw>` in the registry; `clone_box()` produces a fresh
 /// copy with identical config.
-pub(crate) struct CrossValidationGravityLaw {
-    pub(crate) config: CrossValidateGravityConfig,
+/// `pub` rather than `pub(crate)` only so `mps-test` can assert the
+/// `law_type()` mapping that ADR-0005 would otherwise force to live beside the
+/// implementation (same rationale as `registry.rs`). It never reaches the
+/// generated C header, so the ABI surface is unchanged.
+pub struct CrossValidationGravityLaw {
+    pub config: CrossValidateGravityConfig,
 }
 
 impl ForceLaw for CrossValidationGravityLaw {
@@ -792,43 +796,3 @@ pub extern "C" fn world_cross_validate_default_config() -> CrossValidateGravityC
 // `interaction::NewtonianGravityForceLaw` under the same
 // `ForceLawType::NewtonianGravity` slot. The cross-validation law mirrors
 // that singleton pattern; no extra imports are needed here.
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn mask_default_includes_all_lines() {
-        let m = CrossValidateLineMask {
-            bits: CrossValidateLineMask::DEFAULT,
-        };
-        assert!(m.contains(CrossValidateLineMask::NEWTON));
-        assert!(m.contains(CrossValidateLineMask::J2));
-        assert!(m.contains(CrossValidateLineMask::QUADRUPOLE));
-        assert!(m.contains(CrossValidateLineMask::MOND));
-        assert!(m.contains(CrossValidateLineMask::RELATIVISTIC));
-    }
-
-    #[test]
-    fn earth_default_gm_matches_earth_constant() {
-        let c = CrossValidateGravityConfig::earth_default();
-        assert!((c.attractor.gm - 3.986004418e14).abs() < 1.0);
-        assert!((c.mond_a_zero - 1.2e-10).abs() < f64::EPSILON);
-    }
-
-    #[test]
-    fn law_type_is_newtonian_gravity_structure() {
-        let law = CrossValidationGravityLaw {
-            config: CrossValidateGravityConfig::earth_default(),
-        };
-        assert_eq!(law.law_type(), ForceLawType::NewtonianGravity);
-    }
-
-    #[test]
-    fn aggregation_default_is_newton_anchored() {
-        assert_eq!(
-            CrossValidateAggregation::default(),
-            CrossValidateAggregation::NewtonAnchored
-        );
-    }
-}

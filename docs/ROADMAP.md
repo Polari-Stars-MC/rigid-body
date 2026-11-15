@@ -22,11 +22,15 @@
 
 按「不做就会继续伤到边界」排序，不是排期。
 
+**每条都必须附一条能证明它仍然开着的命令。** 第 2 条曾在这里挂了整整一天，其实早已不成立——没有可执行判据的条目会腐烂成传说，下一轮的人会照着它做错事。删掉一条之前，对应的守门或复现命令必须存在。
+
 1. **数值域迁移没有铺满。** `FormulaError` 只覆盖 [formula-numeric-domains.md](formula-numeric-domains.md) 里列出的 `_checked` API。其余公式仍是旧的直接返回。新公式走 checked 路径；旧函数只有在不改 C 签名和失败哨兵的前提下才加 checked 变体。
-2. **`anvilkit-bridge` 的测试编译是坏的。** `crates/mps-test/src/rapier/anvilkit.rs` 在 `--all-features` 下有既存错误。默认 CI 不编它。要么修到 feature 自己能 `cargo test -p mps-test --features anvilkit-bridge`，要么在 ADR 里写明这个桥冻结；不要把它放进 `default`。
+2. ~~**`anvilkit-bridge` 的测试编译是坏的。**~~ **已不成立（2026-11-13 实测）**：`cargo test -p mps-test --features anvilkit-bridge --lib anvilkit` → 2 passed；`--all-features --no-run` 也通过。这条从 2026-11-12 起就过期了，没人清。教训写进下一条。
 3. **Java 声明在仓库外。** `world-collision-mode.md` 仍要求宿主手工补 JNI 声明。`xtask gen-java` 只覆盖带 `#[java_struct]` / `#[java_enum]` 的值类型。JNI 方法清单没有生成进本仓库。在边界稳定之前，不把宿主工程并进来。（2026-11-12 起有所缓解：`crates/mps-test/java/` 的冒烟 fixture + CI `jni-smoke` job 把高价值 JNI 面锁进了契约；宿主仓库仍需自行声明。）
-4. **`xtask verify` 不覆盖两层 CI。** 它跑的是 Rust 侧的六项加 web audit；`jni-smoke`（真实 JVM）和跨 OS 矩阵（Ubuntu / Windows / macOS）只能由 CI 跑。改 JNI 签名或平台相关代码时，本地绿 ≠ CI 绿。
+4. **`xtask verify` 不覆盖两层 CI。** 它跑的是 Rust 侧的七项加 web audit；`jni-smoke`（真实 JVM）和跨 OS 矩阵（Ubuntu / Windows / macOS）只能由 CI 跑。改 JNI 签名或平台相关代码时，本地绿 ≠ CI 绿。
 5. **文档守门只查图结构，不查内容。** `docs_index_consistency` 证明索引连通、链接可解析、ADR 编号连续、代码注释指针不悬空；它**不**证明页面里写的数字或结论仍然成立（`soft_body.md` 曾经写「87 个入口」而实际是 88）。数字以生成物 `metrics.rs` 为准，不要手抄进文档。
+6. **正确性没有下界。** 1233 个测试全绿只证明「没崩、没变」，不证明「算对了」——上一轮审查发现的 SPH 自贡献重复计算、轮胎力量纲错误、光子动量必得 NaN，全部在测试全绿的状态下存在过。缺的是解析解对照、守恒律断言，以及 114 个既无 JNI 绑定也无测试引用的入口（见 [CAPABILITY_MAP.md](CAPABILITY_MAP.md)）的基本有限性检查。
+7. **没有内存安全机械化。** `crates/mps-core` 有 799 个 `unsafe` 块，CI 里没有 Miri / ASAN / fuzz，也没有 `cargo audit`。`ffi_guard` 这条硬规则现在由 `verify_ffi_guard` 静态扫描（三个 crate 全覆盖），但扫描是文本级的，只能证明标识符出现在函数体里，不能证明它接得对。
 
 ## 明确不做
 

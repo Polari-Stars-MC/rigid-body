@@ -368,4 +368,19 @@ mod tests {
         assert_eq!(ec.persistence(), Persistence::Transient);
         assert_eq!(ec.len(), 1);
     }
+
+    // 从 mps-core/src/rapier/forces.rs 的内联 `mod tests` 搬来（ADR-0005）。
+    // 原测试还断言了 `find_by_type`/`len` 的中间状态，那两条上面已有覆盖；
+    // 这里保留它真正独有的那一条：按类型批量注销（`unregister_by_type`）。
+    #[test]
+    fn unregister_by_type_removes_all_laws_of_that_type() {
+        let mut reg = ForceRegistry::new();
+        reg.register(Box::new(TestLaw::new(true)));
+        reg.register(Box::new(TestLaw::new(true)));
+        assert_eq!(reg.find_by_type(ForceLawType::Custom(999)).len(), 2);
+
+        reg.unregister_by_type(ForceLawType::Custom(999));
+        assert_eq!(reg.find_by_type(ForceLawType::Custom(999)).len(), 0);
+        assert_eq!(reg.len(), 0);
+    }
 }
