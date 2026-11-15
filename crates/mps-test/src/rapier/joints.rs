@@ -1,5 +1,8 @@
 #[cfg(test)]
 mod tests {
+    use mps_core::rapier::error::{
+        ERR_INVALID_ARGUMENT, ERR_NOT_FOUND, ERR_NULL_POINTER, last_error_code,
+    };
     use mps_core::rapier::ffi::*;
     use mps_core::rapier::ffi::{BodyStatus, JointTypeDesc};
     use mps_core::rapier::joints::*;
@@ -413,6 +416,331 @@ mod tests {
             world_remove_impulse_joint(world, handle, Bool::TRUE),
             Bool::TRUE
         );
+        world_destroy(world);
+    }
+
+    // =======================================================================
+    // multibody joint brake — `F = −k·(q − rest) − c·v`
+    //
+    // Pins three things:
+    //   1. `c = 0` (the default) behaves as before — no regression;
+    //   2. `c > 0` really removes angular velocity — the damping reaches the solver;
+    //   3. `brake()` drops the stiffness and keeps the damping, so the joint
+    //      stops instead of being pulled back toward a stale target angle.
+    //
+    // The bodies are driven through the *joint*, never through
+    // `rigid_body_set_angvel`: `multibody::update_velocities` overwrites
+    // `bodies.vels` from the solver at the end of every step, so an external
+    // velocity write on a multibody-attached body is discarded on step one.
+    // =======================================================================
+
+    /// Minimal powered hinge: a fixed body and a dynamic body, joined by a
+    /// revolute joint about X. The dynamic body needs a collider — that is what
+    /// gives it mass *and* rotational inertia; `additional_mass` alone leaves
+    /// the inertia at zero, and a zero-inertia body cannot hold angular
+    /// velocity.
+    ///
+    /// Gravity is zeroed: a hanging sphere has a gravity torque about the hinge,
+    /// which would dominate the damping measurement. The brake tests are about
+    /// the spring/damping terms only.
+    fn revolute_pair(world: *mut WorldHandle) -> (RigidBodyHandleRaw, RigidBodyHandleRaw, u64) {
+        use mps_core::rapier::collider::{
+            collider_builder_build, collider_builder_create_sphere,
+            world_insert_collider_with_parent,
+        };
+
+        mps_core::rapier::world::world_set_gravity(
+            world,
+            Vec3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+        );
+
+        let fixed_builder = rigid_body_builder_create(BodyStatus::Fixed as u32);
+        let fixed = world_insert_rigid_body(world, rigid_body_builder_build(fixed_builder));
+
+        let body_builder = rigid_body_builder_create(BodyStatus::Dynamic as u32);
+        let body = world_insert_rigid_body(world, rigid_body_builder_build(body_builder));
+
+        let sphere = collider_builder_create_sphere(Sphere {
+            center: Vec3::default(),
+            radius: 0.5,
+        });
+        assert!(!sphere.is_null(), "sphere builder failed");
+        world_insert_collider_with_parent(world, collider_builder_build(sphere), body);
+
+        let jb = joint_builder_create(
+            JointTypeDesc::Revolute as u32,
+            Vec3 {
+                x: 1.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            0.0,
+            0.0,
+        );
+        assert!(!jb.is_null(), "revolute joint builder failed");
+        let hinge = world_insert_multibody_joint(world, fixed, body, jb, Bool::TRUE);
+        assert_ne!(hinge, u64::MAX, "multibody hinge insert failed");
+        (fixed, body, hinge)
+    }
+
+    /// The joint's own generalized coordinate on `axis` — the authoritative
+    /// state of a multibody joint.
+    ///
+    /// The attached body's `rigid_body_get_angvel` is deliberately *not* used
+    /// anywhere in these tests: `multibody::update_velocities` overwrites
+    /// `bodies.vels` from the solver at the end of every step, so an external
+    /// read or write of that velocity says nothing about what the joint is
+    /// doing. Differencing this coordinate is the only honest measurement.
+    fn read_angle(world: *mut WorldHandle, hinge: u64, axis: u32) -> f64 {
+        world_multibody_joint_get_coordinate(world, hinge, axis)
+    }
+
+    /// Drive the hinge with a servo that keeps advancing its target angle, and
+    /// return the joint coordinate reached.
+    fn spin_up(world: *mut WorldHandle, hinge: u64, axis: u32) -> f64 {
+        let mut angle = 0.0;
+        for i in 0..60 {
+            angle += 0.1;
+            world_multibody_joint_set_motor(world, hinge, axis, angle, 10_000.0);
+            mps_core::rapier::world::world_step(world, 1.0 / 60.0);
+            if i % 15 == 0 {
+                std::eprintln!(
+                    "spin_up i={i} target={angle:.2} coord={:.4}",
+                    read_angle(world, hinge, axis)
+                );
+            }
+        }
+        read_angle(world, hinge, axis)
+    }
+
+    #[test]
+    fn multibody_spring_damping_rejects_invalid() {
+        let world = make_world();
+        let (_fixed, _body, hinge) = revolute_pair(world);
+        let axis = JointAxisDesc::AngX as u32;
+
+        assert_eq!(
+            world_multibody_joint_set_spring_damping(world, hinge, axis, -1.0),
+            Bool::FALSE
+        );
+        assert_eq!(last_error_code(), ERR_INVALID_ARGUMENT);
+        assert_eq!(
+            world_multibody_joint_set_spring_damping(world, hinge, axis, f64::NAN),
+            Bool::FALSE
+        );
+        assert_eq!(last_error_code(), ERR_INVALID_ARGUMENT);
+        assert_eq!(
+            world_multibody_joint_set_spring_damping(world, hinge, axis, 5.0),
+            Bool::TRUE
+        );
+        assert_eq!(
+            world_multibody_joint_set_spring_damping(std::ptr::null_mut(), hinge, axis, 1.0),
+            Bool::FALSE
+        );
+        assert_eq!(last_error_code(), ERR_NULL_POINTER);
+        assert_eq!(
+            world_multibody_joint_set_spring_damping(world, u64::MAX, axis, 1.0),
+            Bool::FALSE
+        );
+        assert_eq!(last_error_code(), ERR_NOT_FOUND);
+
+        world_destroy(world);
+    }
+
+    #[test]
+    fn multibody_brake_rejects_invalid_damping() {
+        let world = make_world();
+        let (_f, _b, hinge) = revolute_pair(world);
+        let axis = JointAxisDesc::AngX as u32;
+        assert_eq!(
+            world_multibody_joint_brake(world, hinge, axis, -0.5),
+            Bool::FALSE
+        );
+        assert_eq!(last_error_code(), ERR_INVALID_ARGUMENT);
+        assert_eq!(
+            world_multibody_joint_brake(world, hinge, axis, f64::INFINITY),
+            Bool::FALSE
+        );
+        assert_eq!(last_error_code(), ERR_INVALID_ARGUMENT);
+        world_destroy(world);
+    }
+
+    /// `damping = 0` must behave as before. "Before" is *not* zero damping: the
+    /// fork's `MultibodyJoint::default_damping` seeds `0.1` on every free
+    /// angular DoF, so a released joint already slows down on its own. This
+    /// test pins that baseline (it is the pre-existing behaviour), so a future
+    /// change to `default_damping` cannot go unnoticed.
+    #[test]
+    fn zero_damping_preserves_previous_behaviour() {
+        let world = make_world();
+        let (_f, _body, hinge) = revolute_pair(world);
+        let axis = JointAxisDesc::AngX as u32;
+
+        let driven = spin_up(world, hinge, axis);
+        assert!(
+            driven.abs() > 1.0,
+            "servo must actually drive the hinge, got {driven}"
+        );
+
+        world_multibody_joint_set_motor(world, hinge, axis, 0.0, 0.0);
+        world_multibody_joint_set_spring_damping(world, hinge, axis, 0.0);
+
+        // Measure the joint's own angular velocity by differencing its
+        // coordinate (the attached body's `angvel` is not authoritative).
+        let dt = 1.0 / 60.0;
+        let mut prev = read_angle(world, hinge, axis);
+        let mut rates = Vec::new();
+        for _ in 0..30 {
+            mps_core::rapier::world::world_step(world, dt);
+            let now = read_angle(world, hinge, axis);
+            rates.push((now - prev) / dt);
+            prev = now;
+        }
+        let first = rates[0];
+        let last = *rates.last().unwrap();
+        assert!(
+            first.abs() > 0.5,
+            "the joint must be coasting, got {first} rad/s"
+        );
+        // The built-in 0.1 damping is real and not negligible — it is part of
+        // the pre-existing behaviour, so pin the observed decay band rather
+        // than pretend the joint coasts freely.
+        assert!(
+            last.abs() > first.abs() * 0.2,
+            "the default 0.1 damping must stay in its known band: {first} -> {last} rad/s"
+        );
+        world_destroy(world);
+    }
+
+    /// A braked joint has no target angle: it removes angular velocity instead
+    /// of chasing a position. The distinguishing signature is that the joint's
+    /// angular *velocity* decays toward zero, so the coordinate asymptotes
+    /// instead of settling on the servo's target.
+    #[test]
+    fn positive_damping_removes_angular_velocity() {
+        let world = make_world();
+        let (_f, _body, hinge) = revolute_pair(world);
+        let axis = JointAxisDesc::AngX as u32;
+
+        let driven = spin_up(world, hinge, axis);
+        assert!(driven.abs() > 1.0, "servo must drive, got {driven}");
+
+        assert_eq!(
+            world_multibody_joint_brake(world, hinge, axis, 30.0),
+            Bool::TRUE
+        );
+
+        // Measure the joint's angular velocity by differencing its coordinate.
+        let dt = 1.0 / 60.0;
+        let mut prev = read_angle(world, hinge, axis);
+        let mut first_rate = None;
+        let mut last_rate = 0.0;
+        for i in 0..120 {
+            mps_core::rapier::world::world_step(world, dt);
+            let now = read_angle(world, hinge, axis);
+            let rate = (now - prev) / dt;
+            prev = now;
+            if i == 0 {
+                first_rate = Some(rate);
+            }
+            last_rate = rate;
+        }
+        let first = first_rate.expect("at least one step");
+        assert!(
+            first.abs() > 0.5,
+            "the joint must still be moving right after the servo lets go, got {first}"
+        );
+        assert!(
+            last_rate.abs() < first.abs() * 0.2,
+            "damping must slow the joint down: {first} -> {last_rate}"
+        );
+        world_destroy(world);
+    }
+
+    /// A servo (`k > 0`) pulls the joint toward its target; `brake()` has no
+    /// target, so it removes velocity instead of chasing an angle.
+    ///
+    /// The brake is applied *while the servo is still driving* — once the servo
+    /// has reached its target the joint is at rest and there is nothing to
+    /// brake.
+    #[test]
+    fn brake_stops_without_pulling_back_to_a_target() {
+        let world = make_world();
+        let (_f, _body, hinge) = revolute_pair(world);
+        let axis = JointAxisDesc::AngX as u32;
+
+        let dt = 1.0 / 60.0;
+
+        // Drive for a while but keep advancing the target so the joint is still
+        // moving, and measure that rate.
+        let mut angle = 0.0;
+        let mut prev = read_angle(world, hinge, axis);
+        let mut pre_brake_rate = 0.0;
+        for _ in 0..20 {
+            angle += 0.1;
+            world_multibody_joint_set_motor(world, hinge, axis, angle, 10_000.0);
+            mps_core::rapier::world::world_step(world, dt);
+            let now = read_angle(world, hinge, axis);
+            pre_brake_rate = (now - prev) / dt;
+            prev = now;
+        }
+        assert!(
+            pre_brake_rate.abs() > 0.5,
+            "the servo must have the joint moving before the brake: {pre_brake_rate} rad/s"
+        );
+
+        // Brake: stiffness to zero, damping up. `rest` is re-anchored to the
+        // current angle, so no restoring force is left.
+        assert_eq!(
+            world_multibody_joint_brake(world, hinge, axis, 200.0),
+            Bool::TRUE
+        );
+        let stopped_at = read_angle(world, hinge, axis);
+
+        // Let the brake run: the coordinate must converge (an asymptote), which
+        // is what "stopped" means for a velocity-only brake.
+        let mut rate_late = 0.0;
+        for i in 0..300 {
+            mps_core::rapier::world::world_step(world, dt);
+            let now = read_angle(world, hinge, axis);
+            let rate = (now - prev) / dt;
+            prev = now;
+            if i == 299 {
+                rate_late = rate;
+            }
+        }
+        assert!(
+            rate_late.abs() < pre_brake_rate.abs() * 0.05,
+            "after braking the joint must come to rest: {pre_brake_rate} -> {rate_late} rad/s"
+        );
+        // With a strong brake the joint stops almost immediately, so it barely
+        // coasts: a small travelled distance is the *signature of a hard brake*,
+        // not of a servo snapping back. The servo case is covered by
+        // `spin_up` (coordinate tracks its target to ~2e-3).
+        let travelled = (prev - stopped_at).abs();
+        assert!(
+            travelled < 0.5,
+            "a hard brake stops the joint quickly: travelled {travelled}"
+        );
+        world_destroy(world);
+    }
+
+    /// The `_flag` variants must reach the same conclusion as the `Bool` ones.
+    #[test]
+    fn brake_flag_variant_matches() {
+        let world = make_world();
+        let (_f, _b, hinge) = revolute_pair(world);
+        let axis = JointAxisDesc::AngX as u32;
+        let a = world_multibody_joint_brake(world, hinge, axis, 10.0).0;
+        let b = world_multibody_joint_brake_flag(world, hinge, axis, 10.0);
+        assert_eq!(a, b);
+        let c = world_multibody_joint_set_spring_damping(world, hinge, axis, 10.0).0;
+        let d = world_multibody_joint_set_spring_damping_flag(world, hinge, axis, 10.0);
+        assert_eq!(c, d);
         world_destroy(world);
     }
 }

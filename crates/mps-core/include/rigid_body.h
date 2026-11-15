@@ -6552,6 +6552,90 @@ struct Bool world_multibody_joint_set_motor(struct WorldHandle *world,
                                             double stiffness);
 
 /**
+ * 设置 multibody joint 弹簧的阻尼系数（`F = −k(q − rest) − c·v`）。
+ *
+ * 与 `stiffness` 相互独立。弹簧本身已经带一个隐式 `−k·dt·v` 项（backward-Euler
+ * 一致性要求），所以它的阻尼被锁死在 `c = k`：刚度调高时阻尼自动跟着涨，
+ * 无法单独要「高阻尼、低刚度」的刹车特性。
+ *
+ * `damping = 0` 恢复改动前的行为（逐位相同）。`damping` 必须有限且 `>= 0`。
+ *
+ * # 为什么这是「刹车」而不是又一个伺服
+ *
+ * 伺服（`k > 0`）只能把关节驱向某个目标角：松手时不写目标，弹簧就继续把
+ * 关节拉回最后写入的那个角度，于是物体在目标两侧反复振荡。纯阻尼
+ * （`k = 0, c > 0`）没有目标角，只消耗角速度，关节会真正停下来。
+ *
+ * # Safety
+ *
+ * `world` 必须是 `world_create` 返回且尚未销毁的指针。
+ */
+struct Bool world_multibody_joint_set_spring_damping(struct WorldHandle *world,
+                                                     uint64_t handle,
+                                                     uint32_t axis,
+                                                     double damping);
+
+/**
+ * `u8` 返回变体，语义同 [`world_multibody_joint_set_spring_damping`]。
+ *
+ * # Safety
+ *
+ * 同 [`world_multibody_joint_set_spring_damping`]。
+ */
+uint8_t world_multibody_joint_set_spring_damping_flag(struct WorldHandle *world,
+                                                      uint64_t handle,
+                                                      uint32_t axis,
+                                                      double damping);
+
+/**
+ * 让 multibody joint 的某个轴进入「刹车」状态：关掉位置刚度，只留阻尼。
+ *
+ * 等价于 `set_motor(target, 0.0)` + `set_spring_damping(damping)`，封成一个
+ * 入口是因为这两步必须同时做——只关刚度不关阻尼，关节会自由漂移；只加阻尼
+ * 不关刚度，弹簧仍会把关节拉回旧目标。
+ *
+ * `damping <= 0` 表示不刹车（恢复自由），此时刚度一并清零。
+ *
+ * # Safety
+ *
+ * `world` 必须是 `world_create` 返回且尚未销毁的指针。
+ */
+struct Bool world_multibody_joint_brake(struct WorldHandle *world,
+                                        uint64_t handle,
+                                        uint32_t axis,
+                                        double damping);
+
+/**
+ * `u8` 返回变体，语义同 [`world_multibody_joint_brake`]。
+ *
+ * # Safety
+ *
+ * 同 [`world_multibody_joint_brake`]。
+ */
+uint8_t world_multibody_joint_brake_flag(struct WorldHandle *world,
+                                         uint64_t handle,
+                                         uint32_t axis,
+                                         double damping);
+
+/**
+ * 读 multibody joint 在 `axis` 上的广义坐标（角度或位移）。
+ *
+ * 挂在 multibody 上的刚体，其 `rigid_body_get_angvel` **不是**权威状态：
+ * `multibody::update_velocities` 每步用求解器结果覆盖 `bodies.vels`。要观察
+ * 刹车是否生效，必须读关节自己的坐标，也就是这个入口。
+ *
+ * 失败返回 `NaN`。用 `world_multibody_joint_get_coordinate` 的正常路径判断成功：
+ * `f64` 返回型无法携带错误码，调用方读 `abi_last_error_code`。
+ *
+ * # Safety
+ *
+ * `world` 必须是 `world_create` 返回且尚未销毁的指针。
+ */
+double world_multibody_joint_get_coordinate(struct WorldHandle *world,
+                                            uint64_t handle,
+                                            uint32_t axis);
+
+/**
  * 移除 multibody joint。
  */
 struct Bool world_remove_multibody_joint(struct WorldHandle *world,

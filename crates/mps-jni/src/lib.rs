@@ -1020,6 +1020,14 @@ jni!(long worldInsertMultibodyJoint(long world, long body1, long body2, long bui
 jni!(boolean worldMultibodyJointSetMotor(long world, long handle, int axis, double target, double stiffness) {
     jo::world_multibody_joint_set_motor(m::<WH>(world), handle as u64, axis as u32, target, stiffness).0 as jbyte
 });
+// 真正的刹车：关刚度、留阻尼。伺服（k>0）松手后仍会把关节拉回旧目标角，
+// 纯阻尼（k=0, c>0）没有目标角，只消耗角速度，关节才会停。
+jni!(boolean worldMultibodyJointSetSpringDamping(long world, long handle, int axis, double damping) {
+    jo::world_multibody_joint_set_spring_damping(wm(world), handle as u64, axis as u32, damping).0 as jbyte
+});
+jni!(boolean worldMultibodyJointBrake(long world, long handle, int axis, double damping) {
+    jo::world_multibody_joint_brake(wm(world), handle as u64, axis as u32, damping).0 as jbyte
+});
 jni!(boolean worldRemoveMultibodyJoint(long world, long handle, int wake_up) {
     jo::world_remove_multibody_joint(m::<WH>(world), handle as u64, jb(wake_up)).0 as jbyte
 });

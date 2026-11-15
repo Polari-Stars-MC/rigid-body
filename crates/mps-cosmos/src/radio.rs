@@ -144,7 +144,7 @@ struct NodeView {
 
 impl NodeView {
     fn of(node: &RadioNode) -> Self {
-        let omni = !(node.rx_beam_angle < std::f64::consts::PI);
+        let omni = node.rx_beam_angle >= std::f64::consts::PI;
         Self {
             id: node.id,
             pos: node.pos,

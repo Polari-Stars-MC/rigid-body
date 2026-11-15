@@ -632,7 +632,10 @@ pub fn build_terrain_colliders(data: &[u8]) -> Result<Vec<ColliderBuilder>, &'st
                 (b.min[1] + b.max[1]) * 0.5,
                 (b.min[2] + b.max[2]) * 0.5,
             );
-            shapes.push((Pose::from_translation(center), SharedShape::cuboid(half.x, half.y, half.z)));
+            shapes.push((
+                Pose::from_translation(center),
+                SharedShape::cuboid(half.x, half.y, half.z),
+            ));
         }
         if shapes.is_empty() {
             continue;

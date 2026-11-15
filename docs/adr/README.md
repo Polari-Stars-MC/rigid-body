@@ -16,5 +16,6 @@
 | [0008](0008-rapier-fork-sync-policy.md) | rapier fork 固定 python-v tag 基线，同步走独立变基分支 | 接受 |
 | [0009](0009-per-body-simulation-domains.md) | 体级模拟域：边界外用 `set_enabled` 冻结，region 语义是 sleep | 接受 |
 | [0010](0010-rolling-resistance-and-contact-mechanics.md) | 滚动阻力进 fork 求解器；Hertz/Mindlin 与凸分解进公式层 | 接受 |
+| [0011](0011-multibody-joint-damping-and-brake.md) | multibody 关节的逐 DoF 阻尼与 rake()：让电机真的能停 | 接受 |
 
 仓库根的 [DESIGN.md](../../DESIGN.md) 和 [OPTIMIZATION.md](../../OPTIMIZATION.md) 是被源码注释引用的章节索引，不是 ADR 的前身。它们的 `§` 编号继续留在原地。
