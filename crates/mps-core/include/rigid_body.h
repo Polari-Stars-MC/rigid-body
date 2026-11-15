@@ -3356,6 +3356,50 @@ uint8_t collider_set_friction_flag(struct WorldHandle *world,
                                    double friction);
 
 /**
+ * Set the rolling-resistance coefficient of a collider.
+ *
+ * Rolling resistance opposes *rolling* — rotation about an axis lying in the
+ * contact tangent plane — not sliding. Coulomb friction already stops slipping;
+ * a ball that rolls without slipping has zero slip velocity, so without this
+ * coefficient it rolls forever. Typical values: ~0.001 steel-on-steel,
+ * ~0.01-0.03 tire-on-asphalt. `0.0` disables the constraint (default), which
+ * keeps the solver on its pre-existing path.
+ *
+ * The resisting torque per step is bounded by `μ_r · N · r_eff`, where `N` is
+ * the accumulated normal impulse of the contact manifold.
+ *
+ * # Safety
+ *
+ * `world` must be a valid pointer returned by `world_create` and not yet destroyed.
+ */
+struct Bool collider_set_rolling_resistance(struct WorldHandle *world,
+                                            ColliderHandleRaw handle,
+                                            double coefficient);
+
+/**
+ * `u8`-returning variant of `collider_set_rolling_resistance`.
+ *
+ * # Safety
+ *
+ * Same contract as `collider_set_rolling_resistance`.
+ */
+uint8_t collider_set_rolling_resistance_flag(struct WorldHandle *world,
+                                             ColliderHandleRaw handle,
+                                             double coefficient);
+
+/**
+ * Read the rolling-resistance coefficient of a collider.
+ *
+ * Returns `0.0` for an unknown collider or a null world, and sets
+ * `ERR_NOT_FOUND` / `ERR_NULL_POINTER` accordingly.
+ *
+ * # Safety
+ *
+ * `world` must be a valid pointer returned by `world_create` and not yet destroyed.
+ */
+double collider_get_rolling_resistance(const struct WorldHandle *world, ColliderHandleRaw handle);
+
+/**
  * # Safety
  *
  * `world` must be a valid pointer returned by `world_create` and not yet destroyed.

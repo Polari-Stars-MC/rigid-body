@@ -45,9 +45,11 @@ pub mod rapier {
     pub mod collider;
     pub mod collision_mode;
     pub mod compat;
+    pub mod contact_mechanics;
     pub mod continuum;
     pub mod control_theory;
     pub mod controller;
+    pub mod convex_decomposition;
     pub mod cosmology;
     pub mod crbtree;
     pub mod cross_validate;

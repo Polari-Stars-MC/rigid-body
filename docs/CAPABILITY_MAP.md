@@ -11,10 +11,10 @@
 | 项 | 数量 |
 | --- | --- |
 | `mps-core` 里有 `extern "C"` 入口的源模块 | 62 |
-| `mps-core` C ABI 入口总数 | 917 |
-| 其中出现在生成头文件 `rigid_body.h` 里 | 917 |
+| `mps-core` C ABI 入口总数 | 920 |
+| 其中出现在生成头文件 `rigid_body.h` 里 | 920 |
 | 其中被 `mps-jni` 的 `jni!` 体引用 | 603 |
-| 其中被 `mps-test` 引用 | 697 |
+| 其中被 `mps-test` 引用 | 700 |
 | 既无 JNI 绑定也无测试引用 | 114 |
 
 ## 模块表
@@ -33,7 +33,7 @@
 | `bounds` | — | 30 | — | [bounds.md](mps-core/bounds.md) | [bounds.rs](../crates/mps-test/src/rapier/bounds.rs) | 30 | 13 |
 | `character_body` | `character_body_*` | 20 | — | [character_body.md](mps-core/character_body.md) | [character_body.rs](../crates/mps-test/src/rapier/character_body.rs) | 20 | 15 |
 | `cloth` | — | 1 | — | [cloth.md](mps-core/cloth.md) | [cloth.rs](../crates/mps-test/src/rapier/cloth.rs) | 1 | 1 |
-| `collider` | — | 64 | — | [collider.md](mps-core/collider.md) | [collider.rs](../crates/mps-test/src/rapier/collider.rs) | 54 | 62 |
+| `collider` | — | 67 | — | [collider.md](mps-core/collider.md) | [collider.rs](../crates/mps-test/src/rapier/collider.rs) | 54 | 65 |
 | `collision_mode` | `world_*` | 4 | — | [collision_mode.md](mps-core/collision_mode.md) | [collision_mode.rs](../crates/mps-test/src/rapier/collision_mode.rs) | 4 | 4 |
 | `compat` | — | 4 | — | [compat.md](mps-core/compat.md) | [compat.rs](../crates/mps-test/src/rapier/compat.rs) | 4 | 4 |
 | `controller` | `character_controller_*` | 14 | — | [controller.md](mps-core/controller.md) | [controller.rs](../crates/mps-test/src/rapier/controller.rs) | 14 | 13 |

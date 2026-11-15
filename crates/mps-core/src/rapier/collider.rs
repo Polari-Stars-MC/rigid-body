@@ -1568,6 +1568,96 @@ pub extern "C" fn collider_set_friction_flag(
     ffi_guard(0, || collider_set_friction(world, handle, friction).0)
 }
 
+/// Set the rolling-resistance coefficient of a collider.
+///
+/// Rolling resistance opposes *rolling* — rotation about an axis lying in the
+/// contact tangent plane — not sliding. Coulomb friction already stops slipping;
+/// a ball that rolls without slipping has zero slip velocity, so without this
+/// coefficient it rolls forever. Typical values: ~0.001 steel-on-steel,
+/// ~0.01-0.03 tire-on-asphalt. `0.0` disables the constraint (default), which
+/// keeps the solver on its pre-existing path.
+///
+/// The resisting torque per step is bounded by `μ_r · N · r_eff`, where `N` is
+/// the accumulated normal impulse of the contact manifold.
+///
+/// # Safety
+///
+/// `world` must be a valid pointer returned by `world_create` and not yet destroyed.
+#[unsafe(no_mangle)]
+pub extern "C" fn collider_set_rolling_resistance(
+    world: *mut WorldHandle,
+    handle: ColliderHandleRaw,
+    coefficient: f64,
+) -> Bool {
+    ffi_guard(Bool::FALSE, || {
+        let Some(world) = (unsafe { world.as_mut() }) else {
+            set_error(ERR_NULL_POINTER, "world is null");
+            return Bool::FALSE;
+        };
+        let Some(collider) = world
+            .inner
+            .colliders
+            .get_mut(unpack_collider_handle(handle))
+        else {
+            set_error(ERR_NOT_FOUND, "collider not found");
+            return Bool::FALSE;
+        };
+        if !coefficient.is_finite() || coefficient < 0.0 {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "rolling_resistance must be finite and non-negative",
+            );
+            return Bool::FALSE;
+        }
+
+        collider.set_rolling_resistance(coefficient);
+        crate::rapier::world::refresh_region_body(&mut world.inner, unpack_collider_handle(handle));
+        Bool::TRUE
+    })
+}
+
+/// `u8`-returning variant of `collider_set_rolling_resistance`.
+///
+/// # Safety
+///
+/// Same contract as `collider_set_rolling_resistance`.
+#[unsafe(no_mangle)]
+pub extern "C" fn collider_set_rolling_resistance_flag(
+    world: *mut WorldHandle,
+    handle: ColliderHandleRaw,
+    coefficient: f64,
+) -> u8 {
+    ffi_guard(0, || {
+        collider_set_rolling_resistance(world, handle, coefficient).0
+    })
+}
+
+/// Read the rolling-resistance coefficient of a collider.
+///
+/// Returns `0.0` for an unknown collider or a null world, and sets
+/// `ERR_NOT_FOUND` / `ERR_NULL_POINTER` accordingly.
+///
+/// # Safety
+///
+/// `world` must be a valid pointer returned by `world_create` and not yet destroyed.
+#[unsafe(no_mangle)]
+pub extern "C" fn collider_get_rolling_resistance(
+    world: *const WorldHandle,
+    handle: ColliderHandleRaw,
+) -> f64 {
+    ffi_guard(0.0, || {
+        let Some(world) = (unsafe { world.as_ref() }) else {
+            set_error(ERR_NULL_POINTER, "world is null");
+            return 0.0;
+        };
+        let Some(collider) = world.inner.colliders.get(unpack_collider_handle(handle)) else {
+            set_error(ERR_NOT_FOUND, "collider not found");
+            return 0.0;
+        };
+        collider.rolling_resistance()
+    })
+}
+
 /// # Safety
 ///
 /// `world` must be a valid pointer returned by `world_create` and not yet destroyed.

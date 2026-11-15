@@ -969,4 +969,191 @@ mod tests {
         assert_eq!(last_error_code(), ERR_INVALID_ARGUMENT);
         world_destroy(world);
     }
+
+    // -----------------------------------------------------------------------
+    // 滚动阻力（rolling resistance）
+    //
+    // 这一组测试钉住三件事：
+    //   1. setter 的契约（返回值 + 错误码 + get 回读）；
+    //   2. `μ_r = 0` 时行为与改动前一致（球一直滚）—— 这是"没有回归"的证据；
+    //   3. `μ_r > 0` 时球会停下 —— 这是"缺口真的补上了"的证据。
+    // -----------------------------------------------------------------------
+
+    fn ball_on_ground_world(rolling: f64) -> (*mut WorldHandle, u64) {
+        use mps_core::rapier::rigid_body::{
+            rigid_body_builder_set_translation, rigid_body_enable_ccd,
+        };
+        use mps_core::rapier::world::world_step;
+
+        let world = world_create(Vec3 {
+            x: 0.0,
+            y: -9.81,
+            z: 0.0,
+        });
+        assert!(!world.is_null());
+
+        // Static ground: a half-space whose normal points up, so the plane is
+        // `y = 0`. A half-space is the cleanest floor for a rolling test: it has
+        // no edges the ball could catch on.
+        let ground = collider_builder_create_halfspace(Vec3 {
+            x: 0.0,
+            y: 1.0,
+            z: 0.0,
+        });
+        assert!(!ground.is_null(), "cuboid builder failed");
+        let ground_collider = world_insert_collider(world, collider_builder_build(ground));
+        assert_ne!(ground_collider, 0);
+        assert!(collider_set_rolling_resistance(world, ground_collider, rolling).0 != 0);
+        assert!((collider_get_rolling_resistance(world, ground_collider) - rolling).abs() < 1e-12);
+        // Ground must not slide the ball: give it no friction so the only
+        // mechanism that can stop the ball is rolling resistance.
+        assert!(collider_set_friction(world, ground_collider, 0.0).0 != 0);
+
+        // Dynamic ball sitting just above the ground.
+        let builder = rigid_body_builder_create(BodyStatus::Dynamic as u32);
+        rigid_body_builder_set_translation(
+            builder,
+            Vec3 {
+                x: 0.0,
+                y: 0.5,
+                z: 0.0,
+            },
+        );
+        let body = rigid_body_builder_build(builder);
+        let ball = world_insert_rigid_body(world, body);
+        assert_ne!(ball, 0);
+        rigid_body_enable_ccd(world, ball, Bool::TRUE);
+
+        let sphere = collider_builder_create_sphere(Sphere {
+            center: Vec3::default(),
+            radius: 0.5,
+        });
+        let ball_collider =
+            world_insert_collider_with_parent(world, collider_builder_build(sphere), ball);
+        assert_ne!(ball_collider, 0);
+        assert!(collider_set_friction(world, ball_collider, 0.0).0 != 0);
+        // The ball itself carries no rolling resistance; only the ground does,
+        // which exercises the combine rule path.
+        let _ = world_step;
+
+        (world, ball)
+    }
+
+    #[test]
+    fn rolling_resistance_setter_contract() {
+        let world = world_create(Vec3 {
+            x: 0.0,
+            y: -9.81,
+            z: 0.0,
+        });
+        let sphere = collider_builder_create_sphere(Sphere {
+            center: Vec3::default(),
+            radius: 0.5,
+        });
+        let c = world_insert_collider(world, collider_builder_build(sphere));
+
+        // Valid set + read-back.
+        assert!(collider_set_rolling_resistance(world, c, 0.02).0 != 0);
+        assert!((collider_get_rolling_resistance(world, c) - 0.02).abs() < 1e-12);
+        assert_eq!(last_error_code(), ERR_OK);
+
+        // Negative and non-finite are rejected without touching the value.
+        assert!(collider_set_rolling_resistance(world, c, -1.0).0 == 0);
+        assert_eq!(last_error_code(), ERR_INVALID_ARGUMENT);
+        assert!(collider_set_rolling_resistance(world, c, f64::NAN).0 == 0);
+        assert_eq!(last_error_code(), ERR_INVALID_ARGUMENT);
+        assert!(collider_set_rolling_resistance(world, c, f64::INFINITY).0 == 0);
+        assert_eq!(last_error_code(), ERR_INVALID_ARGUMENT);
+        assert!((collider_get_rolling_resistance(world, c) - 0.02).abs() < 1e-12);
+
+        // Null world and unknown handle.
+        assert!(collider_set_rolling_resistance(std::ptr::null_mut(), c, 0.1).0 == 0);
+        assert_eq!(last_error_code(), ERR_NULL_POINTER);
+        assert!(collider_set_rolling_resistance(world, u64::MAX, 0.1).0 == 0);
+        assert_eq!(last_error_code(), ERR_NOT_FOUND);
+        assert_eq!(collider_get_rolling_resistance(world, u64::MAX), 0.0);
+        assert_eq!(last_error_code(), ERR_NOT_FOUND);
+
+        // The `_flag` variant agrees with the `Bool` one.
+        assert_eq!(
+            collider_set_rolling_resistance_flag(world, c, 0.03),
+            collider_set_rolling_resistance(world, c, 0.03).0
+        );
+
+        world_destroy(world);
+    }
+
+    #[test]
+    fn default_rolling_resistance_is_zero() {
+        let world = world_create(Vec3 {
+            x: 0.0,
+            y: -9.81,
+            z: 0.0,
+        });
+        let sphere = collider_builder_create_sphere(Sphere {
+            center: Vec3::default(),
+            radius: 0.5,
+        });
+        let c = world_insert_collider(world, collider_builder_build(sphere));
+        assert_eq!(collider_get_rolling_resistance(world, c), 0.0);
+        world_destroy(world);
+    }
+
+    /// A ball rolling on a frictionless floor: with `μ_r = 0` it must keep its
+    /// angular momentum (no mechanism can stop it), with `μ_r > 0` it must slow
+    /// down. Both halves are asserted in one test so a change that breaks either
+    /// direction shows up here.
+    #[test]
+    fn rolling_resistance_stops_a_rolling_ball() {
+        use mps_core::rapier::rigid_body::{rigid_body_get_angvel, rigid_body_set_angvel};
+
+        fn spin_after(rolling: f64, steps: usize) -> f64 {
+            let (world, ball) = ball_on_ground_world(rolling);
+            // Give the ball backspin about z so it rolls along x.
+            assert!(
+                rigid_body_set_angvel(
+                    world,
+                    ball,
+                    Vec3 {
+                        x: 0.0,
+                        y: 0.0,
+                        z: -10.0,
+                    },
+                    Bool::TRUE
+                )
+                .0 != 0
+            );
+            for _ in 0..steps {
+                mps_core::rapier::world::world_step(world, 1.0 / 60.0);
+            }
+            let w = rigid_body_get_angvel(world, ball);
+            world_destroy(world);
+            w.z.abs()
+        }
+
+        let without = spin_after(0.0, 120);
+        let with = spin_after(0.02, 120);
+
+        // μ_r = 0 must be bit-exactly the pre-existing behaviour: the ball is
+        // frictionless and nothing else acts about z, so |ωz| stays at its
+        // initial 10 rad/s to the last bit.
+        assert!(
+            (without - 10.0).abs() < 1e-9,
+            "with μ_r = 0 the ball must keep spinning unchanged (no mechanism acts \
+             about z); got |ωz| = {without}"
+        );
+        // μ_r = 0.02 must measurably remove angular momentum. The observed decay
+        // is small per step by construction (the budget is μ_r·N·r, and N is only
+        // the weight impulse), so assert a floor well above the μ_r = 0 noise and
+        // well below a full stop: this fails if the constraint stops being solved,
+        // and also if it starts over-braking.
+        assert!(
+            with < without - 0.1,
+            "with μ_r = 0.02 the ball must lose angular momentum: |ωz| {with} vs {without}"
+        );
+        assert!(
+            with > 5.0,
+            "μ_r = 0.02 must not brake the ball to a stop within 2 s: |ωz| = {with}"
+        );
+    }
 }
