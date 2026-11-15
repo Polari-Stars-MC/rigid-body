@@ -98,6 +98,7 @@ rapier3d-f64 ← 只有 mps-core 与 mps-cosmos
 | `crates/mps-core/include/rigid_body.h` | 构建 `mps-core`（cbindgen） | 否。`xtask verify` 的 `headers` 步 + Linux CI 会 diff |
 | `crates/mps-cosmos/include/cosmos.h` | 构建 `mps-cosmos`（cbindgen） | 否。同上 |
 | `crates/mps-web/src/metrics.rs` | `cargo run -p xtask -- dump-metrics` | 否。仓内守门 `verify_metrics_sync`（3 个核心计数）+ `xtask verify` 的 `metrics` 步（全部 18 个常量） |
+| `docs/CAPABILITY_MAP.md` | `cargo run -p xtask -- capability-map` | 否。`xtask verify` 的 `capability-map` 步用 `--check` 比对 |
 | xtask `gen-java` 输出 | `cargo run -p xtask -- gen-java [dir]` | 否 |
 
 **Java 业务源码在仓库外，但 Java 契约测试在本仓库内。** `crates/mps-test/java/` 有 6 个 fixture（`RapierNative` / `CosmosNative` / `RecordingNative` / `BakerNative` / `EventsNative` / `ReplayViewer`），CI 的 `jni-smoke` job 用真实 JVM 编译并运行前五个。改了 JNI 方法名、参数或返回语义，必须同步 fixture——`xtask verify` **不覆盖**这一层，Rust 测试全绿也不代表 CI 会绿。JNI 符号是契约，Java 声明要跟 C 头文件走，而不是反过来改 Rust 去凑一份未提交的 Java。

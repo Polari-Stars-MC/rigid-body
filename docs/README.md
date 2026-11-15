@@ -15,6 +15,7 @@
 | [adr/](adr/README.md) | 已经做出的决定，以及为什么 |
 | [evidence/](evidence/README.md) | 哪些行为被测试或基准钉住 |
 | [mps-core.md](mps-core.md) | `mps-core` 每个源文件做什么 |
+| [CAPABILITY_MAP.md](CAPABILITY_MAP.md) | 改一个 C ABI 要动哪几处（生成物，别手改） |
 | [integration/mc-host.md](integration/mc-host.md) | 宿主（Java 侧）怎么接线、JNI 怎么声明 |
 
 ## 专题（实现契约，不是路线）
@@ -39,3 +40,9 @@
 4. Rust 注释里点名的 docs 路径真实存在。
 
 新增一篇文档时，**在拥有它的那份索引里加一行**，不要只把文件放进目录。
+
+## 生成物
+
+| 文件 | 生成命令 | 守门 |
+| --- | --- | --- |
+| [CAPABILITY_MAP.md](CAPABILITY_MAP.md) | `cargo run -p xtask -- capability-map` | `xtask verify` 的 `capability-map` 步（`--check` 比对） |

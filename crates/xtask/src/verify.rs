@@ -55,6 +55,7 @@ pub(crate) const ALL_STEPS: &[&str] = &[
     "build-release",
     "headers",
     "metrics",
+    "capability-map",
     "web-audit",
 ];
 
@@ -69,6 +70,7 @@ fn describe(step: &str) -> &'static str {
         "build-release" => "release build; also regenerates rigid_body.h / cosmos.h via cbindgen",
         "headers" => "generated C headers are byte-identical to a fresh build",
         "metrics" => "crates/mps-web/src/metrics.rs matches the generator",
+        "capability-map" => "docs/CAPABILITY_MAP.md matches the sources it is derived from",
         "web-audit" => {
             "i18n parity, in-page anchors, stat-num hygiene (crates/mps-web/scripts/web_audit.py)"
         }
@@ -118,6 +120,7 @@ fn command_preview(step: &str) -> &'static str {
         "metrics" => {
             "dump-metrics (in process) + git diff --exit-code -- crates/mps-web/src/metrics.rs"
         }
+        "capability-map" => "capability-map --check (in process)",
         "web-audit" => "<python> crates/mps-web/scripts/web_audit.py",
         _ => "?",
     }
@@ -170,6 +173,7 @@ pub(crate) fn run(root: &Path, opts: &Options) -> Result<String, String> {
             "build-release" => step_cargo(root, opts, "build-release", &["build", "--release"]),
             "headers" => step_headers(root),
             "metrics" => step_metrics(root),
+            "capability-map" => step_capability_map(root),
             "web-audit" => step_web_audit(root, opts),
             other => Err(format!("internal: no implementation for step {other:?}")),
         };
@@ -324,6 +328,14 @@ fn step_metrics(root: &Path) -> Result<String, String> {
         ));
     }
     Ok("metrics.rs up to date (18 constants)".to_string())
+}
+
+/// The capability map is derived entirely from source, so "up to date" is
+/// simply "regenerate and compare". Regenerating it here (rather than only
+/// checking) means a stale map is fixed by the same run that reports it — the
+/// diff then shows exactly what moved.
+fn step_capability_map(root: &Path) -> Result<String, String> {
+    crate::capability_map::run(root, true)
 }
 
 fn step_web_audit(root: &Path, opts: &Options) -> Result<String, String> {

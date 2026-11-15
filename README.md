@@ -41,10 +41,12 @@ rapier/     vendored rapier3d-f64（独立 workspace）
 ## 构建
 
 ```powershell
-cargo run -p xtask -- verify     # 唯一的验收入口：fmt / clippy / test / release / 生成物 diff / web audit
+cargo run -p xtask -- verify     # 唯一的验收入口：fmt / clippy / test / release / 生成物 / web audit
 ```
 
-`xtask verify` 跑的七步与 CI 一一对应，退出码就是结论；`cargo run -p xtask -- verify --list` 会打印每一步及其命令。单跑某一条时用 `cargo test -p mps-test <名称>` 或 `cargo build --release -p mps-jni`。
+`xtask verify` 跑的八步与 CI 一一对应，退出码就是结论；`cargo run -p xtask -- verify --list` 会打印每一步及其命令。单跑某一条时用 `cargo test -p mps-test <名称>` 或 `cargo build --release -p mps-jni`。
+
+改 C ABI 之前先查 [docs/CAPABILITY_MAP.md](docs/CAPABILITY_MAP.md)：它由 `cargo run -p xtask -- capability-map` 生成，逐模块列出 C ABI 前缀、导览页、镜像测试、JNI 与测试覆盖。
 
 CI 在 Ubuntu、Windows、macOS 上跑同一套默认 features，另加一个 `jni-smoke` job：用真实 JVM 加载 cdylib，跑 `crates/mps-test/java/` 下的 Java fixture。可选的 `anvilkit-bridge`、`relative-force`、`profiler` 默认关闭。
 

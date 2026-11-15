@@ -24,6 +24,7 @@
 | `MPS_ARENA_VERSION` / `COSMOS_ARENA_VERSION` / `ABI_VERSION` | 两侧常量和 workspace 版本锁 | `arena_compat` 与 `version_consistency` |
 | 任何 JNI 方法签名 | `crates/mps-test/java/` 里对应 fixture | 本机没有 JVM 时靠 CI 的 `jni-smoke`；**`verify` 不跑它** |
 | 新增 / 移动 / 删除 `.md` | 拥有它的那份索引里的一行 | `cargo test -p mps-test docs_index_consistency` |
+| 任何 C ABI 入口增删改名 | `docs/CAPABILITY_MAP.md` | `cargo run -p xtask -- capability-map`，或 `verify` 的 `capability-map` 步 |
 
 注意两个头文件里的版本宏现在是 `MPS_ARENA_VERSION`（core）与 `COSMOS_ARENA_VERSION`（cosmos），Rust 侧常量仍叫 `ARENA_VERSION`。这是为了让宿主能同时 include 两份却不触发宏重定义，不要「统一」回去。
 

@@ -31,7 +31,7 @@
 | `mps-web` | bin | Dioxus 0.7 SSR 文档站。`src/metrics.rs` 由 xtask 生成 |
 | `mps-build-common` | `rlib` | `run_cbindgen()`，只给两个 `build.rs` 用 |
 | `mps-bindgen-macro` | proc-macro | `#[java_struct]` / `#[java_enum]` |
-| `xtask` | bin | `verify`（验收入口）、`dump-metrics`、`gen-java` |
+| `xtask` | bin | `verify`（验收入口）、`capability-map`、`dump-metrics`、`gen-java` |
 
 依赖只能沿 `mps-formula → mps-core / mps-cosmos → mps-jni` 走。`mps-cosmos` 不得依赖 `mps-core`。
 
@@ -50,7 +50,7 @@
 
 ## 命令
 
-**开工前先跑一次 `cargo run -p xtask -- verify --list`**，它打印的七步就是 CI 跑的全部步骤。做完再跑：
+**开工前先跑一次 `cargo run -p xtask -- verify --list`**，它打印的八步就是验收入口的全部步骤。做完再跑：
 
 ```text
 cargo run -p xtask -- verify              # 唯一的验收入口，一个退出码
@@ -58,7 +58,7 @@ cargo run -p xtask -- verify --keep-going # 一次看到所有失败步骤
 cargo run -p xtask -- verify --skip test  # 长跑时跳过测试重跑
 ```
 
-七步分别是 `fmt` / `clippy` / `test` / `build-release` / `headers` / `metrics` / `web-audit`，顺序与 `.github/workflows/ci.yml` 一致。`fmt` 步骤**从根 `Cargo.toml` 的 members 现场解析包名**再逐包 `-p` 圈定——不要改回 `cargo fmt --all --check`：新版 rustfmt 会顺着 path 依赖把 vendored `rapier/`、`parry/` 卷进 `--all`，按本仓库的 `rustfmt.toml` 重排 fork 代码，破坏 ADR-0008 的补丁纪律（提交 `52a4b59` 就是在修这个）。`headers` / `metrics` 两步要求重新生成后 `git diff` 为空。
+一共八步：`fmt` / `clippy` / `test` / `build-release` / `headers` / `metrics` / `capability-map` / `web-audit`，对着 `.github/workflows/ci.yml` 的步骤一一实现（`capability-map` 是仓内新增的生成物校验，CI 不跑）。`fmt` 步骤**从根 `Cargo.toml` 的 members 现场解析包名**再逐包 `-p` 圈定——不要改回 `cargo fmt --all --check`：新版 rustfmt 会顺着 path 依赖把 vendored `rapier/`、`parry/` 卷进 `--all`，按本仓库的 `rustfmt.toml` 重排 fork 代码，破坏 ADR-0008 的补丁纪律（提交 `52a4b59` 就是在修这个）。`headers` / `metrics` / `capability-map` 三处生成物都要求与生成器一致。
 
 定位问题时才单跑某一条：
 
@@ -66,7 +66,12 @@ cargo run -p xtask -- verify --skip test  # 长跑时跳过测试重跑
 cargo test -p mps-test <名称>           # 不要无目的地跑完全部
 cargo build --release -p mps-jni        # Java 加载的库
 cargo run -p xtask -- dump-metrics      # 只重生 metrics.rs（verify 里已含）
+cargo run -p xtask -- capability-map    # 只重生 docs/CAPABILITY_MAP.md
 ```
+
+## 先查地图，再动手
+
+[docs/CAPABILITY_MAP.md](docs/CAPABILITY_MAP.md) 是生成物，逐模块列出：C ABI 前缀、入口数、feature 门控数、导览页、镜像测试、JNI 覆盖、测试覆盖，以及哪些入口既没 JNI 绑定也没测试引用。**改任何 C ABI 之前先查它**，不要靠 grep 反推那六处位置。页尾的「改动配方」是这类改动的固定步骤。
 
 CI（`.github/workflows/ci.yml`）在 Ubuntu / Windows / macOS 上跑同一套默认 features，外加 Linux 上的两份头文件 diff、`dump-metrics` diff、`python3 crates/mps-web/scripts/web_audit.py`，以及 `jni-smoke` job——那个 job 用真实 JVM 加载 cdylib 并跑 [crates/mps-test/java/](crates/mps-test/java) 下的 6 个 Java fixture。**改了 JNI 签名就要改 fixture**，Rust 侧测试全绿不代表 CI 会绿。
 

@@ -9,6 +9,7 @@
 //!   `gen-java`       →  scans `#[java_struct]`/`#[java_enum]` annotations and
 //!                        generates Java value classes under the configured output dir.
 
+mod capability_map;
 mod gen_java;
 mod verify;
 
@@ -23,8 +24,9 @@ fn main() -> ExitCode {
     let mut args = std::env::args().skip(1);
     let Some(sub) = args.next() else {
         eprintln!(
-            "xtask: missing subcommand. Expected one of: verify, dump-metrics, gen-java\n\
+            "xtask: missing subcommand. Expected one of: verify, dump-metrics, gen-java, capability-map\n\
              Usage: cargo run -p xtask -- verify [--list | --keep-going | --verbose | --skip <step>]\n\
+             Usage: cargo run -p xtask -- capability-map [--check]\n\
              Usage: cargo run -p xtask -- dump-metrics\n\
              Usage: cargo run -p xtask -- gen-java [output_dir]"
         );
@@ -35,6 +37,18 @@ fn main() -> ExitCode {
 
     match sub.as_str() {
         "verify" => cmd_verify(&workspace_root, args),
+        "capability-map" => {
+            match capability_map::run(&workspace_root, args.any(|a| a == "--check")) {
+                Ok(report) => {
+                    println!("{report}");
+                    ExitCode::from(0)
+                }
+                Err(err) => {
+                    eprintln!("xtask capability-map: {err}");
+                    ExitCode::from(1)
+                }
+            }
+        }
         "dump-metrics" => match dump_metrics(&workspace_root) {
             Ok(report) => {
                 println!("{report}");
@@ -60,7 +74,7 @@ fn main() -> ExitCode {
         }
         other => {
             eprintln!(
-                "xtask: unknown subcommand {other:?}. Expected one of: verify, dump-metrics, gen-java."
+                "xtask: unknown subcommand {other:?}. Expected one of: verify, dump-metrics, gen-java, capability-map."
             );
             ExitCode::from(2)
         }
