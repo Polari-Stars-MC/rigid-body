@@ -1,6 +1,7 @@
 # 体级模拟域与碎裂闭环证据（B1 + B2）
 
 > 采集日期：2026-11-12。复现命令见各节。
+> 决策背景（冻结域 vs region-sleep 的分工、三个 C ABI 入口的语义、成员资格生命周期）见 [adr/0009-per-body-simulation-domains.md](../adr/0009-per-body-simulation-domains.md)；本页只记实测数字和守门测试。
 
 ## 1. B1：冻结域步进开销（domain_freeze_step_cost_ratio）
 

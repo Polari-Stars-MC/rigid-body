@@ -31,7 +31,7 @@
 | `mps-web` | bin | Dioxus 0.7 SSR 文档站。`src/metrics.rs` 由 xtask 生成 |
 | `mps-build-common` | `rlib` | `run_cbindgen()`，只给两个 `build.rs` 用 |
 | `mps-bindgen-macro` | proc-macro | `#[java_struct]` / `#[java_enum]` |
-| `xtask` | bin | `dump-metrics`、`gen-java` |
+| `xtask` | bin | `verify`（验收入口）、`dump-metrics`、`gen-java` |
 
 依赖只能沿 `mps-formula → mps-core / mps-cosmos → mps-jni` 走。`mps-cosmos` 不得依赖 `mps-core`。
 
@@ -50,16 +50,25 @@
 
 ## 命令
 
+**开工前先跑一次 `cargo run -p xtask -- verify --list`**，它打印的七步就是 CI 跑的全部步骤。做完再跑：
+
 ```text
-cargo fmt --all --check
-cargo clippy --all-targets -- -D warnings
-cargo test                              # 默认 features；用例在 mps-test
-cargo test -p mps-test <名称>           # 不要无目的地跑完全部
-cargo build --release -p mps-jni        # Java 加载的库
-cargo run -p xtask -- dump-metrics
+cargo run -p xtask -- verify              # 唯一的验收入口，一个退出码
+cargo run -p xtask -- verify --keep-going # 一次看到所有失败步骤
+cargo run -p xtask -- verify --skip test  # 长跑时跳过测试重跑
 ```
 
-CI（`.github/workflows/ci.yml`）在 Ubuntu / Windows / macOS 上跑 fmt、clippy、`cargo test`、`cargo build --release`，外加 Linux 头文件 diff 和 `python3 crates/mps-web/scripts/web_audit.py`。
+七步分别是 `fmt` / `clippy` / `test` / `build-release` / `headers` / `metrics` / `web-audit`，顺序与 `.github/workflows/ci.yml` 一致。`fmt` 步骤**从根 `Cargo.toml` 的 members 现场解析包名**再逐包 `-p` 圈定——不要改回 `cargo fmt --all --check`：新版 rustfmt 会顺着 path 依赖把 vendored `rapier/`、`parry/` 卷进 `--all`，按本仓库的 `rustfmt.toml` 重排 fork 代码，破坏 ADR-0008 的补丁纪律（提交 `52a4b59` 就是在修这个）。`headers` / `metrics` 两步要求重新生成后 `git diff` 为空。
+
+定位问题时才单跑某一条：
+
+```text
+cargo test -p mps-test <名称>           # 不要无目的地跑完全部
+cargo build --release -p mps-jni        # Java 加载的库
+cargo run -p xtask -- dump-metrics      # 只重生 metrics.rs（verify 里已含）
+```
+
+CI（`.github/workflows/ci.yml`）在 Ubuntu / Windows / macOS 上跑同一套默认 features，外加 Linux 上的两份头文件 diff、`dump-metrics` diff、`python3 crates/mps-web/scripts/web_audit.py`，以及 `jni-smoke` job——那个 job 用真实 JVM 加载 cdylib 并跑 [crates/mps-test/java/](crates/mps-test/java) 下的 6 个 Java fixture。**改了 JNI 签名就要改 fixture**，Rust 侧测试全绿不代表 CI 会绿。
 
 本机 Windows 用 GNU 工具链（`stable-x86_64-pc-windows-gnu`）。MSVC 目标在 `.cargo/config.toml` 里有 rustflags，但本机没有可用的 `link.exe` 时不要切过去。
 
@@ -67,5 +76,6 @@ CI（`.github/workflows/ci.yml`）在 Ubuntu / Windows / macOS 上跑 fmt、clip
 
 - 不要把 `rapier/` 并进本 workspace，也不要改它来迁就上层，除非任务明确是修 vendored fork。
 - 不要手改 `include/*.h`、`metrics.rs`、xtask 生成的 Java。
-- 不要静默 `error_consistency`、`verify_module_mirror`、`verify_metrics_sync`、`arena_compat`、`version_consistency`。
+- 不要静默 `error_consistency`、`verify_module_mirror`、`verify_metrics_sync`、`arena_compat`、`version_consistency`、`verify_ffi_guard`、`docs_index_consistency`。
+- 新增文档时，在拥有它的那份索引里加一行（`docs/README.md` / `docs/adr/README.md` / `docs/evidence/README.md` / `docs/mps-core.md`），不要把文件放进目录就算完——`docs_index_consistency` 会红。
 - 不要把提交信息写成 Conventional Commits。本仓库用日期戳（如 `2026.8.11.20.8`）或一句短描述。

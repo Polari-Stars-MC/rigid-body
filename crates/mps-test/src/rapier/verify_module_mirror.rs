@@ -139,7 +139,7 @@ mod tests {
         //   force_queue_integration— end-to-end arena/force-queue wiring test
         //   performance_matrix     — `#[ignore]`d step benchmark (docs/world-step-benchmarks.md)
         //   sleep_wake             — A3 挖洞唤醒 + 稳定包络（evidence/numeric-drift.md）
-        //   record_replay          — D2 位级录制重演守门（evidence/record-replay.md）
+        //   record_replay          — D2 位级录制重演守门（docs/evidence/numeric-drift.md §6）
         let test_only_extras: std::collections::BTreeSet<String> = [
             "ffi",
             "arena_compat",

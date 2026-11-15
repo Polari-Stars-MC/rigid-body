@@ -48,8 +48,9 @@
 - [aerodynamics.md](mps-core/aerodynamics.md) — `aerodynamics.rs`：气动面/体素网格施力 `aero_*` 入口。
 - [disasters.md](mps-core/disasters.md) — `disasters.rs`：自然灾害（台风/龙卷风/冰雹）场模拟 `disaster_*` 入口。
 - [volcano.md](mps-core/volcano.md) — `volcano.rs`：火山喷发（烟柱流场/加热/火山弹）与刚体渐进熔化 `volcano_*` 入口。
-- [soft_body.md](mps-core/soft_body.md) — `soft_body.rs`：软体 FFI 主模块（骨骼链 + 点质量体 87 个入口、Phase 5f 碰撞代理、蒙皮、撕裂/细分/存档）。
+- [soft_body.md](mps-core/soft_body.md) — `soft_body.rs`：软体 FFI 主模块（骨骼链 + 点质量体 88 个入口、Phase 5f 碰撞代理、蒙皮、撕裂/细分/存档）。
 - [character_body.md](mps-core/character_body.md) — `character_body.rs`：角色体（第三种体，运动学 KCC 驱动，`character_body_*` 入口）。
+- [articulation.md](mps-core/articulation.md) — `articulation.rs`：铰接体（球链 + multibody revolute 关节 + 隐式弹簧伺服，`articulation_body_*` 入口）。
 - [cloth.md](mps-core/cloth.md) — `cloth.rs`：布料体（矩形网格 + 结构/剪切/弯曲三族弹簧，`soft_cloth_*` 入口）。
 - [rope.md](mps-core/rope.md) — `rope.rs`：绳索/缆绳体（单向 cable 约束 + 绞盘，`soft_rope_create` 入口）。
 - [rope_knot.md](mps-core/rope_knot.md) — `rope_knot.rs`：绳结/编织系统（每股一软体 + 股间碰撞代理，`rope_knot_*` 入口）。
@@ -113,6 +114,12 @@
 - [shared-arena-header.md](mps-core/shared-arena-header.md) — `header.rs`：竞技场头部元数据。
 - [shared-arena-holes.md](mps-core/shared-arena-holes.md) — `holes.rs`：空闲槽位管理（holes 链表）。
 - [shared-arena-ring.md](mps-core/shared-arena-ring.md) — `ring.rs`：事件环形缓冲区。
+
+- [registry.md](mps-core/registry.md) — `registry.rs`：全部 per-body 管理器的稳定 id 注册表（`StableIdRegistry`），id 单调不复用。
+- [body_spatial_index.md](mps-core/body_spatial_index.md) — `body_spatial_index.rs`：刚体中心 BVH，只服务区域策略查询，见 [body-spatial-index.md](body-spatial-index.md)。
+- [collision_mode.md](mps-core/collision_mode.md) — `collision_mode.rs`：默认碰撞体策略枚举与选择器，见 [world-collision-mode.md](world-collision-mode.md)。
+- [soft_data.md](mps-core/soft_data.md) — `soft_data.rs`：软体数据结构与自由粒子积分器。
+- [soft_upstream.md](mps-core/soft_upstream.md) — `soft_upstream.rs`：把 mps 软体授权数据镜像到 fork `SoftBody` 上求解。
 
 ## 兼容、桥接与错误
 

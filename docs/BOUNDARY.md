@@ -60,7 +60,7 @@ rapier3d-f64 ← 只有 mps-core 与 mps-cosmos
 - 把 Rapier / Rust 枚举、引用、`Vec`、`String` 放进 ABI。
 - 让 `extern "C"` 函数在 panic 时展开进宿主。每个入口走 `ffi_guard`；根 `profile.release` 保持 `panic = "unwind"`。
 - 手改 `rigid_body.h` / `cosmos.h`。改 Rust 侧可导出项，然后重新构建，提交生成结果。
-- 改 `shared_arena` 已发布常量而不升版本。`ARENA_VERSION` 与 `mps-ffm::ABI_VERSION` 一起动。守门：`arena_compat`、`version_consistency`。
+- 改 `shared_arena` 已发布常量而不升版本。两侧常量（Rust 侧都叫 `ARENA_VERSION`，导出到 C 头文件时是 `MPS_ARENA_VERSION` 与 `COSMOS_ARENA_VERSION`，刻意不同名以免同时 `#include` 时宏重定义）与 `mps-ffm::ABI_VERSION` 一起动。守门：`arena_compat`、`version_consistency`。
 
 `mps-ffm` 当前只承诺三件事：版本号，以及「这份库带 FFM / JNI 探针」。它不是第二套物理 API。
 
@@ -95,12 +95,12 @@ rapier3d-f64 ← 只有 mps-core 与 mps-cosmos
 
 | 文件 | 生成命令 | 可否手改 |
 | --- | --- | --- |
-| `crates/mps-core/include/rigid_body.h` | 构建 `mps-core`（cbindgen） | 否。Linux CI 会 diff |
-| `crates/mps-cosmos/include/cosmos.h` | 构建 `mps-cosmos`（cbindgen） | 否。Linux CI 会 diff |
-| `crates/mps-web/src/metrics.rs` | `cargo run -p xtask -- dump-metrics` | 否。仓内守门 `verify_metrics_sync`（3 个核心计数）+ Linux CI 重新生成后 `git diff`（全部 18 个常量） |
+| `crates/mps-core/include/rigid_body.h` | 构建 `mps-core`（cbindgen） | 否。`xtask verify` 的 `headers` 步 + Linux CI 会 diff |
+| `crates/mps-cosmos/include/cosmos.h` | 构建 `mps-cosmos`（cbindgen） | 否。同上 |
+| `crates/mps-web/src/metrics.rs` | `cargo run -p xtask -- dump-metrics` | 否。仓内守门 `verify_metrics_sync`（3 个核心计数）+ `xtask verify` 的 `metrics` 步（全部 18 个常量） |
 | xtask `gen-java` 输出 | `cargo run -p xtask -- gen-java [dir]` | 否 |
 
-Java 业务源码在仓库外。本仓库的 JNI 符号是契约，Java 声明要跟 C 头文件走，而不是反过来改 Rust 去凑一份未提交的 Java。
+**Java 业务源码在仓库外，但 Java 契约测试在本仓库内。** `crates/mps-test/java/` 有 6 个 fixture（`RapierNative` / `CosmosNative` / `RecordingNative` / `BakerNative` / `EventsNative` / `ReplayViewer`），CI 的 `jni-smoke` job 用真实 JVM 编译并运行前五个。改了 JNI 方法名、参数或返回语义，必须同步 fixture——`xtask verify` **不覆盖**这一层，Rust 测试全绿也不代表 CI 会绿。JNI 符号是契约，Java 声明要跟 C 头文件走，而不是反过来改 Rust 去凑一份未提交的 Java。
 
 ## 数值
 
@@ -114,4 +114,5 @@ Java 业务源码在仓库外。本仓库的 JNI 符号是契约，Java 声明�
 - 根 `README.md` 只保留人能在一屏内看完的介绍。
 - `AGENTS.md` 只保留代理操作约定，不复制源文件导览。
 - `DESIGN.md` / `OPTIMIZATION.md` 只保留被代码引用的章节。不要给它们编新的叙事章节号。
-- 新的不可逆决定写 [adr/](adr/README.md)。新的「已被钉住」的行为写 [evidence/](evidence/README.md)，并指向真实测试或命令。
+- 新的不可逆决定写 [adr/](adr/README.md)，新的「已被钉住」的行为写 [evidence/](evidence/README.md)，并指向真实测试或命令。
+- 新文档必须进索引：`docs/README.md`（专题/集成）、[adr/README.md](adr/README.md)、[evidence/README.md](evidence/README.md) 或 [mps-core.md](mps-core.md) 之一。守门：`docs_index_consistency`。

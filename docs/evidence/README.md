@@ -12,5 +12,10 @@
 | [abi-versions.md](abi-versions.md) | arena ABI 与 FFM 版本一起动 |
 | [world-step.md](world-step.md) | 步进性能矩阵的命令和 CSV |
 | [numeric-domains.md](numeric-domains.md) | 已迁移的 checked 公式 |
+| [numeric-drift.md](numeric-drift.md) | f64 长时积分漂移、挖洞唤醒、长期轨道、Plummer 软化、双世界一致性、录制重演位级守门 |
+| [convergence.md](convergence.md) | 自适应子步收敛性、天体自转、central_body 切换 SOI 契约 |
+| [performance-domains-fracture.md](performance-domains-fracture.md) | 冻结域步进开销（B1）与接触力→自动碎裂闭环（B2） |
+| [real-physics-validation.md](real-physics-validation.md) | 与解析解对照的真实物理系列：终端速度、摩擦/恢复系数能量学、Hohmann 闭环、颗粒休止角 |
+| [engine-compare.md](engine-compare.md) | 与 Jolt 的同负载性能对比协议（含对齐要求） |
 
 CI 本身（fmt、clippy、`cargo test`、release 构建、Linux 上的 `rigid_body.h` 与 `cosmos.h` diff、`web_audit.py`）记在 `.github/workflows/ci.yml`，不在这里重复步骤。

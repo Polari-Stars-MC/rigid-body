@@ -147,6 +147,10 @@ pub mod rapier {
 // mps-ffm 探针库契约守门（公式层 JNI/FFM 兼容性）——不属于 rapier 镜像树。
 pub mod ffm_probe;
 
+// 文档索引一致性守门（docs/ 可达性、相对链接、ADR 编号、代码注释里的
+// docs 指针）——不属于 rapier 镜像树。
+pub mod docs_index_consistency;
+
 // 每个 extern "C" 必须套 ffi_guard/ffi_scalar（AGENTS.md 硬性规定）——
 // 跨整个 rapier 树 + cosmos ffi 的横向审计，不属于镜像树。
 pub mod verify_ffi_guard;

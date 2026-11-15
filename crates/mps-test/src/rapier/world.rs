@@ -194,7 +194,8 @@ mod tests {
     }
 
     /// B1 性能证据：2000 体世界，90% 冻结在 inactive 域，步进耗时对比
-    /// 全活动基线。evidence/performance.md 附表数据源（ADR 承诺 <40% 基线）。
+    /// 全活动基线。docs/evidence/performance-domains-fracture.md §1 的数据源
+    /// （ADR-0009 承诺冻结开销 < 全活动基线的 40%）。
     #[test]
     #[ignore = "performance evidence; run with --ignored --release"]
     fn domain_freeze_step_cost_ratio() {

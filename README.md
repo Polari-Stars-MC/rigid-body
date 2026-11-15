@@ -41,12 +41,11 @@ rapier/     vendored rapier3d-f64（独立 workspace）
 ## 构建
 
 ```powershell
-cargo fmt --all --check
-cargo clippy --all-targets -- -D warnings
-cargo test
-cargo build --release -p mps-jni
+cargo run -p xtask -- verify     # 唯一的验收入口：fmt / clippy / test / release / 生成物 diff / web audit
 ```
 
-CI 在 Ubuntu、Windows、macOS 上跑同一套默认 features。可选的 `anvilkit-bridge`、`relative-force`、`profiler` 默认关闭。
+`xtask verify` 跑的七步与 CI 一一对应，退出码就是结论；`cargo run -p xtask -- verify --list` 会打印每一步及其命令。单跑某一条时用 `cargo test -p mps-test <名称>` 或 `cargo build --release -p mps-jni`。
+
+CI 在 Ubuntu、Windows、macOS 上跑同一套默认 features，另加一个 `jni-smoke` job：用真实 JVM 加载 cdylib，跑 `crates/mps-test/java/` 下的 Java fixture。可选的 `anvilkit-bridge`、`relative-force`、`profiler` 默认关闭。
 
 在线文档由 `crates/mps-web` 生成，发布到 <https://Polari-Stars-MC.github.io/rigid-body/>。站点基数来自 GitHub Pages 的 `base_path`，fork 不需要改硬编码路径。

@@ -1,11 +1,16 @@
 //! Workspace automation helper (OPTIMIZATION.md §N3).
 //!
 //! Subcommands:
+//!   `verify`        →  runs the whole acceptance gate: fmt (scoped to the 10
+//!                      workspace members), clippy, test, release build, the
+//!                      two generated-artifact diffs, and the web audit. One
+//!                      command, one exit code — this is what "done" means.
 //!   `dump-metrics`  →  regenerates `crates/mps-web/src/metrics.rs`
 //!   `gen-java`       →  scans `#[java_struct]`/`#[java_enum]` annotations and
 //!                        generates Java value classes under the configured output dir.
 
 mod gen_java;
+mod verify;
 
 use std::path::Path;
 use std::process::ExitCode;
@@ -18,7 +23,8 @@ fn main() -> ExitCode {
     let mut args = std::env::args().skip(1);
     let Some(sub) = args.next() else {
         eprintln!(
-            "xtask: missing subcommand. Expected one of: dump-metrics, gen-java\n\
+            "xtask: missing subcommand. Expected one of: verify, dump-metrics, gen-java\n\
+             Usage: cargo run -p xtask -- verify [--list | --keep-going | --verbose | --skip <step>]\n\
              Usage: cargo run -p xtask -- dump-metrics\n\
              Usage: cargo run -p xtask -- gen-java [output_dir]"
         );
@@ -28,6 +34,7 @@ fn main() -> ExitCode {
     let workspace_root = find_workspace_root().expect("workspace root");
 
     match sub.as_str() {
+        "verify" => cmd_verify(&workspace_root, args),
         "dump-metrics" => match dump_metrics(&workspace_root) {
             Ok(report) => {
                 println!("{report}");
@@ -53,11 +60,72 @@ fn main() -> ExitCode {
         }
         other => {
             eprintln!(
-                "xtask: unknown subcommand {other:?}. Expected one of: dump-metrics, gen-java."
+                "xtask: unknown subcommand {other:?}. Expected one of: verify, dump-metrics, gen-java."
             );
             ExitCode::from(2)
         }
     }
+}
+
+/// Parse `verify` flags and run the acceptance gate.
+///
+/// Exit codes: 2 = bad usage, 1 = at least one step failed, 0 = gate is green.
+fn cmd_verify(workspace_root: &Path, mut args: impl Iterator<Item = String>) -> ExitCode {
+    let mut opts = verify::Options::default();
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--list" | "--dry-run" | "-n" => {
+                println!("{}", verify::plan());
+                return ExitCode::from(0);
+            }
+            "--keep-going" | "-k" => opts.keep_going = true,
+            "--verbose" | "-v" => opts.verbose = true,
+            "--skip" => {
+                let Some(list) = args.next() else {
+                    eprintln!("xtask verify: --skip needs a comma-separated step list");
+                    return ExitCode::from(2);
+                };
+                if let Err(code) = parse_list(&list, &mut opts) {
+                    return code;
+                }
+            }
+            other if other.starts_with("--skip=") => {
+                let list = &other["--skip=".len()..];
+                if let Err(code) = parse_list(list, &mut opts) {
+                    return code;
+                }
+            }
+            other => {
+                eprintln!("xtask verify: unknown flag {other:?}. Try --list.");
+                return ExitCode::from(2);
+            }
+        }
+    }
+
+    match verify::run(workspace_root, &opts) {
+        Ok(report) => {
+            println!("{report}");
+            ExitCode::from(0)
+        }
+        Err(report) => {
+            println!("{report}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+fn parse_list(list: &str, opts: &mut verify::Options) -> Result<(), ExitCode> {
+    for step in list.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+        if !verify::ALL_STEPS.contains(&step) {
+            eprintln!(
+                "xtask verify: unknown step {step:?} in --skip. Known steps: {}",
+                verify::ALL_STEPS.join(", ")
+            );
+            return Err(ExitCode::from(2));
+        }
+        opts.skip.push(step.to_string());
+    }
+    Ok(())
 }
 
 /// Locate the workspace root by walking up from CARGO_MANIFEST_DIR (which
@@ -442,8 +510,8 @@ fn dump_metrics(workspace_root: &Path) -> Result<String, String> {
          pub const FORMULA_MODULE_COUNT: &str = \"{formula_modules}\";\n\
          /// Number of `CelestialBodyId` variants (built-in celestial bodies).\n\
          pub const CELESTIAL_COUNT: &str = \"{celestial}\";\n\
-         /// Number of `world_set_*gravity*` C-ABI setters in mps-core (one per
-         /// selectable gravity model). Counted from `crates/mps-core/src/rapier`;
+         /// Number of `world_set_*gravity*` C-ABI setters in mps-core (one per\n\
+         /// selectable gravity model). Counted from `crates/mps-core/src/rapier`;\n\
          /// there is no `mps-core/src/gravity` directory.\n\
          pub const GRAVITY_MODEL_COUNT: &str = \"{gravity_models}\";\n\
          /// Number of `OrbitIntegration` variants (integrator selection).\n\

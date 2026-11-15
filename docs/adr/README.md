@@ -14,5 +14,6 @@
 | [0006](0006-generated-artifacts.md) | 头文件与 metrics 只由工具生成 | 接受 |
 | [0007](0007-vendored-rapier-workspace.md) | vendored rapier 保持独立 workspace | 接受 |
 | [0008](0008-rapier-fork-sync-policy.md) | rapier fork 固定 python-v tag 基线，同步走独立变基分支 | 接受 |
+| [0009](0009-per-body-simulation-domains.md) | 体级模拟域：边界外用 `set_enabled` 冻结，region 语义是 sleep | 接受 |
 
 仓库根的 [DESIGN.md](../../DESIGN.md) 和 [OPTIMIZATION.md](../../OPTIMIZATION.md) 是被源码注释引用的章节索引，不是 ADR 的前身。它们的 `§` 编号继续留在原地。

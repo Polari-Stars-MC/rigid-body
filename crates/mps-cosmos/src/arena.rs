@@ -63,7 +63,9 @@ pub const MAX_ARENA_COMMANDS: u32 = 1_000_000;
 pub const MAX_ARENA_TOTAL_BYTES: usize = 256 * 1024 * 1024;
 
 // Header offset table (bytes) — stable ABI, mirrored by the Java side and the
-// round-trip tests in `mps-test`.  See `docs/cosmos-arena.md` for the full map.
+// round-trip tests in `mps-test`.  The full map (including the placeholder
+// collider/event fields this arena deliberately keeps at zero) is written down
+// in `docs/cosmos-arena.md`.
 pub const OFF_BODY_COUNT: usize = 32; // u32: bodies flushed last step
 pub const OFF_CMD_WRITE: usize = 44; // u32: SPSC ring write index (Java → Rust)
 pub const OFF_BODY_SLOT_BASE: usize = HEADER_SIZE; // body slots start here
