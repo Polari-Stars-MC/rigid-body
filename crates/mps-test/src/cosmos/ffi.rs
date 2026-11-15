@@ -45,11 +45,12 @@ fn empty_world() -> CosmosWorld {
     })
 }
 
-/// 还原 `pack_handle = (idx << 32) | generation`（与 mps-cosmos `ffi.rs::unpack_handle`
-/// 完全相同的位运算）—— 测试侧独立写一份避免直接依赖 mps_cosmos::ffi 内部 fn。
+/// 还原 `pack_handle = ((idx << 32) | generation) + 1`（与 mps-cosmos `ffi.rs::unpack_handle`
+/// 完全相同的位运算，含 +1 偏移）—— 测试侧独立写一份避免直接依赖 mps_cosmos::ffi 内部 fn。
 fn unpack_handle(packed: u64) -> (u32, u32) {
-    let idx = ((packed >> 32) & 0xFFFF_FFFF) as u32;
-    let generation = (packed & 0xFFFF_FFFF) as u32;
+    let raw = packed.checked_sub(1).unwrap_or(u64::MAX);
+    let idx = ((raw >> 32) & 0xFFFF_FFFF) as u32;
+    let generation = (raw & 0xFFFF_FFFF) as u32;
     (idx, generation)
 }
 
@@ -287,7 +288,8 @@ fn snapshot_round_trip_against_per_body_translation_out() {
     }; 2];
     let pack = |h: rapier3d::prelude::RigidBodyHandle| -> u64 {
         let (idx, generation) = h.into_raw_parts();
-        ((idx as u64) << 32) | (generation as u64)
+        // 与 `mps_cosmos::ffi::pack_handle` 一致：结果 +1，0 只留给失败/无效
+        (((idx as u64) << 32) | (generation as u64)).wrapping_add(1)
     };
     // FFI 签名是 `out: *mut Vec3`——这里直接传裸指针，C-ABI 入口在 panic=abort
     // 防护下不会 UB（`world` 也是 `*const CosmosWorld`，Rust 引用强转裸指针对齐）。

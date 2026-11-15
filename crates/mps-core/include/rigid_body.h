@@ -99,6 +99,8 @@
  */
 #define G 6.67430e-11
 
+#define MAGIC 1414745680
+
 /**
  * Magic number identifying a valid arena: "MPS_AREN"
  */
@@ -162,6 +164,14 @@
  * and `compute_body_effective_forces` summation as gravity/thrust (Phase 2).
  */
 #define SOFT_SPRING_CUSTOM_ID 20546
+
+/**
+ * Minecraft 维度允许的最大高度（4064 格 = 254 个 section）。
+ * 地形体素网格是 16 × 世界高度 × 16，格子上限按世界最高取，不再按老版本的 256 格卡。
+ */
+#define MC_MAX_WORLD_HEIGHT 4064
+
+#define MAX_VOXEL_CELLS ((16 * MC_MAX_WORLD_HEIGHT) * 16)
 
 /**
  * Aggregation policy applied to per-line accelerations after the
@@ -315,6 +325,8 @@ typedef struct ColliderBuilderHandle ColliderBuilderHandle;
 typedef struct ColliderMemHandle ColliderMemHandle;
 
 typedef struct ForceQueueHeader ForceQueueHeader;
+
+typedef struct GenericJointBuilderHandle GenericJointBuilderHandle;
 
 typedef struct JointBuilderHandle JointBuilderHandle;
 
@@ -3356,6 +3368,50 @@ uint8_t collider_set_friction_flag(struct WorldHandle *world,
                                    double friction);
 
 /**
+ * Set the rolling-resistance coefficient of a collider.
+ *
+ * Rolling resistance opposes *rolling* — rotation about an axis lying in the
+ * contact tangent plane — not sliding. Coulomb friction already stops slipping;
+ * a ball that rolls without slipping has zero slip velocity, so without this
+ * coefficient it rolls forever. Typical values: ~0.001 steel-on-steel,
+ * ~0.01-0.03 tire-on-asphalt. `0.0` disables the constraint (default), which
+ * keeps the solver on its pre-existing path.
+ *
+ * The resisting torque per step is bounded by `μ_r · N · r_eff`, where `N` is
+ * the accumulated normal impulse of the contact manifold.
+ *
+ * # Safety
+ *
+ * `world` must be a valid pointer returned by `world_create` and not yet destroyed.
+ */
+struct Bool collider_set_rolling_resistance(struct WorldHandle *world,
+                                            ColliderHandleRaw handle,
+                                            double coefficient);
+
+/**
+ * `u8`-returning variant of `collider_set_rolling_resistance`.
+ *
+ * # Safety
+ *
+ * Same contract as `collider_set_rolling_resistance`.
+ */
+uint8_t collider_set_rolling_resistance_flag(struct WorldHandle *world,
+                                             ColliderHandleRaw handle,
+                                             double coefficient);
+
+/**
+ * Read the rolling-resistance coefficient of a collider.
+ *
+ * Returns `0.0` for an unknown collider or a null world, and sets
+ * `ERR_NOT_FOUND` / `ERR_NULL_POINTER` accordingly.
+ *
+ * # Safety
+ *
+ * `world` must be a valid pointer returned by `world_create` and not yet destroyed.
+ */
+double collider_get_rolling_resistance(const struct WorldHandle *world, ColliderHandleRaw handle);
+
+/**
  * # Safety
  *
  * `world` must be a valid pointer returned by `world_create` and not yet destroyed.
@@ -6373,6 +6429,143 @@ ImpulseJointHandleRaw world_insert_impulse_joint(struct WorldHandle *world,
 struct Bool world_remove_impulse_joint(struct WorldHandle *world,
                                        ImpulseJointHandleRaw handle,
                                        struct Bool wake_up);
+
+/**
+ * Create a Rapier GenericJoint with `locked` as a JointAxesMask bitmask.
+ */
+struct GenericJointBuilderHandle *generic_joint_builder_create(uint64_t locked);
+
+void generic_joint_builder_destroy(struct GenericJointBuilderHandle *builder);
+
+void generic_joint_builder_set_contacts_enabled(struct GenericJointBuilderHandle *builder,
+                                                struct Bool enabled);
+
+void generic_joint_builder_set_local_anchor1(struct GenericJointBuilderHandle *builder,
+                                             struct Vec3 anchor);
+
+void generic_joint_builder_set_local_anchor2(struct GenericJointBuilderHandle *builder,
+                                             struct Vec3 anchor);
+
+void generic_joint_builder_set_limits(struct GenericJointBuilderHandle *builder,
+                                      uint32_t axis,
+                                      double min,
+                                      double max);
+
+/**
+ * ForceBased position motor with stiffness/damping, plus optional max force
+ * (call `generic_joint_builder_set_motor_max_force` afterwards).
+ */
+void generic_joint_builder_set_motor_position(struct GenericJointBuilderHandle *builder,
+                                              uint32_t axis,
+                                              double target_pos,
+                                              double stiffness,
+                                              double damping);
+
+void generic_joint_builder_set_motor_max_force(struct GenericJointBuilderHandle *builder,
+                                               uint32_t axis,
+                                               double max_force);
+
+ImpulseJointHandleRaw world_insert_generic_joint(struct WorldHandle *world,
+                                                 RigidBodyHandleRaw body1,
+                                                 RigidBodyHandleRaw body2,
+                                                 struct GenericJointBuilderHandle *builder,
+                                                 struct Bool wake_up);
+
+/**
+ * Read one joint-space coordinate (rad/m) of an impulse joint.
+ */
+struct Bool world_joint_axis_state(struct WorldHandle *world,
+                                   ImpulseJointHandleRaw joint,
+                                   uint32_t axis,
+                                   double *out_angle);
+
+/**
+ * Update a ForceBased position motor at runtime.
+ */
+struct Bool world_joint_set_motor(struct WorldHandle *world,
+                                  ImpulseJointHandleRaw joint,
+                                  uint32_t axis,
+                                  double target,
+                                  double stiffness,
+                                  double damping,
+                                  double max_force);
+
+/**
+ * Batch update ForceBased position motors: one call for many (joint, axis).
+ */
+struct Bool world_batch_set_motor(struct WorldHandle *world,
+                                  uint32_t count,
+                                  const uint64_t *joints,
+                                  const uint32_t *axes,
+                                  const double *targets,
+                                  const double *stiffness,
+                                  const double *damping,
+                                  const double *max_forces);
+
+/**
+ * Batch read joint-space coordinates (rad/m) for many (joint, axis) pairs.
+ */
+struct Bool world_batch_joint_axis_state(const struct WorldHandle *world,
+                                         uint32_t count,
+                                         const uint64_t *joints,
+                                         const uint32_t *axes,
+                                         double *out);
+
+/**
+ * Snap a joint axis to a target angle, but never by more than `max_step` in one call.
+ *
+ * This is the force-aware version of [`world_joint_step_to`]. The uncapped call is
+ * infinitely strong: it rewrites the subtree pose, so no external load can make the
+ * joint yield and the work that load does is discarded - the body can hold or push
+ * what no real motor could. Here the per-call movement is bounded, which restores the
+ * usual trade-off: small targets are reached at once (no lag, no ringing), large ones
+ * are approached at the rate the motor could sustain, and a large external force can
+ * actually push the joint away from its target.
+ *
+ * Returns TRUE when the joint was found.
+ */
+struct Bool world_joint_step_to_capped(struct WorldHandle *world,
+                                       ImpulseJointHandleRaw joint,
+                                       uint32_t axis,
+                                       double target,
+                                       double max_step);
+
+/**
+ * 用 multibody joint 连接两个刚体（解运动方程那套），返回 handle；`u64::MAX` = 失败。
+ *
+ * # Safety
+ * `world` / `builder` 必须是有效指针，调用后 builder 所有权转移给本函数。
+ */
+uint64_t world_insert_multibody_joint(struct WorldHandle *world,
+                                      RigidBodyHandleRaw body1,
+                                      RigidBodyHandleRaw body2,
+                                      struct JointBuilderHandle *builder,
+                                      struct Bool wake_up);
+
+/**
+ * 设置 multibody joint 的弹簧马达（目标角度 + 刚度）。
+ */
+struct Bool world_multibody_joint_set_motor(struct WorldHandle *world,
+                                            uint64_t handle,
+                                            uint32_t axis,
+                                            double target,
+                                            double stiffness);
+
+/**
+ * 移除 multibody joint。
+ */
+struct Bool world_remove_multibody_joint(struct WorldHandle *world,
+                                         uint64_t handle,
+                                         struct Bool wake_up);
+
+/**
+ * 由 Java 侧保留内存里的快照直接建碰撞体构建器（不挂刚体）。
+ *
+ * # Safety
+ *
+ * `data` 必须指向至少 `len` 个可读字节，且在一次调用期间保持有效。
+ */
+struct ColliderBuilderHandle *terrain_collider_builder_create(const uint8_t *data, uintptr_t len);
 
 /**
  * Computes the Lennard-Jones potential at `distance` for well depth `epsilon`
@@ -11541,6 +11734,23 @@ int32_t world_get_rigid_body_set_size(const struct WorldHandle *world);
  * `world` must be a valid world pointer (or null).
  */
 int32_t world_get_collider_set_size(const struct WorldHandle *world);
+
+/**
+ * Set contact solver parameters used by Rapier's contact pipeline.
+ */
+struct Bool world_set_contact_parameters(struct WorldHandle *world, uint32_t internal_pgs);
+
+/**
+ * Apply the original rapier 0.22 contact style onto the fork: both dynamic and
+ * static contacts share one natural frequency/damping ratio, warm-starts joints,
+ * and uses the legacy normalized error/prediction distances.
+ */
+struct Bool world_set_legacy_contact_style(struct WorldHandle *world,
+                                           double natural_frequency,
+                                           double damping_ratio,
+                                           struct Bool warmstart_joints,
+                                           double allowed_linear_error,
+                                           double prediction_distance);
 
 /**
  * Write the world gravity into `out_gravity`.

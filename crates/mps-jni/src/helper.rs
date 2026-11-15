@@ -97,6 +97,7 @@ pub fn jdoublearray_to_array(env: &JNIEnv, data: jdoubleArray) -> Option<Vec<f64
 /// here is the only place the real allocation size is known: a Java caller that
 /// passes `box_count` larger than `box_data.length / 6` would otherwise make
 /// Rust read past the end of the copied `Vec`.
+#[allow(dead_code)] // 上游新 helper；当前 JNI 面走 raw pointer，先保留待移植。
 pub fn jdoublearray_to_array_exact(
     env: &JNIEnv,
     data: jdoubleArray,
@@ -112,6 +113,7 @@ pub fn jdoublearray_to_array_exact(
 ///
 /// See [`jdoublearray_to_array_exact`] for why this has to be checked before
 /// the pointer is handed to the C ABI.
+#[allow(dead_code)] // 上游新 helper；当前 JNI 面走 raw pointer，先保留待移植。
 pub fn jbytearray_to_array_exact(
     env: &JNIEnv,
     data: jbyteArray,
@@ -127,6 +129,7 @@ pub fn jbytearray_to_array_exact(
 ///
 /// Rounded up to whole pages in the message so a 128³ voxel volume reports
 /// "16777216 bytes" rather than an opaque element count.
+#[allow(dead_code)] // 上游新 helper；当前 JNI 面走 raw pointer，先保留待移植。
 fn check_len(actual: usize, needed: usize, what: &'static str) -> Option<()> {
     if actual < needed {
         crate::er::set_error(
@@ -139,6 +142,7 @@ fn check_len(actual: usize, needed: usize, what: &'static str) -> Option<()> {
 }
 
 /// `size_x * size_y * size_z` with overflow detection (voxel volumes).
+#[allow(dead_code)] // 上游新 helper；当前 JNI 面走 raw pointer，先保留待移植。
 pub fn voxel_len(size_x: u32, size_y: u32, size_z: u32) -> Option<usize> {
     (size_x as usize)
         .checked_mul(size_y as usize)

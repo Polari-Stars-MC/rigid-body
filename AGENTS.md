@@ -25,7 +25,7 @@
 | `mps-formula` | `rlib` | 纯公式。禁止 Rapier、`WorldHandle`、共享 arena |
 | `mps-core` | `cdylib` + `rlib` | 物理世界、体家族、查询、C ABI。头文件 `include/rigid_body.h` |
 | `mps-cosmos` | `rlib` | 独立太空世界。只用 `mps-formula`，不进 `mps-core` 的世界。头文件 `include/cosmos.h` |
-| `mps-jni` | `cdylib` + `rlib`，库名 `mps_rigid_body` | Java 实际加载的库 |
+| `mps-jni` | `cdylib` + `rlib`，库名 `mps`（产物 `mps.dll` / `libmps.so` / `libmps.dylib`） | Java 实际加载的库 |
 | `mps-ffm` | `cdylib` + `rlib` | ABI 版本探针（`abi_version` / `abi_supports_*`） |
 | `mps-test` | lib（测试） | 全部集成测试。源 crate 里不放 `#[cfg(test)]` |
 | `mps-web` | bin | Dioxus 0.7 SSR 文档站。`src/metrics.rs` 由 xtask 生成 |

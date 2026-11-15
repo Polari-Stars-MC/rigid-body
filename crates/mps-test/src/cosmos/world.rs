@@ -303,7 +303,7 @@ fn step_reports_skipped_reasons() {
         world.step(f64::INFINITY),
         StepResult::Skipped(StepSkipReason::NonFinite)
     );
-    // 硬上限：超过 30s 拒。MAX_STEP_DT(10s) 与硬上限(30s) 之间会走子步。
+    // 无硬上限了：任意正 dt 都推进；超过 MAX_STEP_DT(10s) 走子步。
     assert_eq!(
         world.step(11.0),
         StepResult::Substepped {
@@ -313,7 +313,10 @@ fn step_reports_skipped_reasons() {
     );
     assert_eq!(
         world.step(31.0),
-        StepResult::Skipped(StepSkipReason::TooLarge)
+        StepResult::Substepped {
+            substeps: 4,
+            sub_dt: 7.75
+        }
     );
     assert_eq!(world.step(10.0), StepResult::Stepped(10.0));
 
@@ -360,10 +363,13 @@ fn step_substeps_oversized_dt_rapier_force() {
     let x = world.body_translation(h).unwrap().x;
     assert!((x - 25.0).abs() < 1e-6, "25s 自由漂移应 ≈ 25m，实际 {x}");
 
-    // 超过硬上限 30s → TooLarge。
+    // 大 dt 也照样推进（不再拒），只是拆更多子步。
     assert_eq!(
         world.step(31.0),
-        StepResult::Skipped(StepSkipReason::TooLarge)
+        StepResult::Substepped {
+            substeps: 4,
+            sub_dt: 7.75
+        }
     );
 }
 
@@ -379,7 +385,8 @@ fn step_n_validates_and_batches() {
         world.step_n(f64::NAN, 10).unwrap_err(),
         StepSkipReason::NonFinite
     );
-    assert_eq!(world.step_n(31.0, 1).unwrap_err(), StepSkipReason::TooLarge);
+    // 大 dt 不再被拒（原来 >30s → TooLarge）
+    assert!(world.step_n(31.0, 1).is_ok());
 
     let h = world.insert_body(satellite_builder(
         1.0,
@@ -439,10 +446,13 @@ fn step_substep_boundary_values() {
         }
     );
 
-    // dt 略超硬上限：f64 下 30.0+EPSILON 仍舍入回 30.0，用 30.0001 验证拒。
+    // 大 dt 不再被拒：30.0001 拆 4 子步。
     assert_eq!(
         world.step(30.0001),
-        StepResult::Skipped(StepSkipReason::TooLarge)
+        StepResult::Substepped {
+            substeps: 4,
+            sub_dt: 7.500025
+        }
     );
 }
 

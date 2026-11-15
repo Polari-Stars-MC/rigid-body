@@ -1102,9 +1102,6 @@ impl CosmosWorld {
         if dt <= 0.0 {
             return StepResult::Skipped(StepSkipReason::NonPositive);
         }
-        if dt > 30.0 {
-            return StepResult::Skipped(StepSkipReason::TooLarge);
-        }
 
         // --- Arena: drain Java commands (Java→Rust zero-copy channel) ---
         // 在物理推进之前把 Java 写入命令环的命令应用到刚体；推进结束后 flush
@@ -1210,6 +1207,18 @@ impl CosmosWorld {
         self.radio.is_some()
     }
 
+    /// 设置无线电波速（m/s）。Java 建完世界调一次；没启用 radio 时忽略。
+    pub fn radio_set_wave_speed(&mut self, speed: f64) {
+        if let Some(radio) = self.radio.as_mut() {
+            radio.set_wave_speed(speed);
+        }
+    }
+
+    /// 当前波速（m/s）；没启用 radio 返回 0。
+    pub fn radio_wave_speed(&self) -> f64 {
+        self.radio.as_ref().map_or(0.0, |radio| radio.wave_speed())
+    }
+
     /// 注册一个反射天体（行星/恒星等，按刚体句柄 + 半径）。
     /// 返回 false 表示尚未启用 radio 或句柄无效。
     pub fn radio_add_reflector(&mut self, handle: RigidBodyHandle, radius: f64) -> bool {
@@ -1293,9 +1302,6 @@ impl CosmosWorld {
         }
         if dt <= 0.0 {
             return Err(StepSkipReason::NonPositive);
-        }
-        if dt > 30.0 {
-            return Err(StepSkipReason::TooLarge);
         }
         for _ in 0..n {
             // step 内部对合法 dt 不会再返回 Skipped，这里丢弃每步的 StepResult。
@@ -2069,7 +2075,14 @@ impl CosmosWorld {
                     }
                     return;
                 };
-                let new_gm = gm_from_mass(b.mass());
+                // fixed 刚体的 `mass()` 恒为 0（rapier 对被固定体的定义），若拿它覆盖注册时
+                // 传进来的 gm，"固定体当引力源中心"（恒星）的引力会被清零 → 行星不受力不公转。
+                // 因此只有刚体真的带质量时才刷新 gm，否则保留注册值。
+                let mass = b.mass();
+                if mass <= 0.0 {
+                    return;
+                }
+                let new_gm = gm_from_mass(mass);
                 // 不规则源：按新质量/原 gm 比例缩放每个 MassPoint.gm（保持几何结构
                 // 不变、只是质量跟着刚体走）。
                 if !s.points.is_empty() && s.gm > 0.0 {

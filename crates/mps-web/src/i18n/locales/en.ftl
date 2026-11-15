@@ -512,8 +512,8 @@ jni-arena-title = Zero-copy Arena bridge
 jni-arena-lead = arenaAsDirectByteBuffer uses NewDirectByteBuffer (a standard JNI API since Java 1.4) to expose the native Arena memory directly as a java.nio.ByteBuffer.
 jni-arena-body = The Java side reads/writes purely through DoubleBuffer with no JNI upcalls; the per-frame native→jdoubleArray copy disappears, and the hot path barely sees JNI scheduling.
 jni-deploy-title = Deployment
-jni-deploy-lib = The cargo build --release -p mps-jni product mps_rigid_body.dll goes into src/main/resources/natives/.
-jni-deploy-load = On the Java side, System.load("mps_rigid_body") per architecture; on failure UnsatisfiedLinkError will carry the offending symbol name.
+jni-deploy-lib = The cargo build --release -p mps-jni product mps.dll goes into src/main/resources/natives/.
+jni-deploy-load = On the Java side, System.load("mps") per architecture; on failure UnsatisfiedLinkError will carry the offending symbol name.
 jni-deploy-version = ABI is negotiated via abiVersion(); mps-web self-reports v{ $version }, any runtime mismatch should cause the caller to abort.
 # ---- Debug replay page ----
 nav-debug-replay = Debug Replay

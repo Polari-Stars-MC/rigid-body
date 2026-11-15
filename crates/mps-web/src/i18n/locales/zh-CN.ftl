@@ -512,8 +512,8 @@ jni-arena-title = 零拷贝 Arena 桥
 jni-arena-lead = arenaAsDirectByteBuffer 用 NewDirectByteBuffer（Java 1.4 起的标准 JNI API）把原生 Arena 内存直接暴露成 java.nio.ByteBuffer。
 jni-arena-body = Java 侧纯用 DoubleBuffer 读写，不再走 JNI upcall；per-frame 的 native→jdoubleArray 复制消失，热路径里几乎看不见 JNI 调度。
 jni-deploy-title = 部署
-jni-deploy-lib = cargo build --release -p mps-jni 产物 mps_rigid_body.dll 放进 src/main/resources/natives/。
-jni-deploy-load = Java 端按架构 System.load("mps_rigid_body")，缺失时 UnsatisfiedLinkError 会带出错的符号名。
+jni-deploy-lib = cargo build --release -p mps-jni 产物 mps.dll 放进 src/main/resources/natives/。
+jni-deploy-load = Java 端按架构 System.load("mps")，缺失时 UnsatisfiedLinkError 会带出错的符号名。
 jni-deploy-version = ABI 通过 abiVersion() 商谈；当前 mps-web 自报 v{ $version }，运行时不匹配应由调用方主动 abort。
 # ---- Debug replay page ----
 nav-debug-replay = 调试回放

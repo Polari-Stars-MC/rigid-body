@@ -251,18 +251,18 @@ DoubleBuffer db = new DirectByteBuffer(blob, slots * 8L)
 // 逐帧解码（13 lanes: pos3 + quat4 + linvel3 + angvel3）
 int frameCount = (int) db.get(0);
 int cursor = 2;                          // 跳过 [frame_count, dropped]
-for (int f = 0; f < frameCount; f++) {
+for (int f = 0; f < frameCount; f++) {{
     double magic = db.get(cursor++);     // MPSDR01 位型，可校验
     int bodies    = (int) db.get(cursor++);
     double dt     = db.get(cursor++);
-    for (int b = 0; b < bodies; b++) {
+    for (int b = 0; b < bodies; b++) {{
         long handle = Double.doubleToRawLongBits(db.get(cursor++));
         double x = db.get(cursor++), y = db.get(cursor++), z = db.get(cursor++);
         // quat(i,j,k,w) 在 lanes 3..7 —— 渲染时只需 pose 的话可跳过
         cursor += 10;                    // quat4 + linvel3 + angvel3
         render(handle, x, y, z);         // 正交投影到 Canvas，逐帧绘制
-    }
-}"#
+    }}
+}}"#
                 } }
             }
             p { class: "p-muted", { t!("replay-java-note") } }

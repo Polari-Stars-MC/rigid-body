@@ -138,7 +138,8 @@ mod tests {
         //                            production side
         //   force_queue_integration— end-to-end arena/force-queue wiring test
         //   performance_matrix     — `#[ignore]`d step benchmark (docs/world-step-benchmarks.md)
-        //   sleep_wake             — A3 挖洞唤醒 + 稳定包络（evidence/numeric-drift.md）
+        //   sleep_wake             — A3 挖洞唤醒 + 稳定包络（evidence/numeric-drift.md）；
+        //                            无可镜像的 `core::rapier::sleep_wake` 模块
         //   record_replay          — D2 位级录制重演守门（docs/evidence/numeric-drift.md §6）
         let test_only_extras: std::collections::BTreeSet<String> = [
             "ffi",
@@ -259,27 +260,30 @@ mod tests {
             .filter(|n| *n != "ffi" && !test_cosmos.contains_key(*n))
             .cloned()
             .collect();
+        // Test-only cosmos 文件（没有对应的 cosmos 源子模块）：
+        //   drift_matrix            — A1 数值漂移证据的测试矩阵（纯测试证据）
+        //   long_orbit              — C1 长期轨道基准（evidence/numeric-drift.md 附表）
+        //   convergence             — A2 收敛性扫描 + adaptive 修复证据
+        //   celestial_rotation      — C3 天体自转表面平衡（evidence/convergence.md）
+        //   central_body_switch     — C2 central_body 切换 SOI 契约（evidence/convergence.md）
+        //   cross_world             — E2 双世界一致性抽查
+        //   drag_terminal_velocity  — 真实物理验证：大气终端速度
+        //   hohmann_transfer_validation — 真实物理验证：Hohmann 转移闭环
+        let test_only_extras: std::collections::BTreeSet<&str> = [
+            "drift_matrix",
+            "long_orbit",
+            "convergence",
+            "celestial_rotation",
+            "central_body_switch",
+            "cross_world",
+            "drag_terminal_velocity",
+            "hohmann_transfer_validation",
+        ]
+        .into_iter()
+        .collect();
         let orphans_in_test: std::collections::BTreeSet<String> = test_cosmos
             .keys()
-            // test-only adapters (no cosmos submodule): evidence/benchmark-only
-            // test files — same policy as the rapier-side `test_only_extras`.
-            .filter(|n| {
-                !cosmos_src.contains_key(*n)
-                    // C1 长期轨道基准（evidence/numeric-drift.md 附表）
-                    && *n != "drift_matrix"
-                    && *n != "long_orbit"
-                    // A2 收敛性扫描 + adaptive 修复证据
-                    && *n != "convergence"
-                    // C3 天体自转表面平衡（evidence/convergence.md）
-                    && *n != "celestial_rotation"
-                    // C2 central_body 切换 SOI 契约（evidence/convergence.md）
-                    && *n != "central_body_switch"
-                    // E2 双世界一致性抽查
-                    && *n != "cross_world"
-                    // 真实物理验证系列：大气终端速度、Hohmann 转移闭环
-                    && *n != "drag_terminal_velocity"
-                    && *n != "hohmann_transfer_validation"
-            })
+            .filter(|n| !cosmos_src.contains_key(*n) && !test_only_extras.contains(n.as_str()))
             .cloned()
             .collect();
 

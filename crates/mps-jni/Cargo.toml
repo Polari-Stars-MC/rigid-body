@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [lib]
-name = "mps_rigid_body"
+name = "mps"
 crate-type = ["cdylib", "rlib"]
 
 [features]

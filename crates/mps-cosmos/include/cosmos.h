@@ -112,9 +112,23 @@
 #define HIT_EPS 1.0e-6
 
 /**
- * 信号最长存活时间（ms）
+ * 天文单位（m），写波速用的。
  */
-#define SIGNAL_TTL_MS 5000
+#define AU 1.495978707e11
+
+/**
+ * 默认波速（m/s）：**100 AU/s**（比光速快得多，跨星系通讯不至于等十几分钟）。
+ * 实际用的是 [`RadioWorld::set_wave_speed`] 设进去的值（Java 建完世界传），
+ * 没设过才用这个默认值。决定波前什么时候到达某个天线。
+ */
+#define WAVE_SPEED (100.0 * AU)
+
+/**
+ * 背景噪声底（W）：波前强度掉到它以下就销毁。
+ * 射程 = [`max_range`] = sqrt(能量 / 噪声底)：100 W 全向约 3.16e11 m（≈2.11 AU，
+ * 按 100 AU/s 飞 21 ms）。
+ */
+#define NOISE_FLOOR 1.0e-21
 
 /**
  * 灵敏度兜底下限（W）
@@ -374,19 +388,19 @@ uint64_t cosmos_world_get_shared_arena_size(const struct CosmosWorld *world);
 
 /**
  * 取刚体当前位置（3×f64）。`out` 指向 24 字节 native 缓冲（`Vec3`）。
- * 返回 1 成功 / 0 句柄无效或 world 为 null。
+ * 返回 1 成功 / -1 句柄无效或 world 为 null。
  */
 int32_t cosmos_body_translation_out(const struct CosmosWorld *world,
                                     uint64_t body,
                                     struct Vec3 *out);
 
 /**
- * 取刚体当前线速度（3×f64）。
+ * 取刚体当前线速度（3×f64）。返回 1 成功 / -1 失败。
  */
 int32_t cosmos_body_linvel_out(const struct CosmosWorld *world, uint64_t body, struct Vec3 *out);
 
 /**
- * 取刚体质量（kg）。`NaN` 表示句柄无效 / world 为 null。
+ * 取刚体质量（kg）。`-1.0` 表示句柄无效 / world 为 null。
  */
 double cosmos_body_mass(const struct CosmosWorld *world, uint64_t body);
 
@@ -470,6 +484,18 @@ uint8_t cosmos_world_enable_radio(struct CosmosWorld *world);
 uint8_t cosmos_world_radio_enabled(const struct CosmosWorld *world);
 
 /**
+ * 设置无线电波速（m/s）。Java 建完 cosmos 世界后调一次；非法值回落默认值。
+ * 返回 1 成功 / 0 world 无效或未启用 radio。
+ */
+uint8_t cosmos_world_radio_set_wave_speed(struct CosmosWorld *world,
+                                          double speed);
+
+/**
+ * 读回当前无线电波速（m/s）；world 无效或未启用 radio 返回 0。
+ */
+double cosmos_world_radio_wave_speed(const struct CosmosWorld *world);
+
+/**
  * 注册一个反射天体：`body` 是打包的刚体句柄（`pack_handle`），`radius` 米。
  */
 uint8_t cosmos_world_radio_add_reflector(struct CosmosWorld *world, uint64_t body, double radius);
@@ -484,7 +510,7 @@ void cosmos_world_radio_remove_reflector(struct CosmosWorld *world, uint64_t bod
  *
  * 参数布局（全部 f64，按顺序）：
  * `id, px, py, pz, vx, vy, vz, dx, dy, dz, frequency, power, sensitivity,
- *  rx_gain, tx_gain, beam_angle, owner_body`。
+ *  rx_gain, tx_gain, beam_angle, owner_body, rx_beam_angle`。
  * `owner_body`：节点所属刚体句柄（飞船），0 表示无（用于跳过源自身反射）。
  */
 uint8_t cosmos_world_radio_register_node(struct CosmosWorld *world,
@@ -499,7 +525,7 @@ void cosmos_world_radio_unregister_node(struct CosmosWorld *world, double id);
  * 提交一个活跃信号（发射）。
  *
  * 参数布局（f64，按顺序）：
- * `id, tx_node_id, birth_ms, ox, oy, oz, ovx, ovy, ovz, odx, ody, odz,
+ * `id, birth_ms, ox, oy, oz, ovx, ovy, ovz, odx, ody, odz,
  *  frequency, energy, tx_gain, beam_angle, owner_body`
  */
 uint8_t cosmos_world_radio_submit_signal(struct CosmosWorld *world, const double *values);

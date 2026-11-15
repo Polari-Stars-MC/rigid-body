@@ -76,16 +76,21 @@ fn buffer_len<T>(ptr: *const T, count: usize, stride: usize) -> Option<usize> {
     }
 }
 
-/// 把 `RigidBodyHandle` 打包为 `u64`：`(idx << 32) | generation`。
+/// 把 `RigidBodyHandle` 打包为 `u64`：`((idx << 32) | generation) + 1`。
+///
+/// **必须 +1**：第一个插入的刚体句柄是 `(idx = 0, generation = 0)`，不偏移时打包结果就是 0，
+/// 而整套 C ABI / JNI 都用 0 当"失败"哨兵 —— 有效句柄会被上层直接当成失败丢掉
+/// （现象：插入明明成功，Java 侧读回却是 null）。与 `mps-core` 的 `pack_handle_parts` 同一处理。
 fn pack_handle(h: RigidBodyHandle) -> u64 {
     let (idx, generation) = h.into_raw_parts();
-    ((idx as u64) << 32) | (generation as u64)
+    (((idx as u64) << 32) | (generation as u64)).wrapping_add(1)
 }
 
-/// 反解 `pack_handle` 产物。
+/// 反解 `pack_handle` 产物。0（失败哨兵）解出 `u64::MAX`，查不到刚体。
 fn unpack_handle(packed: u64) -> RigidBodyHandle {
-    let idx = ((packed >> 32) & 0xFFFF_FFFF) as u32;
-    let generation = (packed & 0xFFFF_FFFF) as u32;
+    let raw = packed.checked_sub(1).unwrap_or(u64::MAX);
+    let idx = ((raw >> 32) & 0xFFFF_FFFF) as u32;
+    let generation = (raw & 0xFFFF_FFFF) as u32;
     RigidBodyHandle::from_raw_parts(idx, generation)
 }
 
@@ -395,13 +400,13 @@ pub extern "C" fn cosmos_world_insert_body_as_gravity_source(
     builder: *mut CosmosRigidBodyBuilder,
     mass: f64,
 ) -> u64 {
-    ffi_guard(0, || {
+    ffi_guard(u64::MAX, || {
         let w = match unsafe { world.as_mut() } {
             Some(t) => t,
-            None => return 0,
+            None => return u64::MAX,
         };
         if builder.is_null() {
-            return 0;
+            return u64::MAX;
         }
         let b = unsafe { Box::from_raw(builder) }.into_inner();
         pack_handle(w.insert_body_as_gravity_source(b, mass))
@@ -414,13 +419,13 @@ pub extern "C" fn cosmos_world_insert_body(
     world: *mut CosmosWorld,
     builder: *mut CosmosRigidBodyBuilder,
 ) -> u64 {
-    ffi_guard(0, || {
+    ffi_guard(u64::MAX, || {
         let w = match unsafe { world.as_mut() } {
             Some(t) => t,
-            None => return 0,
+            None => return u64::MAX,
         };
         if builder.is_null() {
-            return 0;
+            return u64::MAX;
         }
         let b = unsafe { Box::from_raw(builder) }.into_inner();
         pack_handle(w.insert_body(b))
@@ -648,20 +653,20 @@ pub extern "C" fn cosmos_world_get_shared_arena_size(world: *const CosmosWorld) 
 }
 
 /// 取刚体当前位置（3×f64）。`out` 指向 24 字节 native 缓冲（`Vec3`）。
-/// 返回 1 成功 / 0 句柄无效或 world 为 null。
+/// 返回 1 成功 / -1 句柄无效或 world 为 null。
 #[unsafe(no_mangle)]
 pub extern "C" fn cosmos_body_translation_out(
     world: *const CosmosWorld,
     body: u64,
     out: *mut Vec3,
 ) -> i32 {
-    ffi_guard(0, || {
+    ffi_guard(-1, || {
         let w = match unsafe { world.as_ref() } {
             Some(t) => t,
-            None => return 0,
+            None => return -1,
         };
         let Some(p) = w.body_translation(unpack_handle(body)) else {
-            return 0;
+            return -1;
         };
         if let Some(o) = unsafe { out.as_mut() } {
             o.x = p.x;
@@ -672,20 +677,20 @@ pub extern "C" fn cosmos_body_translation_out(
     })
 }
 
-/// 取刚体当前线速度（3×f64）。
+/// 取刚体当前线速度（3×f64）。返回 1 成功 / -1 失败。
 #[unsafe(no_mangle)]
 pub extern "C" fn cosmos_body_linvel_out(
     world: *const CosmosWorld,
     body: u64,
     out: *mut Vec3,
 ) -> i32 {
-    ffi_guard(0, || {
+    ffi_guard(-1, || {
         let w = match unsafe { world.as_ref() } {
             Some(t) => t,
-            None => return 0,
+            None => return -1,
         };
         let Some(v) = w.body_linvel(unpack_handle(body)) else {
-            return 0;
+            return -1;
         };
         if let Some(o) = unsafe { out.as_mut() } {
             o.x = v.x;
@@ -696,15 +701,15 @@ pub extern "C" fn cosmos_body_linvel_out(
     })
 }
 
-/// 取刚体质量（kg）。`NaN` 表示句柄无效 / world 为 null。
+/// 取刚体质量（kg）。`-1.0` 表示句柄无效 / world 为 null。
 #[unsafe(no_mangle)]
 pub extern "C" fn cosmos_body_mass(world: *const CosmosWorld, body: u64) -> f64 {
-    ffi_guard(f64::NAN, || {
+    ffi_guard(-1.0, || {
         let w = match unsafe { world.as_ref() } {
             Some(t) => t,
-            None => return f64::NAN,
+            None => return -1.0,
         };
-        w.body_mass(unpack_handle(body)).unwrap_or(f64::NAN)
+        w.body_mass(unpack_handle(body)).unwrap_or(-1.0)
     })
 }
 
@@ -902,6 +907,31 @@ pub extern "C" fn cosmos_world_radio_enabled(world: *const CosmosWorld) -> u8 {
     })
 }
 
+/// 设置无线电波速（m/s）。Java 建完 cosmos 世界后调一次；非法值回落默认值。
+/// 返回 1 成功 / 0 world 无效或未启用 radio。
+#[unsafe(no_mangle)]
+pub extern "C" fn cosmos_world_radio_set_wave_speed(world: *mut CosmosWorld, speed: f64) -> u8 {
+    ffi_guard(0, || {
+        let Some(w) = (unsafe { world.as_mut() }) else {
+            set_error(ERR_NULL_POINTER, "cosmos world is null");
+            return 0;
+        };
+        if !w.radio_enabled() {
+            return 0;
+        }
+        w.radio_set_wave_speed(speed);
+        1
+    })
+}
+
+/// 读回当前无线电波速（m/s）；world 无效或未启用 radio 返回 0。
+#[unsafe(no_mangle)]
+pub extern "C" fn cosmos_world_radio_wave_speed(world: *const CosmosWorld) -> f64 {
+    ffi_guard(0.0, || {
+        unsafe { world.as_ref() }.map_or(0.0, |w| w.radio_wave_speed())
+    })
+}
+
 /// 注册一个反射天体：`body` 是打包的刚体句柄（`pack_handle`），`radius` 米。
 #[unsafe(no_mangle)]
 pub extern "C" fn cosmos_world_radio_add_reflector(
@@ -939,7 +969,7 @@ pub extern "C" fn cosmos_world_radio_remove_reflector(world: *mut CosmosWorld, b
 ///
 /// 参数布局（全部 f64，按顺序）：
 /// `id, px, py, pz, vx, vy, vz, dx, dy, dz, frequency, power, sensitivity,
-///  rx_gain, tx_gain, beam_angle, owner_body`。
+///  rx_gain, tx_gain, beam_angle, owner_body, rx_beam_angle`。
 /// `owner_body`：节点所属刚体句柄（飞船），0 表示无（用于跳过源自身反射）。
 #[unsafe(no_mangle)]
 pub extern "C" fn cosmos_world_radio_register_node(
@@ -955,7 +985,7 @@ pub extern "C" fn cosmos_world_radio_register_node(
             set_error(ERR_NULL_POINTER, "node values is null");
             return 0;
         }
-        let Some(len) = buffer_len(values, 17, 1) else {
+        let Some(len) = buffer_len(values, 18, 1) else {
             return 0;
         };
         let v = unsafe { std::slice::from_raw_parts(values, len) };
@@ -978,6 +1008,7 @@ pub extern "C" fn cosmos_world_radio_register_node(
             rx_gain: v[13],
             tx_gain: v[14],
             beam_angle: v[15],
+            rx_beam_angle: crate::radio::sanitize_beam_angle(v[17]),
             owner_body: (v[16] != 0.0).then_some(v[16] as u64),
         });
         1
@@ -997,7 +1028,7 @@ pub extern "C" fn cosmos_world_radio_unregister_node(world: *mut CosmosWorld, id
 /// 提交一个活跃信号（发射）。
 ///
 /// 参数布局（f64，按顺序）：
-/// `id, tx_node_id, birth_ms, ox, oy, oz, ovx, ovy, ovz, odx, ody, odz,
+/// `id, birth_ms, ox, oy, oz, ovx, ovy, ovz, odx, ody, odz,
 ///  frequency, energy, tx_gain, beam_angle, owner_body`
 #[unsafe(no_mangle)]
 pub extern "C" fn cosmos_world_radio_submit_signal(
@@ -1013,30 +1044,31 @@ pub extern "C" fn cosmos_world_radio_submit_signal(
             set_error(ERR_NULL_POINTER, "signal values is null");
             return 0;
         }
-        let Some(len) = buffer_len(values, 17, 1) else {
+        let Some(len) = buffer_len(values, 16, 1) else {
             return 0;
         };
         let v = unsafe { std::slice::from_raw_parts(values, len) };
         // 信号能量必须有限：NaN/Inf 的 energy 会沿 `energy · dist_att · att ·
         // rx_gain` 直接污染接收功率（NaN 结果或把噪声误判成可收包）。
-        if !v[13].is_finite() {
+        if !v[12].is_finite() {
             set_error(ERR_INVALID_ARGUMENT, "signal energy must be finite");
             return 0;
         }
         w.radio_submit_signal(crate::radio::ActiveSignal {
             id: v[0] as u64,
-            tx_node_id: v[1] as u64,
-            birth_ms: v[2] as u64,
-            origin: Vector::new(v[3], v[4], v[5]),
-            origin_vel: Vector::new(v[6], v[7], v[8]),
-            origin_dir: Vector::new(v[9], v[10], v[11])
+            birth_ms: v[1] as u64,
+            origin: Vector::new(v[2], v[3], v[4]),
+            origin_vel: Vector::new(v[5], v[6], v[7]),
+            origin_dir: Vector::new(v[8], v[9], v[10])
                 .try_normalize()
                 .unwrap_or(Vector::Z),
-            frequency: v[12],
-            energy: v[13],
-            tx_gain: v[14],
-            beam_angle: v[15],
-            owner_body: (v[16] != 0.0).then_some(v[16] as u64),
+            frequency: v[11],
+            energy: v[12],
+            tx_gain: v[13],
+            beam_angle: v[14],
+            owner_body: (v[15] != 0.0).then_some(v[15] as u64),
+            schedule: Vec::new(),
+            cursor: 0,
         });
         1
     })
