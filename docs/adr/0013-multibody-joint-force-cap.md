@@ -79,3 +79,31 @@ ADR-0012 把九个电机家族放进了公式层。要让它们真的驱动一�
 - `crates/mps-test/src/rapier/joints.rs`（6 项新测试）
 - `crates/mps-jni/src/lib.rs`（三个 JNI 绑定）
 - [docs/mps-formula-motors.md](../mps-formula-motors.md)（接入方式）
+## 未解问题：速度读数与坐标微分不符
+
+`world_multibody_joint_get_velocity` 在测试里读出的值**不等于**坐标的数值
+微分，这一点没有解决，先记在这里而不是掩盖。
+
+实测（revolute 铰链，伺服每 60Hz 步把目标角推进 0.1 rad）：
+
+```text
+Δcoord/Δt = 6.000 rad/s    // 坐标确实每步走 0.100
+readout   = -2.012 rad/s
+```
+
+而 `MultibodyJoint::integrate` 写的是
+`coords[DIM + dof_id] += vels[curr_free_dof] * dt`，所以这两个数**本该相等**。
+比值也不是伺服驱动的常数倍，所以不是单位问题。
+
+因此 `multibody_velocity_readout_is_finite_while_moving` **只断言已被验证的
+部分**（读数有限、关节确实在动、读数确实看到了运动），**不**声称读数等于
+真实角速度。测试注释里写明了这一点。
+
+**影响**：ADR-0012 的电机包络用法要求 `torque_at_speed(ω)` 拿到正确的 ω。
+用这个读数会让包络算错。所以在解决之前，把 `get_velocity` 接到电机模型上
+是**不安全**的。
+
+**下一步该查的**：`damping_index` 返回的槽位是否真的与 `integrate` 用的
+`curr_free_dof` 一致。两者对 revolute 都推得 `0`，但推导可能有共同的前提
+错误——需要直接打印 `Multibody::velocities` 全量来对照，而不是继续从代码
+反推。
