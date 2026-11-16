@@ -27,6 +27,7 @@
 | [body-spatial-index.md](body-spatial-index.md) | 刚体中心 BVH：区域查询，不替代碰撞体 BVH |
 | [world-step-benchmarks.md](world-step-benchmarks.md) | `world_step` 性能矩阵怎么跑、CSV 是什么 |
 | [cosmos-arena.md](cosmos-arena.md) | cosmos 共享竞技场的偏移表、槽位和上限（跨语言 ABI） |
+| [rapier-fork-delta.md](rapier-fork-delta.md) | fork 相对官方 v0.36.1 改了什么、为什么、哪些该删 |
 | [mps-formula-motors.md](mps-formula-motors.md) | 电机家族（直流/串励/无刷/步进/异步/伺服/直线/压电/SMA）的转矩–转速与热模型 |
 
 `mps-core/` 下是按源文件拆开的导览，只从 [mps-core.md](mps-core.md) 进入。不要在新文档里再抄一份文件清单。
