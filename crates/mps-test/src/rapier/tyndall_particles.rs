@@ -10,7 +10,8 @@
 //! * 包围盒正确
 
 use mps_formula::tyndall_particles::{
-    ParticleOptics, inscatter_through_particles, number_density_from_mass_density,
+    ParticleOptics, UniformGrid, inscatter_through_particles,
+    inscatter_through_particles_accelerated, number_density_from_mass_density,
     particle_cloud_bounds, poly6_kernel, sample_number_density,
 };
 
@@ -547,4 +548,125 @@ fn bounds_from_world_covers_the_cloud() {
     assert!((max.x - 1.6).abs() < 1e-12, "max.x = {}", max.x);
 
     world_destroy(world);
+}
+// ── 空间加速：均匀网格（ADR-0023）───────────────────────────────────────────
+
+/// 网格查询必须与朴素查询**逐位相同** —— 这是加速版可信的唯一前提。
+#[test]
+fn grid_density_matches_brute_force() {
+    let h = 0.8;
+    // 造一团不均匀的粒子：一部分密集、一部分稀疏、一部分超出核半径。
+    let mut positions: Vec<[f64; 3]> = Vec::new();
+    for i in 0..30 {
+        positions.push([i as f64 * 0.05, 0.0, 0.0]); // 密集
+    }
+    for i in 0..10 {
+        positions.push([i as f64 * 1.5, 5.0, 0.0]); // 稀疏
+    }
+    positions.push([100.0, 100.0, 100.0]); // 远离
+
+    let grid = UniformGrid::build(&positions, h).unwrap();
+    assert_eq!(grid.len(), positions.len());
+
+    for q in [
+        [0.0, 0.0, 0.0],
+        [0.7, 0.0, 0.0],
+        [5.0, 5.0, 0.0],
+        [50.0, 0.0, 0.0],
+        [100.0, 100.0, 100.0],
+        [-3.0, -3.0, -3.0],
+    ] {
+        let brute = sample_number_density(&positions, q, h).unwrap();
+        let fast = grid.number_density(q, h).unwrap();
+        assert!(
+            (brute - fast).abs() <= brute.abs().max(1.0) * 1e-15,
+            "grid must match brute force at {q:?}: {fast} vs {brute}"
+        );
+    }
+}
+
+/// 加速版积分必须与朴素版**逐位相同**（同样的物理，只是查询更快）。
+#[test]
+fn accelerated_inscatter_matches_brute_force() {
+    let optics = ParticleOptics {
+        sigma_sca: 1e-2,
+        sigma_ext: 2e-2,
+        mass: 1e-6,
+    };
+    // 超过 GRID_THRESHOLD（64）才会走网格路径。
+    let positions: Vec<[f64; 3]> = (0..200).map(|i| [i as f64 * 0.03, 0.0, 0.0]).collect();
+    let (o, d, l, h, ph, li, st) = ([-0.5, 0.0, 0.0], [1.0, 0.0, 0.0], 8.0, 0.8, 1.0, 1.0, 64);
+
+    let brute = inscatter_through_particles(&positions, optics, o, d, l, h, ph, li, st).unwrap();
+    let fast = inscatter_through_particles_accelerated(&positions, optics, o, d, l, h, ph, li, st)
+        .unwrap();
+
+    assert!(brute > 0.0);
+    assert!(
+        (fast - brute).abs() <= brute * 1e-12,
+        "accelerated must match brute force: {fast} vs {brute}"
+    );
+}
+
+/// 粒子少时自动退化为朴素路径（结果仍一致）。
+#[test]
+fn accelerated_falls_back_below_threshold() {
+    let optics = ParticleOptics {
+        sigma_sca: 1e-2,
+        sigma_ext: 2e-2,
+        mass: 1e-6,
+    };
+    let positions: Vec<[f64; 3]> = (0..10).map(|i| [i as f64 * 0.1, 0.0, 0.0]).collect();
+    let (o, d, l, h, ph, li, st) = ([-0.5, 0.0, 0.0], [1.0, 0.0, 0.0], 4.0, 0.8, 1.0, 1.0, 32);
+    let brute = inscatter_through_particles(&positions, optics, o, d, l, h, ph, li, st).unwrap();
+    let fast = inscatter_through_particles_accelerated(&positions, optics, o, d, l, h, ph, li, st)
+        .unwrap();
+    assert!((fast - brute).abs() <= brute.max(1e-30) * 1e-15);
+}
+
+#[test]
+fn grid_handles_degenerate_input() {
+    // 空粒子云。
+    let g = UniformGrid::build(&[], 0.8).unwrap();
+    assert!(g.is_empty());
+    assert_eq!(g.len(), 0);
+    assert_eq!(g.number_density([0.0; 3], 0.8).unwrap(), 0.0);
+
+    // 非法核半径。
+    assert!(UniformGrid::build(&[[0.0; 3]], 0.0).is_none());
+    assert!(UniformGrid::build(&[[0.0; 3]], -1.0).is_none());
+
+    // 非有限粒子被跳过。
+    let g = UniformGrid::build(&[[f64::NAN, 0.0, 0.0], [0.1, 0.0, 0.0]], 0.8).unwrap();
+    assert_eq!(g.len(), 1, "the NaN particle must be skipped");
+
+    // 查询时核半径必须与建网格时一致。
+    let g = UniformGrid::build(&[[0.0; 3]], 0.8).unwrap();
+    assert!(
+        g.number_density([0.0; 3], 0.4).is_none(),
+        "mismatched h must be rejected"
+    );
+}
+
+/// 网格的格子数应远小于粒子数（对一团紧凑的粒子云）。
+#[test]
+fn grid_compacts_a_dense_cloud() {
+    let h = 0.5;
+    // 1000 个粒子挤在 1m³ 内 => 格子数应该是个位到几十。
+    let mut positions = Vec::new();
+    for i in 0..10 {
+        for j in 0..10 {
+            for k in 0..10 {
+                positions.push([i as f64 * 0.1, j as f64 * 0.1, k as f64 * 0.1]);
+            }
+        }
+    }
+    let grid = UniformGrid::build(&positions, h).unwrap();
+    assert_eq!(grid.len(), 1000);
+    // cell_size = 0.5，1m³ 跨 2~3 格每轴 => 最多 27 格。
+    assert!(
+        grid.cell_count() <= 27,
+        "dense cloud should collapse into few cells, got {}",
+        grid.cell_count()
+    );
 }

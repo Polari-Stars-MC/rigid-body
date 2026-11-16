@@ -584,3 +584,85 @@ fn particle_mass(world: &WorldHandle, source: u32, id: u32) -> f64 {
     };
     m.unwrap_or(1.0)
 }
+/// 加速版标量散射（ADR-0023）：用均匀网格把密度查询从 `O(N)` 降到 `O(k)`。
+///
+/// 粒子数少于阈值时自动退化为朴素路径，结果**逐位相同**。
+///
+/// # Safety
+/// `world` 必须有效；`out` 必须可写。
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub extern "C" fn tyndall_inscatter_from_world_accelerated(
+    world: *const WorldHandle,
+    source: u32,
+    id: u32,
+    origin: Vec3,
+    direction: Vec3,
+    length: f64,
+    smoothing_radius: f64,
+    sigma_sca: f64,
+    sigma_ext: f64,
+    phase: f64,
+    light_intensity: f64,
+    steps: u32,
+    out: *mut f64,
+) -> Bool {
+    ffi_guard(Bool::FALSE, || {
+        if out.is_null() {
+            set_error(
+                ERR_NULL_POINTER,
+                "tyndall_inscatter_from_world_accelerated: out is null",
+            );
+            return Bool::FALSE;
+        }
+        let Some(world) = (unsafe { world.as_ref() }) else {
+            set_error(
+                ERR_NULL_POINTER,
+                "tyndall_inscatter_from_world_accelerated: world is null",
+            );
+            return Bool::FALSE;
+        };
+        if !vec3_finite(origin) || !vec3_finite(direction) {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "tyndall_inscatter_from_world_accelerated: non-finite origin/direction",
+            );
+            return Bool::FALSE;
+        }
+        let positions = match collect_positions(world, source, id) {
+            Ok(p) => p,
+            Err(e) => return e,
+        };
+        let optics = mps_formula::tyndall_particles::ParticleOptics {
+            sigma_sca,
+            sigma_ext,
+            mass: particle_mass(world, source, id),
+        };
+        match mps_formula::tyndall_particles::inscatter_through_particles_accelerated(
+            &positions,
+            optics,
+            [origin.x, origin.y, origin.z],
+            [direction.x, direction.y, direction.z],
+            length,
+            smoothing_radius,
+            phase,
+            light_intensity,
+            steps,
+        ) {
+            Some(v) => {
+                unsafe {
+                    *out = v;
+                }
+                clear_error();
+                Bool::TRUE
+            }
+            None => {
+                set_error(
+                    ERR_INVALID_ARGUMENT,
+                    "tyndall_inscatter_from_world_accelerated: invalid arguments",
+                );
+                Bool::FALSE
+            }
+        }
+    })
+}

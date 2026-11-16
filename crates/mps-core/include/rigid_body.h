@@ -11998,6 +11998,28 @@ struct Bool tyndall_spectral_from_world(const struct WorldHandle *world,
                                         double *out_b);
 
 /**
+ * 加速版标量散射（ADR-0023）：用均匀网格把密度查询从 `O(N)` 降到 `O(k)`。
+ *
+ * 粒子数少于阈值时自动退化为朴素路径，结果**逐位相同**。
+ *
+ * # Safety
+ * `world` 必须有效；`out` 必须可写。
+ */
+struct Bool tyndall_inscatter_from_world_accelerated(const struct WorldHandle *world,
+                                                     uint32_t source,
+                                                     uint32_t id,
+                                                     struct Vec3 origin,
+                                                     struct Vec3 direction,
+                                                     double length,
+                                                     double smoothing_radius,
+                                                     double sigma_sca,
+                                                     double sigma_ext,
+                                                     double phase,
+                                                     double light_intensity,
+                                                     uint32_t steps,
+                                                     double *out);
+
+/**
  * # Safety
  *
  * `voxels` must point to at least `size_x * size_y * size_z` readable bytes

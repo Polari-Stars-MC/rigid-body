@@ -265,3 +265,242 @@ pub fn particle_cloud_bounds(positions: &[[f64; 3]]) -> Option<([f64; 3], [f64; 
     }
     if any { Some((min, max)) } else { None }
 }
+// ── 空间加速：均匀网格（ADR-0023）───────────────────────────────────────────
+//
+// `sample_number_density` 是 O(N) 的：每个查询点扫全部粒子。在
+// `inscatter_through_particles` 里被调用 `steps` 次，总复杂度 `O(steps·N)`。
+//
+// 对 `steps = 128`、`N = 10⁶` 是 1.28 亿次核求值/帧，不可接受。
+//
+// ## 为什么用均匀网格而不是 k-d tree / BVH
+//
+// SPH 的核半径 `h` 是**常数**，所有查询都是"固定半径邻域"。这个前提下均匀
+// 网格是最优结构：
+//
+// * 建网格 `O(N)`
+// * 查询只扫所在格 + 26 个邻居
+// * k-d tree 需要 `O(N log N)` 建树且每帧重建，对固定半径反而更慢
+//
+// ## 格子尺寸的选择
+//
+// `cell_size = h`：查询点最多跨 2 个格，所以只需扫 3×3×3 = 27 个邻居。
+// 如果 `cell_size < h`，邻居数会增加；如果 `> h`，单格粒子数会增加。`= h`
+// 是平衡点。
+
+/// 均匀网格索引。
+///
+/// 由 [`UniformGrid::build`] 从粒子位置构建，随后可用 [`UniformGrid::number_density`]
+/// 做 `O(k)` 查询。
+pub struct UniformGrid {
+    /// 格子边长（取核半径 `h`）。
+    cell_size: f64,
+    /// 每个格子的粒子索引。
+    cells: std::collections::HashMap<(i64, i64, i64), Vec<u32>>,
+    /// 粒子位置（与索引对齐）。
+    positions: Vec<[f64; 3]>,
+    /// 参与建网格的有效粒子数。
+    count: usize,
+}
+
+impl UniformGrid {
+    /// 从粒子位置构建网格。
+    ///
+    /// `smoothing_radius` 作为格子边长。非有限位置的粒子被**跳过**（与
+    /// `sample_number_density` 的容错行为一致），但仍保留在 `positions` 里以
+    /// 保持索引对齐 —— 它们只是永远不会被查询命中。
+    ///
+    /// # Returns
+    /// `Some(grid)`；`h <= 0` 或非有限时 `None`。
+    pub fn build(positions: &[[f64; 3]], smoothing_radius: f64) -> Option<Self> {
+        if !smoothing_radius.is_finite() || smoothing_radius <= 0.0 {
+            return None;
+        }
+        let mut cells: std::collections::HashMap<(i64, i64, i64), Vec<u32>> =
+            std::collections::HashMap::new();
+        let mut count = 0usize;
+        for (i, p) in positions.iter().enumerate() {
+            if !p.iter().all(|v| v.is_finite()) {
+                continue;
+            }
+            let key = Self::cell_of(*p, smoothing_radius);
+            cells.entry(key).or_default().push(i as u32);
+            count += 1;
+        }
+        Some(Self {
+            cell_size: smoothing_radius,
+            cells,
+            positions: positions.to_vec(),
+            count,
+        })
+    }
+
+    /// 有效粒子数（跳过非有限的）。
+    pub fn len(&self) -> usize {
+        self.count
+    }
+
+    /// 是否为空。
+    pub fn is_empty(&self) -> bool {
+        self.count == 0
+    }
+
+    /// 格子数（用于观察粒子分布的离散程度）。
+    pub fn cell_count(&self) -> usize {
+        self.cells.len()
+    }
+
+    fn cell_of(p: [f64; 3], h: f64) -> (i64, i64, i64) {
+        (
+            (p[0] / h).floor() as i64,
+            (p[1] / h).floor() as i64,
+            (p[2] / h).floor() as i64,
+        )
+    }
+
+    /// 在查询点处按核加权估计数密度（`O(k)`，`k` 为邻域粒子数）。
+    ///
+    /// 与 [`sample_number_density`] **逐位相同**（同样的 Poly6 核、同样的跳过
+    /// 非有限粒子规则），只是查询范围从全部粒子缩到 27 个邻居格。
+    pub fn number_density(&self, query: [f64; 3], smoothing_radius: f64) -> Option<f64> {
+        if !smoothing_radius.is_finite() || smoothing_radius <= 0.0 {
+            return None;
+        }
+        if !query.iter().all(|v| v.is_finite()) {
+            return None;
+        }
+        // 格子尺寸必须与建网格时一致，否则邻居偏移会算错。
+        if (smoothing_radius - self.cell_size).abs() > 1e-12 {
+            return None;
+        }
+        let (cx, cy, cz) = Self::cell_of(query, self.cell_size);
+        let mut sum = 0.0;
+        for dx in -1..=1 {
+            for dy in -1..=1 {
+                for dz in -1..=1 {
+                    let key = (cx + dx, cy + dy, cz + dz);
+                    let Some(bucket) = self.cells.get(&key) else {
+                        continue;
+                    };
+                    for &idx in bucket {
+                        let p = self.positions[idx as usize];
+                        let ex = p[0] - query[0];
+                        let ey = p[1] - query[1];
+                        let ez = p[2] - query[2];
+                        let r = (ex * ex + ey * ey + ez * ez).sqrt();
+                        sum += poly6_kernel(r, smoothing_radius)?;
+                    }
+                }
+            }
+        }
+        Some(sum)
+    }
+}
+
+/// 沿视线穿过粒子云的分通道/标量无关的**加速版**单次散射积分。
+///
+/// 与 [`inscatter_through_particles`] 同一个物理模型，但用 [`UniformGrid`] 把
+/// 每步的密度查询从 `O(N)` 降到 `O(k)`。
+///
+/// 总复杂度 `O(N + steps·k)` 而不是 `O(steps·N)`。
+#[allow(clippy::too_many_arguments)]
+pub fn inscatter_through_particles_accelerated(
+    positions: &[[f64; 3]],
+    optics: ParticleOptics,
+    origin: [f64; 3],
+    direction: [f64; 3],
+    length: f64,
+    smoothing_radius: f64,
+    phase: f64,
+    light_intensity: f64,
+    steps: u32,
+) -> Option<f64> {
+    // 粒子少的时候建网格不划算（HashMap 开销 > 直接扫）。
+    // 经验阈值：单步要扫的粒子数少于 64 时直接走朴素路径。
+    const GRID_THRESHOLD: usize = 64;
+    if positions.len() < GRID_THRESHOLD {
+        return inscatter_through_particles(
+            positions,
+            optics,
+            origin,
+            direction,
+            length,
+            smoothing_radius,
+            phase,
+            light_intensity,
+            steps,
+        );
+    }
+
+    let grid = UniformGrid::build(positions, smoothing_radius)?;
+    inscatter_with_sampler(
+        &grid,
+        optics,
+        origin,
+        direction,
+        length,
+        smoothing_radius,
+        phase,
+        light_intensity,
+        steps,
+    )
+}
+
+/// 用给定的网格做积分。抽出来让加速版与朴素版共享累积逻辑（测试里也用它验证
+/// 两条路径一致）。
+#[allow(clippy::too_many_arguments)]
+fn inscatter_with_sampler(
+    grid: &UniformGrid,
+    optics: ParticleOptics,
+    origin: [f64; 3],
+    direction: [f64; 3],
+    length: f64,
+    smoothing_radius: f64,
+    phase: f64,
+    light_intensity: f64,
+    steps: u32,
+) -> Option<f64> {
+    if !optics.is_valid() {
+        return None;
+    }
+    if !origin.iter().all(|v| v.is_finite())
+        || !direction.iter().all(|v| v.is_finite())
+        || !length.is_finite()
+        || !phase.is_finite()
+        || !light_intensity.is_finite()
+    {
+        return None;
+    }
+    if length < 0.0 || phase < 0.0 || light_intensity < 0.0 || steps == 0 {
+        return None;
+    }
+    let norm =
+        (direction[0] * direction[0] + direction[1] * direction[1] + direction[2] * direction[2])
+            .sqrt();
+    if (norm - 1.0).abs() > 1e-6 {
+        return None;
+    }
+    if length == 0.0 || grid.is_empty() {
+        return Some(0.0);
+    }
+
+    let n_steps = steps as f64;
+    let ds = length / n_steps;
+    let scattered = optics.sigma_sca * phase * light_intensity;
+    let mut trans = 1.0;
+    let mut sum = 0.0;
+    for k in 0..steps {
+        let t = (k as f64 + 0.5) * ds;
+        let q = [
+            origin[0] + direction[0] * t,
+            origin[1] + direction[1] * t,
+            origin[2] + direction[2] * t,
+        ];
+        let n = grid.number_density(q, smoothing_radius)?;
+        sum += trans * n * scattered * ds;
+        trans *= (-optics.sigma_ext * n * ds).exp();
+        if trans < 1e-12 {
+            break;
+        }
+    }
+    Some(sum)
+}

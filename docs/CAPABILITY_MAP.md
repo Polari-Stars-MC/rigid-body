@@ -11,11 +11,11 @@
 | 项 | 数量 |
 | --- | --- |
 | `mps-core` 里有 `extern "C"` 入口的源模块 | 64 |
-| `mps-core` C ABI 入口总数 | 992 |
-| 其中出现在生成头文件 `rigid_body.h` 里 | 992 |
+| `mps-core` C ABI 入口总数 | 993 |
+| 其中出现在生成头文件 `rigid_body.h` 里 | 993 |
 | 其中被 `mps-jni` 的 `jni!` 体引用 | 613 |
 | 其中被 `mps-test` 引用 | 751 |
-| 既无 JNI 绑定也无测试引用 | 135 |
+| 既无 JNI 绑定也无测试引用 | 136 |
 
 ## 模块表
 
@@ -84,7 +84,7 @@
 | `thermo` | `thermodynamics_*` | 5 | — | dedicated 5 | [thermo.md](mps-core/thermo.md) | [thermo.rs](../crates/mps-test/src/rapier/thermo.rs) | 5 | 5 |
 | `tire_model` | `tire_model_*` | 5 | — | set_param 1 / read_param 1 / topology 1 / dedicated 2 | [tire_model.md](mps-core/tire_model.md) | [tire_model.rs](../crates/mps-test/src/rapier/tire_model.rs) | 5 | 5 |
 | `trajectory` | `trajectory_*` | 6 | — | dedicated 6 | [trajectory.md](mps-core/trajectory.md) | [trajectory.rs](../crates/mps-test/src/rapier/trajectory.rs) | 1 | 4 |
-| `tyndall_scene` | `tyndall_*` | 6 | — | dedicated 6 | — | [tyndall_scene.rs](../crates/mps-test/src/rapier/tyndall_scene.rs) | 0 | 6 |
+| `tyndall_scene` | `tyndall_*` | 7 | — | dedicated 7 | — | [tyndall_scene.rs](../crates/mps-test/src/rapier/tyndall_scene.rs) | 0 | 6 |
 | `vehicle` | `vehicle_controller_*` | 12 | — | set_param 4 / read_param 2 / topology 1 / dedicated 5 | [vehicle.md](mps-core/vehicle.md) | [vehicle.rs](../crates/mps-test/src/rapier/vehicle.rs) | 12 | 10 |
 | `volcano` | `volcano_*` | 9 | — | set_param 1 / clear_param 1 / topology 2 / dedicated 5 | [volcano.md](mps-core/volcano.md) | [volcano.rs](../crates/mps-test/src/rapier/volcano.rs) | 9 | 9 |
 | `voxel` | — | 23 | — | set_param 1 / read_param 3 / topology 2 / dedicated 17 | [voxel.md](mps-core/voxel.md) | [voxel.rs](../crates/mps-test/src/rapier/voxel.rs) | 21 | 8 |
@@ -98,9 +98,9 @@
 | `clear_param` | `*_clear_<prop>` → `*_set_param(e, PROP, none)` | 32 |
 | `read_param` | `*_get_<prop>` / `*_read_<prop>` → `*_get_param(e, PROP, out)` | 118 |
 | `topology` | `*_add/insert/remove/detach/attach_*`（第二批） | 57 |
-| `dedicated` | 带真实逻辑，必须保留专用入口 | 582 |
+| `dedicated` | 带真实逻辑，必须保留专用入口 | 583 |
 
-**属性通道可直接吸收 353 个入口（占 992 的 35%）。**
+**属性通道可直接吸收 353 个入口（占 993 的 35%）。**
 
 ## 头文件声明了、默认构建里没有
 
@@ -136,6 +136,7 @@ cbindgen 不按 feature 过滤，所以这些符号出现在 `rigid_body.h` 里�
 | `rigid_body` | 2 |
 | `terrain_gravity` | 6 |
 | `trajectory` | 1 |
+| `tyndall_scene` | 1 |
 | `voxel` | 2 |
 | `world` | 6 |
 

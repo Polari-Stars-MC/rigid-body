@@ -28,5 +28,6 @@
 | [0020](0020-spectral-tyndall.md) | 丁达尔效应的光谱版本（RGB 分通道，厚介质偏红） | 接受 |
 | [0021](0021-particle-driven-spectral.md) | 粒子驱动的光谱散射（流动烟雾里的彩色光柱） | 接受 |
 | [0022](0022-multiple-scattering.md) | 多次散射近似（阶数递推 + 等比级数） | 接受 |
+| [0023](0023-uniform-grid-acceleration.md) | 均匀网格空间加速（O(steps·N) → O(N + steps·k)） | 接受 |
 
 仓库根的 [DESIGN.md](../../DESIGN.md) 和 [OPTIMIZATION.md](../../OPTIMIZATION.md) 是被源码注释引用的章节索引，不是 ADR 的前身。它们的 `§` 编号继续留在原地。
