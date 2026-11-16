@@ -86,6 +86,43 @@ struct Bool soft_body_get_param(struct WorldHandle *world, uint32_t id,
 **为什么 `indexed` 要独立通道**：硬塞进 `set_param` 会让签名变成
 `(world, id, param, value)` 而丢掉索引。
 
+### 第三批（`39d4a4c`）：collider —— 跨模块验证
+
+前两批都在 `soft_body` 内部，只证明了这套模式在**一个模块内**可行。这一批换到
+`collider`，确认它能否跨模块复用。
+
+`collider` 与 `soft_body` 有三处实质差异：
+
+| 差异 | soft_body | collider |
+| --- | --- | --- |
+| 实体句柄 | `u32` 索引 | packed `ColliderHandleRaw`（`u64`，含 generation） |
+| `_flag` 变体 | 无 | 9 个 setter 里 8 个另有 `_flag` |
+| 必要副作用 | 无 | 每个 setter 都要 `refresh_region_body` |
+
+**结论：设计撑住了。** 差异体现在签名（`handle` 而非 `id`）与副作用（必须逐个
+保留 `refresh_region_body`），不影响"一个通道吸收 N 个入口"的核心主张。
+
+`_flag` 的处理方式值得记一笔：不为 8 个专用入口各写一个 `_flag`，而是提供**一个**
+`collider_set_param_flag` 统一包装。这正是收敛要省掉的东西。
+
+9 个属性：`FRICTION` / `ROLLING_RESISTANCE` / `RESTITUTION` /
+`CONTACT_FORCE_EVENT_THRESHOLD` / `FRICTION_COMBINE_RULE` /
+`RESTITUTION_COMBINE_RULE` / `ACTIVE_EVENTS` / `ACTIVE_HOOKS` / `SENSOR`。
+
+### 顺带发现的既有语义陷阱（记录，未改）
+
+`collider_set_friction_combine_rule` 的内联 `match` 是：
+
+```rust
+_ => CoefficientCombineRule::Average,
+```
+
+**任何非法值都被静默映射成 `Average`**，而不是拒绝。通道沿用同样的映射，因为
+通道的职责是等价迁移，不是顺手修 bug。真要改应该两个入口一起改并单独记 ADR。
+
+但通道的**入参校验**比专用入口严：分数、负数、`> 4` 全部返回
+`ERR_INVALID_ARGUMENT`，不会走到那个兜底分支。
+
 ### 还没做的：向量与复合载荷
 
 `set_fibre_direction` / `set_spring_fibre_direction` / `set_particle_velocity` /
@@ -95,6 +132,10 @@ struct Bool soft_body_get_param(struct WorldHandle *world, uint32_t id,
 `set_thermal`（4 个标量）、`set_plasticity`（2 个）、`set_cohesion` /
 `set_self_collision` / `set_cross_collision`（2~3 个）需要"复合载荷"通道，
 比向量更麻烦。
+
+`collider` 侧同样有这两类：`set_pose` / `set_translation` / `set_rotation`
+（`Vec3`/`Quat`）与 `set_collision_groups` / `set_solver_groups`
+（`InteractionGroupsDesc`）。
 
 这两类是下一批的事。
 
