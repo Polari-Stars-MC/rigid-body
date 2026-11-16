@@ -81,6 +81,23 @@
  */
 #define COLLIDER_PARAM_SENSOR 8
 
+/**
+ * `collider_set_vec3_param` 的属性编号。
+ */
+#define COLLIDER_VEC3_TRANSLATION 0
+
+/**
+ * 旋转用四元数，走 `collider_set_quat_param`（4 个分量）。
+ */
+#define COLLIDER_QUAT_ROTATION 0
+
+/**
+ * `collider_set_u32x2_param` 的属性编号。
+ */
+#define COLLIDER_U32X2_COLLISION_GROUPS 0
+
+#define COLLIDER_U32X2_SOLVER_GROUPS 1
+
 #define ERR_OK 0
 
 #define ERR_NULL_POINTER 1
@@ -3700,6 +3717,68 @@ uint8_t collider_set_param_flag(struct WorldHandle *world,
                                 ColliderHandleRaw handle,
                                 uint32_t param,
                                 double value);
+
+/**
+ * 已分配的向量属性个数。
+ */
+uint32_t collider_vec3_param_abi_version(void);
+
+/**
+ * 已分配的四元数属性个数。
+ */
+uint32_t collider_quat_param_abi_version(void);
+
+/**
+ * 已分配的"2×u32 复合载荷"属性个数。
+ */
+uint32_t collider_u32x2_param_abi_version(void);
+
+/**
+ * 向量属性写入通道（`Vec3` 载荷）。
+ *
+ * # Returns
+ * `Bool::TRUE` 成功；world 为 null → `ERR_NULL_POINTER`；句柄无效 →
+ * `ERR_NOT_FOUND`；`param` 未分配或分量非有限 → `ERR_INVALID_ARGUMENT`。
+ *
+ * # Safety
+ * `world` 必须有效。
+ */
+struct Bool collider_set_vec3_param(struct WorldHandle *world,
+                                    ColliderHandleRaw handle,
+                                    uint32_t param,
+                                    double x,
+                                    double y,
+                                    double z);
+
+/**
+ * 四元数属性写入通道（`Quat` 载荷）。
+ *
+ * # Safety
+ * `world` 必须有效。
+ */
+struct Bool collider_set_quat_param(struct WorldHandle *world,
+                                    ColliderHandleRaw handle,
+                                    uint32_t param,
+                                    double x,
+                                    double y,
+                                    double z,
+                                    double w);
+
+/**
+ * 复合载荷写入通道（固定 2 个 `u32`，如 `InteractionGroupsDesc`）。
+ *
+ * **这是本设计的边界**：通道签名写死了 2 个 `u32`。载荷宽度不同的复合属性
+ * （3 个字段、混合类型）无法复用这个通道，必须另开一个。所以复合载荷的收敛
+ * 是"宽度级"的，不像标量那样是"形状级"的。
+ *
+ * # Safety
+ * `world` 必须有效。
+ */
+struct Bool collider_set_u32x2_param(struct WorldHandle *world,
+                                     ColliderHandleRaw handle,
+                                     uint32_t param,
+                                     uint32_t a,
+                                     uint32_t b);
 
 /**
  * Creates a world with a default collider policy (0=None, 1=Simple, 2=Compound, 3=Adaptive).

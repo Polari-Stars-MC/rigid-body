@@ -11,10 +11,10 @@
 | 项 | 数量 |
 | --- | --- |
 | `mps-core` 里有 `extern "C"` 入口的源模块 | 63 |
-| `mps-core` C ABI 入口总数 | 960 |
-| 其中出现在生成头文件 `rigid_body.h` 里 | 960 |
+| `mps-core` C ABI 入口总数 | 966 |
+| 其中出现在生成头文件 `rigid_body.h` 里 | 966 |
 | 其中被 `mps-jni` 的 `jni!` 体引用 | 613 |
-| 其中被 `mps-test` 引用 | 725 |
+| 其中被 `mps-test` 引用 | 731 |
 | 既无 JNI 绑定也无测试引用 | 129 |
 
 ## 模块表
@@ -35,7 +35,7 @@
 | `bounds` | — | 30 | — | read_param 12 / dedicated 18 | [bounds.md](mps-core/bounds.md) | [bounds.rs](../crates/mps-test/src/rapier/bounds.rs) | 30 | 13 |
 | `character_body` | `character_body_*` | 20 | — | set_param 9 / read_param 3 / dedicated 8 | [character_body.md](mps-core/character_body.md) | [character_body.rs](../crates/mps-test/src/rapier/character_body.rs) | 20 | 15 |
 | `cloth` | — | 1 | — | dedicated 1 | [cloth.md](mps-core/cloth.md) | [cloth.rs](../crates/mps-test/src/rapier/cloth.rs) | 1 | 1 |
-| `collider` | — | 70 | — | set_param 39 / read_param 7 / topology 4 / dedicated 20 | [collider.md](mps-core/collider.md) | [collider.rs](../crates/mps-test/src/rapier/collider.rs) | 54 | 69 |
+| `collider` | — | 76 | — | set_param 42 / read_param 7 / topology 4 / dedicated 23 | [collider.md](mps-core/collider.md) | [collider.rs](../crates/mps-test/src/rapier/collider.rs) | 54 | 75 |
 | `collision_mode` | `world_*` | 4 | — | set_param 1 / read_param 1 / topology 1 / dedicated 1 | [collision_mode.md](mps-core/collision_mode.md) | [collision_mode.rs](../crates/mps-test/src/rapier/collision_mode.rs) | 4 | 4 |
 | `compat` | — | 4 | — | read_param 1 / topology 2 / dedicated 1 | [compat.md](mps-core/compat.md) | [compat.rs](../crates/mps-test/src/rapier/compat.rs) | 4 | 4 |
 | `controller` | `character_controller_*` | 14 | — | set_param 7 / read_param 2 / dedicated 5 | [controller.md](mps-core/controller.md) | [controller.rs](../crates/mps-test/src/rapier/controller.rs) | 14 | 13 |
@@ -93,13 +93,13 @@
 
 | 组 | 含义 | 入口数 |
 | --- | --- | ---: |
-| `set_param` | `*_set_<prop>` → `*_set_param(e, PROP, v)` | 197 |
+| `set_param` | `*_set_<prop>` → `*_set_param(e, PROP, v)` | 200 |
 | `clear_param` | `*_clear_<prop>` → `*_set_param(e, PROP, none)` | 32 |
 | `read_param` | `*_get_<prop>` / `*_read_<prop>` → `*_get_param(e, PROP, out)` | 118 |
 | `topology` | `*_add/insert/remove/detach/attach_*`（第二批） | 57 |
-| `dedicated` | 带真实逻辑，必须保留专用入口 | 556 |
+| `dedicated` | 带真实逻辑，必须保留专用入口 | 559 |
 
-**属性通道可直接吸收 347 个入口（占 960 的 36%）。**
+**属性通道可直接吸收 350 个入口（占 966 的 36%）。**
 
 ## 头文件声明了、默认构建里没有
 

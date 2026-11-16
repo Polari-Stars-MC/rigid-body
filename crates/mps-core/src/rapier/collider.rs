@@ -2247,3 +2247,228 @@ fn combine_rule(rule: u32) -> CoefficientCombineRule {
         _ => CoefficientCombineRule::Average,
     }
 }
+
+// ── 向量与复合载荷通道（ADR-0016 第四批，验证设计上限） ──────────────────────
+//
+// 前三批都是纯标量。这一批处理两类**不同形状**的载荷，目的是测出这套设计的真实
+// 上限：
+//
+// 1. **向量**：`Vec3`（3 个 f64）和 `Quat`（4 个 f64）。`set_param` 的单个
+//    `f64` 装不下，需要独立签名。
+// 2. **复合**：`InteractionGroupsDesc`（2 个 u32）。既不是标量也不是向量，
+//    而是"固定宽度的小结构体"。
+//
+// ## 设计结论（先说答案）
+//
+// 两类都能收敛，但**代价不同**：
+//
+// * 向量用 `(x, y, z)` / `(x, y, z, w)` 展开成独立参数 —— 干净，一个通道吸收
+//   3 个入口（pose / translation / rotation）。
+// * 复合载荷用 `(a, b)` 两个 u32 —— 也干净，但**只能吸收载荷恰好是 2 个 u32 的
+//   入口**。载荷变成 3 个或含混合类型时，就得再开一个通道。
+//
+// 也就是说：**标量与向量的收敛是"形状级"的，复合载荷的收敛是"宽度级"的。**
+// 后者不能无限扩展，这是这套设计的真实边界。
+//
+// 顺带一个观察：`InteractionGroupsDesc` 只有 2 个 u32，所以它其实**可以**塞进
+// 一个 `u64`（高 32 位 memberships，低 32 位 filter）。但那样会让 C 侧调用者
+// 手工做位移，容易错。展开成两个参数更清楚，代价是通道签名固定为 2 个 u32。
+
+/// `collider_set_vec3_param` 的属性编号。
+pub const COLLIDER_VEC3_TRANSLATION: u32 = 0;
+/// 旋转用四元数，走 `collider_set_quat_param`（4 个分量）。
+pub const COLLIDER_QUAT_ROTATION: u32 = 0;
+
+/// 已分配的向量属性个数。
+#[unsafe(no_mangle)]
+pub extern "C" fn collider_vec3_param_abi_version() -> u32 {
+    ffi_guard(0, || 1)
+}
+
+/// 已分配的四元数属性个数。
+#[unsafe(no_mangle)]
+pub extern "C" fn collider_quat_param_abi_version() -> u32 {
+    ffi_guard(0, || 1)
+}
+
+/// 已分配的"2×u32 复合载荷"属性个数。
+#[unsafe(no_mangle)]
+pub extern "C" fn collider_u32x2_param_abi_version() -> u32 {
+    ffi_guard(0, || 2)
+}
+
+/// `collider_set_u32x2_param` 的属性编号。
+pub const COLLIDER_U32X2_COLLISION_GROUPS: u32 = 0;
+pub const COLLIDER_U32X2_SOLVER_GROUPS: u32 = 1;
+
+/// 向量属性写入通道（`Vec3` 载荷）。
+///
+/// # Returns
+/// `Bool::TRUE` 成功；world 为 null → `ERR_NULL_POINTER`；句柄无效 →
+/// `ERR_NOT_FOUND`；`param` 未分配或分量非有限 → `ERR_INVALID_ARGUMENT`。
+///
+/// # Safety
+/// `world` 必须有效。
+#[unsafe(no_mangle)]
+pub extern "C" fn collider_set_vec3_param(
+    world: *mut WorldHandle,
+    handle: ColliderHandleRaw,
+    param: u32,
+    x: f64,
+    y: f64,
+    z: f64,
+) -> Bool {
+    ffi_guard(Bool::FALSE, || {
+        let Some(world) = (unsafe { world.as_mut() }) else {
+            set_error(ERR_NULL_POINTER, "collider_set_vec3_param: world is null");
+            return Bool::FALSE;
+        };
+        let ch = unpack_collider_handle(handle);
+        let Some(collider) = world.inner.colliders.get_mut(ch) else {
+            set_error(ERR_NOT_FOUND, "collider_set_vec3_param: collider not found");
+            return Bool::FALSE;
+        };
+        match param {
+            COLLIDER_VEC3_TRANSLATION => {
+                let translation = Vec3 { x, y, z };
+                if !vec3_finite(translation) {
+                    set_error(
+                        ERR_INVALID_ARGUMENT,
+                        "collider_set_vec3_param: translation must be finite",
+                    );
+                    return Bool::FALSE;
+                }
+                // 只改平移，保留现有旋转 —— 与 `collider_set_translation` 一致。
+                // `position()` 返回 `Pose`，其 `translation` 已是 `DVec3`，没有
+                // 额外的 `.vector` 层。
+                let pose = collider.position();
+                collider.set_position(Pose::from_parts(vec3_to_rapier(translation), pose.rotation));
+            }
+            _ => {
+                set_error(
+                    ERR_INVALID_ARGUMENT,
+                    "collider_set_vec3_param: unknown param id \
+                     (see collider_vec3_param_abi_version)",
+                );
+                return Bool::FALSE;
+            }
+        }
+        crate::rapier::world::refresh_region_body(&mut world.inner, ch);
+        crate::rapier::error::clear_error();
+        Bool::TRUE
+    })
+}
+
+/// 四元数属性写入通道（`Quat` 载荷）。
+///
+/// # Safety
+/// `world` 必须有效。
+#[unsafe(no_mangle)]
+pub extern "C" fn collider_set_quat_param(
+    world: *mut WorldHandle,
+    handle: ColliderHandleRaw,
+    param: u32,
+    x: f64,
+    y: f64,
+    z: f64,
+    w: f64,
+) -> Bool {
+    ffi_guard(Bool::FALSE, || {
+        let Some(world) = (unsafe { world.as_mut() }) else {
+            set_error(ERR_NULL_POINTER, "collider_set_quat_param: world is null");
+            return Bool::FALSE;
+        };
+        let ch = unpack_collider_handle(handle);
+        let Some(collider) = world.inner.colliders.get_mut(ch) else {
+            set_error(ERR_NOT_FOUND, "collider_set_quat_param: collider not found");
+            return Bool::FALSE;
+        };
+        match param {
+            COLLIDER_QUAT_ROTATION => {
+                // `Quat` 的字段是 `i/j/k/w`（不是 `x/y/z/w`）—— 沿用仓库既有
+                // 的四元数分量命名，避免和 glam/nalgebra 的约定混淆。
+                let rotation = Quat {
+                    i: x,
+                    j: y,
+                    k: z,
+                    w,
+                };
+                if !quat_finite(rotation) {
+                    set_error(
+                        ERR_INVALID_ARGUMENT,
+                        "collider_set_quat_param: rotation must be finite",
+                    );
+                    return Bool::FALSE;
+                }
+                // 只改旋转，保留现有平移 —— 与 `collider_set_rotation` 一致。
+                collider.set_rotation(quat_to_rapier(rotation));
+            }
+            _ => {
+                set_error(
+                    ERR_INVALID_ARGUMENT,
+                    "collider_set_quat_param: unknown param id \
+                     (see collider_quat_param_abi_version)",
+                );
+                return Bool::FALSE;
+            }
+        }
+        crate::rapier::world::refresh_region_body(&mut world.inner, ch);
+        crate::rapier::error::clear_error();
+        Bool::TRUE
+    })
+}
+
+/// 复合载荷写入通道（固定 2 个 `u32`，如 `InteractionGroupsDesc`）。
+///
+/// **这是本设计的边界**：通道签名写死了 2 个 `u32`。载荷宽度不同的复合属性
+/// （3 个字段、混合类型）无法复用这个通道，必须另开一个。所以复合载荷的收敛
+/// 是"宽度级"的，不像标量那样是"形状级"的。
+///
+/// # Safety
+/// `world` 必须有效。
+#[unsafe(no_mangle)]
+pub extern "C" fn collider_set_u32x2_param(
+    world: *mut WorldHandle,
+    handle: ColliderHandleRaw,
+    param: u32,
+    a: u32,
+    b: u32,
+) -> Bool {
+    ffi_guard(Bool::FALSE, || {
+        let Some(world) = (unsafe { world.as_mut() }) else {
+            set_error(ERR_NULL_POINTER, "collider_set_u32x2_param: world is null");
+            return Bool::FALSE;
+        };
+        let ch = unpack_collider_handle(handle);
+        let Some(collider) = world.inner.colliders.get_mut(ch) else {
+            set_error(
+                ERR_NOT_FOUND,
+                "collider_set_u32x2_param: collider not found",
+            );
+            return Bool::FALSE;
+        };
+        let groups = InteractionGroupsDesc {
+            memberships: a,
+            filter: b,
+        };
+        match param {
+            COLLIDER_U32X2_COLLISION_GROUPS => {
+                collider.set_collision_groups(interaction_groups_to_rapier(groups));
+            }
+            COLLIDER_U32X2_SOLVER_GROUPS => {
+                collider.set_solver_groups(interaction_groups_to_rapier(groups));
+            }
+            _ => {
+                set_error(
+                    ERR_INVALID_ARGUMENT,
+                    "collider_set_u32x2_param: unknown param id \
+                     (see collider_u32x2_param_abi_version)",
+                );
+                return Bool::FALSE;
+            }
+        }
+        crate::rapier::world::refresh_region_body(&mut world.inner, ch);
+        crate::rapier::error::clear_error();
+        Bool::TRUE
+    })
+}

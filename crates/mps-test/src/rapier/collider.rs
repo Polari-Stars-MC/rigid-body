@@ -1380,4 +1380,279 @@ mod tests {
         }
         world_destroy(world);
     }
+
+    // ── 向量与复合载荷通道（ADR-0016 第四批，设计上限验证） ──────────────────
+
+    use mps_core::rapier::collider::{
+        COLLIDER_QUAT_ROTATION, COLLIDER_U32X2_COLLISION_GROUPS, COLLIDER_U32X2_SOLVER_GROUPS,
+        COLLIDER_VEC3_TRANSLATION, collider_quat_param_abi_version, collider_set_quat_param,
+        collider_set_u32x2_param, collider_set_vec3_param, collider_u32x2_param_abi_version,
+        collider_vec3_param_abi_version,
+    };
+
+    #[test]
+    fn vec_and_composite_param_ids_match_their_abi_versions() {
+        assert_eq!(collider_vec3_param_abi_version(), 1);
+        assert_eq!(collider_quat_param_abi_version(), 1);
+        assert_eq!(collider_u32x2_param_abi_version(), 2);
+        // The single allocated ids must be 0 so a version bump is the only way
+        // to add a property.
+        assert_eq!(COLLIDER_VEC3_TRANSLATION, 0);
+        assert_eq!(COLLIDER_QUAT_ROTATION, 0);
+        assert_ne!(
+            COLLIDER_U32X2_COLLISION_GROUPS, COLLIDER_U32X2_SOLVER_GROUPS,
+            "the two composite properties must not alias"
+        );
+    }
+
+    /// `set_vec3_param(TRANSLATION, ..)` must equal `collider_set_translation`.
+    #[test]
+    fn vec3_translation_agrees_with_the_dedicated_entry() {
+        let world = make_world();
+        for (x, y, z) in [(1.0, 2.0, 3.0), (-0.5, 0.0, 4.25), (0.0, 0.0, 0.0)] {
+            let a = insert_ball(world);
+            let b = insert_ball(world);
+            let generic = collider_set_vec3_param(world, a, COLLIDER_VEC3_TRANSLATION, x, y, z).0;
+            let specific = collider_set_translation(world, b, Vec3 { x, y, z }).0;
+            assert_eq!(
+                generic, specific,
+                "translation ({x}, {y}, {z}): generic {generic} vs dedicated {specific}"
+            );
+        }
+
+        // Non-finite components are rejected.
+        let a = insert_ball(world);
+        assert_eq!(
+            collider_set_vec3_param(world, a, COLLIDER_VEC3_TRANSLATION, f64::NAN, 0.0, 0.0),
+            Bool::FALSE
+        );
+        assert_eq!(last_error_code(), ERR_INVALID_ARGUMENT);
+
+        world_destroy(world);
+    }
+
+    /// `set_quat_param(ROTATION, ..)` must equal `collider_set_rotation`.
+    ///
+    /// Note the component naming: the ABI `Quat` uses `i/j/k/w`, so the channel
+    /// parameters `x/y/z/w` map onto `i/j/k/w` in that order.
+    #[test]
+    fn quat_rotation_agrees_with_the_dedicated_entry() {
+        let world = make_world();
+        // (x, y, z, w) = (i, j, k, w) in ABI order.
+        for (x, y, z, w) in [
+            (0.0, 0.0, 0.0, 1.0),                               // identity
+            (0.0, 0.7071067811865476, 0.0, 0.7071067811865476), // 90° about Y
+            (0.5, 0.5, 0.5, 0.5),                               // unit-ish
+        ] {
+            let a = insert_ball(world);
+            let b = insert_ball(world);
+            let generic = collider_set_quat_param(world, a, COLLIDER_QUAT_ROTATION, x, y, z, w).0;
+            let specific = collider_set_rotation(
+                world,
+                b,
+                Quat {
+                    i: x,
+                    j: y,
+                    k: z,
+                    w,
+                },
+            )
+            .0;
+            assert_eq!(
+                generic, specific,
+                "rotation ({x}, {y}, {z}, {w}): generic {generic} vs dedicated {specific}"
+            );
+        }
+
+        let a = insert_ball(world);
+        assert_eq!(
+            collider_set_quat_param(
+                world,
+                a,
+                COLLIDER_QUAT_ROTATION,
+                0.0,
+                0.0,
+                0.0,
+                f64::INFINITY
+            ),
+            Bool::FALSE
+        );
+        assert_eq!(last_error_code(), ERR_INVALID_ARGUMENT);
+
+        world_destroy(world);
+    }
+
+    /// The composite channel must equal both `set_collision_groups` and
+    /// `set_solver_groups`.
+    #[test]
+    fn u32x2_groups_agree_with_the_dedicated_entries() {
+        let world = make_world();
+        let cases: [(u32, u32); 3] = [
+            (0x0001_0001, 0xFFFF_FFFF),
+            (0, 0),
+            (0x00FF_00FF, 0x0000_FFFF),
+        ];
+
+        for (memberships, filter) in cases {
+            // collision groups
+            let a = insert_ball(world);
+            let b = insert_ball(world);
+            let generic = collider_set_u32x2_param(
+                world,
+                a,
+                COLLIDER_U32X2_COLLISION_GROUPS,
+                memberships,
+                filter,
+            );
+            let specific = collider_set_collision_groups(
+                world,
+                b,
+                InteractionGroupsDesc {
+                    memberships,
+                    filter,
+                },
+            );
+            assert_eq!(
+                generic, specific,
+                "collision groups ({memberships:#x}, {filter:#x})"
+            );
+
+            // solver groups
+            let a = insert_ball(world);
+            let b = insert_ball(world);
+            let generic = collider_set_u32x2_param(
+                world,
+                a,
+                COLLIDER_U32X2_SOLVER_GROUPS,
+                memberships,
+                filter,
+            );
+            let specific = collider_set_solver_groups(
+                world,
+                b,
+                InteractionGroupsDesc {
+                    memberships,
+                    filter,
+                },
+            );
+            assert_eq!(
+                generic, specific,
+                "solver groups ({memberships:#x}, {filter:#x})"
+            );
+        }
+        world_destroy(world);
+    }
+
+    #[test]
+    fn new_channels_reject_unknown_ids_and_bad_handles() {
+        let world = make_world();
+        let handle = insert_ball(world);
+
+        // Unknown param on each channel.
+        assert_eq!(
+            collider_set_vec3_param(
+                world,
+                handle,
+                collider_vec3_param_abi_version(),
+                1.0,
+                0.0,
+                0.0
+            ),
+            Bool::FALSE
+        );
+        assert_eq!(last_error_code(), ERR_INVALID_ARGUMENT);
+
+        assert_eq!(
+            collider_set_quat_param(
+                world,
+                handle,
+                collider_quat_param_abi_version(),
+                0.0,
+                0.0,
+                0.0,
+                1.0
+            ),
+            Bool::FALSE
+        );
+        assert_eq!(last_error_code(), ERR_INVALID_ARGUMENT);
+
+        assert_eq!(
+            collider_set_u32x2_param(world, handle, collider_u32x2_param_abi_version(), 0, 0),
+            Bool::FALSE
+        );
+        assert_eq!(last_error_code(), ERR_INVALID_ARGUMENT);
+
+        // Null world on each channel.
+        assert_eq!(
+            collider_set_vec3_param(
+                std::ptr::null_mut(),
+                handle,
+                COLLIDER_VEC3_TRANSLATION,
+                0.0,
+                0.0,
+                0.0
+            ),
+            Bool::FALSE
+        );
+        assert_eq!(last_error_code(), ERR_NULL_POINTER);
+
+        // Unknown handle.
+        assert_eq!(
+            collider_set_u32x2_param(world, 0xDEAD_BEEF, COLLIDER_U32X2_COLLISION_GROUPS, 1, 1),
+            Bool::FALSE
+        );
+        assert_eq!(last_error_code(), ERR_NOT_FOUND);
+
+        world_destroy(world);
+    }
+
+    /// Setting translation must not disturb rotation, and vice versa — both
+    /// dedicated entries preserve the other half of the pose.
+    #[test]
+    fn vec_and_quat_channels_preserve_the_other_half_of_the_pose() {
+        let world = make_world();
+        let handle = insert_ball(world);
+
+        // Establish a known pose.
+        let t = Vec3 {
+            x: 3.0,
+            y: -2.0,
+            z: 1.5,
+        };
+        let q = Quat {
+            i: 0.0,
+            j: 0.7071067811865476,
+            k: 0.0,
+            w: 0.7071067811865476,
+        };
+        assert_eq!(collider_set_pose(world, handle, t, q), Bool::TRUE);
+
+        // Change only the translation; rotation must survive.
+        assert_eq!(
+            collider_set_vec3_param(world, handle, COLLIDER_VEC3_TRANSLATION, 7.0, 8.0, 9.0),
+            Bool::TRUE
+        );
+        let out_t = collider_get_translation(world, handle);
+        let out_q = collider_get_rotation(world, handle);
+        assert!((out_t.x - 7.0).abs() < 1e-12);
+        assert!(
+            (out_q.w - q.w).abs() < 1e-12 && (out_q.j - q.j).abs() < 1e-12,
+            "rotation must be preserved by a translation-only set"
+        );
+
+        // Change only the rotation; translation must survive.
+        assert_eq!(
+            collider_set_quat_param(world, handle, COLLIDER_QUAT_ROTATION, 0.0, 0.0, 0.0, 1.0),
+            Bool::TRUE
+        );
+        let out_t = collider_get_translation(world, handle);
+        let out_q = collider_get_rotation(world, handle);
+        assert!(
+            (out_t.x - 7.0).abs() < 1e-12 && (out_t.y - 8.0).abs() < 1e-12,
+            "translation must be preserved by a rotation-only set"
+        );
+        assert!((out_q.w - 1.0).abs() < 1e-12);
+
+        world_destroy(world);
+    }
 }
