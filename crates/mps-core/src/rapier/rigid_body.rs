@@ -1569,3 +1569,98 @@ pub extern "C" fn rigid_body_is_sleeping_flag(
 ) -> u8 {
     ffi_guard(0, || rigid_body_is_sleeping(world, handle).0)
 }
+
+// ── 通用属性通道（ADR-0016，rigid_body 批） ──────────────────────────────────
+//
+// 第三个模块。这里能吸收的入口很少——扫描（docs/abi-merge-scan.md）显示
+// rigid 的 34 个未覆盖 setter 里绝大多数是 `Vec3 + Bool` 形态（施加力/冲量）
+// 或向量型的速度/位姿设置，都不属于"标量属性"。
+//
+// ## 为什么只有 3 个属性
+//
+// * `simulation_domain`（u32）**故意不收**：它要拿查询锁、把体从旧域摘除、
+//   在目标域 inactive 时立刻冻结。这些副作用不适合塞进通用通道，留在专用入口
+//   更安全。这是"能合并但不该合并"的例子。
+// * `Vec3 + Bool` 那一批（`add_force` / `apply_impulse` / `set_linvel` …）
+//   需要"向量 + 可选开关"的通道，那是另一个设计，不在本批。
+//
+// 留下来的三个都是干净的实体级布尔/标量开关。
+
+/// `rigid_body_set_param` 的属性编号。
+pub const RIGID_BODY_PARAM_ENABLE_CCD: u32 = 0;
+/// `wake_up(strong)`：非零 = 强唤醒（清空睡眠计时器），零 = 普通唤醒。
+pub const RIGID_BODY_PARAM_WAKE_UP: u32 = 1;
+/// `enabled`：暂停/恢复该体的模拟。
+pub const RIGID_BODY_PARAM_ENABLED: u32 = 2;
+
+/// 已分配的 rigid_body 属性个数。
+#[unsafe(no_mangle)]
+pub extern "C" fn rigid_body_param_abi_version() -> u32 {
+    ffi_guard(0, || 3)
+}
+
+/// 通用 rigid-body 属性写入通道。
+///
+/// 语义同 `soft_body_set_param` / `collider_set_param`（ADR-0016 三条规则）。
+///
+/// # Returns
+/// `Bool::TRUE` 成功；world 为 null → `ERR_NULL_POINTER`；句柄无效 →
+/// `ERR_NOT_FOUND`；`param` 未分配或载荷非有限 → `ERR_INVALID_ARGUMENT`。
+///
+/// # Safety
+/// `world` 必须有效。
+#[unsafe(no_mangle)]
+pub extern "C" fn rigid_body_set_param(
+    world: *mut WorldHandle,
+    handle: RigidBodyHandleRaw,
+    param: u32,
+    value: f64,
+) -> Bool {
+    ffi_guard(Bool::FALSE, || {
+        let Some(world) = (unsafe { world.as_mut() }) else {
+            set_error(ERR_NULL_POINTER, "rigid_body_set_param: world is null");
+            return Bool::FALSE;
+        };
+        if !value.is_finite() {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "rigid_body_set_param: value must be finite",
+            );
+            return Bool::FALSE;
+        }
+        let bh = unpack_rigid_body_handle(handle);
+        let Some(body) = world.inner.bodies.get_mut(bh) else {
+            set_error(ERR_NOT_FOUND, "rigid_body_set_param: body was not found");
+            return Bool::FALSE;
+        };
+        match param {
+            RIGID_BODY_PARAM_ENABLE_CCD => body.enable_ccd(value != 0.0),
+            RIGID_BODY_PARAM_WAKE_UP => body.wake_up(value != 0.0),
+            RIGID_BODY_PARAM_ENABLED => body.set_enabled(value != 0.0),
+            _ => {
+                set_error(
+                    ERR_INVALID_ARGUMENT,
+                    "rigid_body_set_param: unknown param id \
+                     (see rigid_body_param_abi_version)",
+                );
+                return Bool::FALSE;
+            }
+        }
+        clear_error();
+        Bool::TRUE
+    })
+}
+
+/// `u8` 返回变体，语义同 [`rigid_body_set_param`]。
+///
+/// # Safety
+/// 同 [`rigid_body_set_param`]。
+#[unsafe(no_mangle)]
+pub extern "C" fn rigid_body_set_param_flag(
+    world: *mut WorldHandle,
+    handle: RigidBodyHandleRaw,
+    param: u32,
+    value: f64,
+) -> u8 {
+    ffi_guard(0, || rigid_body_set_param(world, handle, param, value).0)
+}

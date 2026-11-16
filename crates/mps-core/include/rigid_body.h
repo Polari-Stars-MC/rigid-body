@@ -159,6 +159,21 @@
 #define MAGIC 1414745680
 
 /**
+ * `rigid_body_set_param` 的属性编号。
+ */
+#define RIGID_BODY_PARAM_ENABLE_CCD 0
+
+/**
+ * `wake_up(strong)`：非零 = 强唤醒（清空睡眠计时器），零 = 普通唤醒。
+ */
+#define RIGID_BODY_PARAM_WAKE_UP 1
+
+/**
+ * `enabled`：暂停/恢复该体的模拟。
+ */
+#define RIGID_BODY_PARAM_ENABLED 2
+
+/**
  * Magic number identifying a valid arena: "MPS_AREN"
  */
 #define ARENA_MAGIC 5571044407640212814
@@ -8025,6 +8040,39 @@ struct Bool rigid_body_is_sleeping(const struct WorldHandle *world, RigidBodyHan
  * `world` must be a live pointer returned by `world_create`, or null.
  */
 uint8_t rigid_body_is_sleeping_flag(const struct WorldHandle *world, RigidBodyHandleRaw handle);
+
+/**
+ * 已分配的 rigid_body 属性个数。
+ */
+uint32_t rigid_body_param_abi_version(void);
+
+/**
+ * 通用 rigid-body 属性写入通道。
+ *
+ * 语义同 `soft_body_set_param` / `collider_set_param`（ADR-0016 三条规则）。
+ *
+ * # Returns
+ * `Bool::TRUE` 成功；world 为 null → `ERR_NULL_POINTER`；句柄无效 →
+ * `ERR_NOT_FOUND`；`param` 未分配或载荷非有限 → `ERR_INVALID_ARGUMENT`。
+ *
+ * # Safety
+ * `world` 必须有效。
+ */
+struct Bool rigid_body_set_param(struct WorldHandle *world,
+                                 RigidBodyHandleRaw handle,
+                                 uint32_t param,
+                                 double value);
+
+/**
+ * `u8` 返回变体，语义同 [`rigid_body_set_param`]。
+ *
+ * # Safety
+ * 同 [`rigid_body_set_param`]。
+ */
+uint8_t rigid_body_set_param_flag(struct WorldHandle *world,
+                                  RigidBodyHandleRaw handle,
+                                  uint32_t param,
+                                  double value);
 
 /**
  * Create an empty R-tree index.

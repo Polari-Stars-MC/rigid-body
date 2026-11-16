@@ -1619,4 +1619,122 @@ mod tests {
     fn world_destroy_null_is_noop() {
         world_destroy(std::ptr::null_mut());
     }
+
+    // ── 通用属性通道：rigid_body 批（ADR-0016 第三个模块） ────────────────────
+
+    use mps_core::rapier::rigid_body::{
+        RIGID_BODY_PARAM_ENABLE_CCD, RIGID_BODY_PARAM_ENABLED, RIGID_BODY_PARAM_WAKE_UP,
+        rigid_body_param_abi_version, rigid_body_set_param, rigid_body_set_param_flag,
+    };
+
+    #[test]
+    fn rigid_body_param_ids_match_the_abi_version() {
+        let all = [
+            RIGID_BODY_PARAM_ENABLE_CCD,
+            RIGID_BODY_PARAM_WAKE_UP,
+            RIGID_BODY_PARAM_ENABLED,
+        ];
+        assert_eq!(rigid_body_param_abi_version() as usize, all.len());
+        let mut sorted = all;
+        sorted.sort_unstable();
+        for w in sorted.windows(2) {
+            assert_ne!(w[0], w[1], "duplicate rigid_body param id {}", w[0]);
+        }
+    }
+
+    /// `set_param(ENABLE_CCD, v)` must equal `rigid_body_enable_ccd(Bool(v))`.
+    #[test]
+    fn enable_ccd_agrees_with_the_dedicated_entry() {
+        let world = make_world();
+        for (value, flag) in [(1.0, true), (0.0, false), (2.0, true), (-1.0, true)] {
+            let a = make_dynamic_body(world);
+            let b = make_dynamic_body(world);
+            let generic = rigid_body_set_param(world, a, RIGID_BODY_PARAM_ENABLE_CCD, value).0;
+            let specific = rigid_body_enable_ccd(world, b, Bool(flag as u8)).0;
+            assert_eq!(
+                generic, specific,
+                "enable_ccd value {value}: generic {generic} vs dedicated {specific}"
+            );
+        }
+        world_destroy(world);
+    }
+
+    /// `set_param(WAKE_UP, v)` must equal `rigid_body_wake_up(Bool(v))`.
+    ///
+    /// The dedicated entry's `Bool` is "strong": a true value clears the sleep
+    /// timer, not just the sleeping flag. The channel must preserve that.
+    #[test]
+    fn wake_up_agrees_with_the_dedicated_entry() {
+        let world = make_world();
+        for value in [0.0, 1.0] {
+            let a = make_dynamic_body(world);
+            let b = make_dynamic_body(world);
+            // Put both to sleep first so wake-up has something to do.
+            assert_eq!(rigid_body_sleep(world, a), Bool::TRUE);
+            assert_eq!(rigid_body_sleep(world, b), Bool::TRUE);
+
+            let generic = rigid_body_set_param(world, a, RIGID_BODY_PARAM_WAKE_UP, value).0;
+            let specific = rigid_body_wake_up(world, b, Bool(value as u8)).0;
+            assert_eq!(
+                generic, specific,
+                "wake_up value {value}: generic {generic} vs dedicated {specific}"
+            );
+        }
+        world_destroy(world);
+    }
+
+    #[test]
+    fn set_param_rejects_unknown_ids_and_bad_input() {
+        let world = make_world();
+        let handle = make_dynamic_body(world);
+
+        assert_eq!(
+            rigid_body_set_param(world, handle, rigid_body_param_abi_version(), 1.0),
+            Bool::FALSE
+        );
+        assert_eq!(last_error_code(), ERR_INVALID_ARGUMENT);
+
+        assert_eq!(
+            rigid_body_set_param(
+                std::ptr::null_mut(),
+                handle,
+                RIGID_BODY_PARAM_ENABLE_CCD,
+                1.0
+            ),
+            Bool::FALSE
+        );
+        assert_eq!(last_error_code(), ERR_NULL_POINTER);
+
+        assert_eq!(
+            rigid_body_set_param(world, 0xDEAD_BEEF, RIGID_BODY_PARAM_ENABLE_CCD, 1.0),
+            Bool::FALSE
+        );
+        assert_eq!(last_error_code(), ERR_NOT_FOUND);
+
+        // Non-finite is rejected before it reaches the setter.
+        assert_eq!(
+            rigid_body_set_param(world, handle, RIGID_BODY_PARAM_ENABLE_CCD, f64::NAN),
+            Bool::FALSE
+        );
+        assert_eq!(last_error_code(), ERR_INVALID_ARGUMENT);
+
+        world_destroy(world);
+    }
+
+    #[test]
+    fn set_param_flag_matches_the_bool_variant() {
+        let world = make_world();
+        let handle = make_dynamic_body(world);
+        for (param, value) in [
+            (RIGID_BODY_PARAM_ENABLE_CCD, 1.0),
+            (RIGID_BODY_PARAM_ENABLE_CCD, 0.0),
+            (RIGID_BODY_PARAM_WAKE_UP, 1.0),
+            (rigid_body_param_abi_version(), 1.0),
+        ] {
+            let b = rigid_body_set_param(world, handle, param, value).0;
+            let f = rigid_body_set_param_flag(world, handle, param, value);
+            assert_eq!(b, f, "param {param} value {value}: Bool {b} vs flag {f}");
+        }
+        world_destroy(world);
+    }
 }
