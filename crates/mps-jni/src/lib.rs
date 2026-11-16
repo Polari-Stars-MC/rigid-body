@@ -1028,6 +1028,11 @@ jni!(boolean worldMultibodyJointSetSpringDamping(long world, long handle, int ax
 jni!(boolean worldMultibodyJointBrake(long world, long handle, int axis, double damping) {
     jo::world_multibody_joint_brake(wm(world), handle as u64, axis as u32, damping).0 as jbyte
 });
+// 读关节自己的广义坐标。挂在 multibody 上的刚体，其 angvel 会被求解器每步覆盖，
+// 所以观察关节运动只能读这个。
+jni!(double worldMultibodyJointGetCoordinate(long world, long handle, int axis) {
+    jo::world_multibody_joint_get_coordinate(wm(world), handle as u64, axis as u32)
+});
 jni!(boolean worldRemoveMultibodyJoint(long world, long handle, int wake_up) {
     jo::world_remove_multibody_joint(m::<WH>(world), handle as u64, jb(wake_up)).0 as jbyte
 });
