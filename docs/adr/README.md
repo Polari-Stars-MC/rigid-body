@@ -21,5 +21,6 @@
 | [0013](0013-multibody-joint-force-cap.md) | multibody 关节的力矩上限：让九种电机模型在两条路径上通用 | 接受 |
 | [0014](0014-fork-force-containers.md) | fork 的力容器模型：持久力不必每帧重加（事后补记） | 接受 |
 | [0015](0015-explicit-collision-pair-disable.md) | fork 的显式禁用碰撞对（事后补记） | 接受 |
+| [0016](0016-generic-abi-property-channel.md) | C ABI 通用属性通道（soft_body 首批切片） | 接受 |
 
 仓库根的 [DESIGN.md](../../DESIGN.md) 和 [OPTIMIZATION.md](../../OPTIMIZATION.md) 是被源码注释引用的章节索引，不是 ADR 的前身。它们的 `§` 编号继续留在原地。
