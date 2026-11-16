@@ -132,6 +132,7 @@ pub mod rapier {
     pub mod tyndall;
     pub mod tyndall_particles;
     pub mod tyndall_scene;
+    pub mod tyndall_spectral;
     pub mod vehicle;
     pub mod volcano;
     pub mod voronoi;

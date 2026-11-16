@@ -51,6 +51,7 @@ pub mod trajectory;
 pub mod transmission;
 pub mod tyndall;
 pub mod tyndall_particles;
+pub mod tyndall_spectral;
 pub mod volcano;
 pub mod voronoi;
 pub mod wave_optics;

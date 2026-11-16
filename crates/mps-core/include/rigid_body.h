@@ -525,6 +525,11 @@ typedef struct RigidBodyBuilderHandle RigidBodyBuilderHandle;
  */
 typedef struct RigidBodyMemHandle RigidBodyMemHandle;
 
+/**
+ * RGB 三通道亮度。
+ */
+typedef struct SpectralLuminance SpectralLuminance;
+
 typedef struct VoxelGrid VoxelGrid;
 
 typedef struct WorldHandle WorldHandle;
@@ -2305,6 +2310,8 @@ typedef struct TopologyOptimizationReport {
   double total_compliance;
   double max_density_change;
 } TopologyOptimizationReport;
+
+
 
 #ifdef __cplusplus
 extern "C" {
@@ -11291,6 +11298,63 @@ struct Bool tyndall_visibility_score(double sigma_sca,
                                      double path_length,
                                      double g,
                                      double *out);
+
+struct Bool tyndall_wavelength_to_rgb(double wavelength,
+                                      double *out_r,
+                                      double *out_g,
+                                      double *out_b);
+
+/**
+ * 由单波长参数构造三通道光学参数（米氏标度 `σ ∝ λ^(-n)`）。
+ *
+ * `exponent` 取 `1.0~1.5` 做丁达尔光柱；取 `4.0` 是瑞利极限（强烈偏蓝）。
+ */
+struct Bool tyndall_spectral_optics_from_monochrome(double sigma_sca,
+                                                    double sigma_ext,
+                                                    double mass,
+                                                    double wavelength_ref,
+                                                    double exponent,
+                                                    double *out_sigma_sca,
+                                                    double *out_sigma_ext);
+
+/**
+ * 均匀介质的分通道散射亮度。
+ *
+ * 六个 `sigma_*` 分别是 R/G/B 的散射与消光截面；`light_*` 是三通道入射强度。
+ */
+struct Bool tyndall_inscatter_spectral(double sigma_sca_r,
+                                       double sigma_sca_g,
+                                       double sigma_sca_b,
+                                       double sigma_ext_r,
+                                       double sigma_ext_g,
+                                       double sigma_ext_b,
+                                       double mass,
+                                       double number_density,
+                                       double phase,
+                                       double light_r,
+                                       double light_g,
+                                       double light_b,
+                                       double ray_length,
+                                       uint32_t steps,
+                                       double *out_r,
+                                       double *out_g,
+                                       double *out_b);
+
+/**
+ * 分通道透射率。
+ */
+struct Bool tyndall_spectral_transmittance(double sigma_ext_r,
+                                           double sigma_ext_g,
+                                           double sigma_ext_b,
+                                           double sigma_sca_r,
+                                           double sigma_sca_g,
+                                           double sigma_sca_b,
+                                           double mass,
+                                           double number_density,
+                                           double path_length,
+                                           double *out_r,
+                                           double *out_g,
+                                           double *out_b);
 
 struct Bool material_mechanics_hookes_law_uniaxial(double stress,
                                                    double youngs_modulus,

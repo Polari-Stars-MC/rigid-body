@@ -19,6 +19,9 @@
 //! not expand declarative macros, so macro-generated `pub extern "C" fn`
 //! items are silently omitted from `rigid_body.h`.
 
+use crate::rapier::error::{
+    ERR_INVALID_ARGUMENT, ERR_NULL_POINTER, clear_error, ffi_guard, set_error,
+};
 use crate::rapier::ffi::{Bool, ffi_scalar};
 use mps_formula::electromagnetism::*;
 
@@ -342,5 +345,229 @@ pub extern "C" fn tyndall_visibility_score(
             path_length,
             g,
         )
+    })
+}
+
+// ── 丁达尔光谱版（ADR-0020）─────────────────────────────────────────────────
+//
+// 标量版本只能让光柱"变暗"，分通道版本能让它"变暖"—— 穿过厚烟雾后蓝光先被
+// 散射掉，光柱偏红，与日落同源。
+//
+// 写 `out_r` / `out_g` / `out_b` 三个 `f64`，全部成功才写，避免半更新的状态。
+
+#[unsafe(no_mangle)]
+pub extern "C" fn tyndall_wavelength_to_rgb(
+    wavelength: f64,
+    out_r: *mut f64,
+    out_g: *mut f64,
+    out_b: *mut f64,
+) -> Bool {
+    if out_r.is_null() || out_g.is_null() || out_b.is_null() {
+        set_error(ERR_NULL_POINTER, "tyndall_wavelength_to_rgb: out is null");
+        return Bool::FALSE;
+    }
+    ffi_guard(
+        Bool::FALSE,
+        || match mps_formula::tyndall_spectral::wavelength_to_rgb(wavelength) {
+            Some((r, g, b)) => {
+                unsafe {
+                    *out_r = r;
+                    *out_g = g;
+                    *out_b = b;
+                }
+                clear_error();
+                Bool::TRUE
+            }
+            None => {
+                set_error(
+                    ERR_INVALID_ARGUMENT,
+                    "tyndall_wavelength_to_rgb: non-finite wavelength",
+                );
+                Bool::FALSE
+            }
+        },
+    )
+}
+
+/// 由单波长参数构造三通道光学参数（米氏标度 `σ ∝ λ^(-n)`）。
+///
+/// `exponent` 取 `1.0~1.5` 做丁达尔光柱；取 `4.0` 是瑞利极限（强烈偏蓝）。
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub extern "C" fn tyndall_spectral_optics_from_monochrome(
+    sigma_sca: f64,
+    sigma_ext: f64,
+    mass: f64,
+    wavelength_ref: f64,
+    exponent: f64,
+    out_sigma_sca: *mut f64,
+    out_sigma_ext: *mut f64,
+) -> Bool {
+    if out_sigma_sca.is_null() || out_sigma_ext.is_null() {
+        set_error(
+            ERR_NULL_POINTER,
+            "tyndall_spectral_optics_from_monochrome: out is null",
+        );
+        return Bool::FALSE;
+    }
+    ffi_guard(Bool::FALSE, || {
+        match mps_formula::tyndall_spectral::SpectralOptics::from_monochrome(
+            sigma_sca,
+            sigma_ext,
+            mass,
+            wavelength_ref,
+            exponent,
+        ) {
+            Some(o) => {
+                // 按 RGB 顺序写 6 个值：sca_r, sca_g, sca_b, ext_r, ext_g, ext_b。
+                unsafe {
+                    *out_sigma_sca = o.sigma_sca_r;
+                    *out_sigma_ext = o.sigma_ext_r;
+                    *out_sigma_sca.add(1) = o.sigma_sca_g;
+                    *out_sigma_ext.add(1) = o.sigma_ext_g;
+                    *out_sigma_sca.add(2) = o.sigma_sca_b;
+                    *out_sigma_ext.add(2) = o.sigma_ext_b;
+                }
+                clear_error();
+                Bool::TRUE
+            }
+            None => {
+                set_error(
+                    ERR_INVALID_ARGUMENT,
+                    "tyndall_spectral_optics_from_monochrome: invalid arguments",
+                );
+                Bool::FALSE
+            }
+        }
+    })
+}
+
+/// 均匀介质的分通道散射亮度。
+///
+/// 六个 `sigma_*` 分别是 R/G/B 的散射与消光截面；`light_*` 是三通道入射强度。
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub extern "C" fn tyndall_inscatter_spectral(
+    sigma_sca_r: f64,
+    sigma_sca_g: f64,
+    sigma_sca_b: f64,
+    sigma_ext_r: f64,
+    sigma_ext_g: f64,
+    sigma_ext_b: f64,
+    mass: f64,
+    number_density: f64,
+    phase: f64,
+    light_r: f64,
+    light_g: f64,
+    light_b: f64,
+    ray_length: f64,
+    steps: u32,
+    out_r: *mut f64,
+    out_g: *mut f64,
+    out_b: *mut f64,
+) -> Bool {
+    if out_r.is_null() || out_g.is_null() || out_b.is_null() {
+        set_error(ERR_NULL_POINTER, "tyndall_inscatter_spectral: out is null");
+        return Bool::FALSE;
+    }
+    ffi_guard(Bool::FALSE, || {
+        let optics = mps_formula::tyndall_spectral::SpectralOptics {
+            sigma_sca_r,
+            sigma_sca_g,
+            sigma_sca_b,
+            sigma_ext_r,
+            sigma_ext_g,
+            sigma_ext_b,
+            mass,
+        };
+        let light = mps_formula::tyndall_spectral::SpectralLuminance {
+            r: light_r,
+            g: light_g,
+            b: light_b,
+        };
+        match mps_formula::tyndall_spectral::inscatter_spectral(
+            optics,
+            number_density,
+            phase,
+            light,
+            ray_length,
+            steps,
+        ) {
+            Some(v) => {
+                unsafe {
+                    *out_r = v.r;
+                    *out_g = v.g;
+                    *out_b = v.b;
+                }
+                clear_error();
+                Bool::TRUE
+            }
+            None => {
+                set_error(
+                    ERR_INVALID_ARGUMENT,
+                    "tyndall_inscatter_spectral: invalid arguments",
+                );
+                Bool::FALSE
+            }
+        }
+    })
+}
+
+/// 分通道透射率。
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub extern "C" fn tyndall_spectral_transmittance(
+    sigma_ext_r: f64,
+    sigma_ext_g: f64,
+    sigma_ext_b: f64,
+    sigma_sca_r: f64,
+    sigma_sca_g: f64,
+    sigma_sca_b: f64,
+    mass: f64,
+    number_density: f64,
+    path_length: f64,
+    out_r: *mut f64,
+    out_g: *mut f64,
+    out_b: *mut f64,
+) -> Bool {
+    if out_r.is_null() || out_g.is_null() || out_b.is_null() {
+        set_error(
+            ERR_NULL_POINTER,
+            "tyndall_spectral_transmittance: out is null",
+        );
+        return Bool::FALSE;
+    }
+    ffi_guard(Bool::FALSE, || {
+        let optics = mps_formula::tyndall_spectral::SpectralOptics {
+            sigma_sca_r,
+            sigma_sca_g,
+            sigma_sca_b,
+            sigma_ext_r,
+            sigma_ext_g,
+            sigma_ext_b,
+            mass,
+        };
+        match mps_formula::tyndall_spectral::spectral_transmittance(
+            optics,
+            number_density,
+            path_length,
+        ) {
+            Some(v) => {
+                unsafe {
+                    *out_r = v.r;
+                    *out_g = v.g;
+                    *out_b = v.b;
+                }
+                clear_error();
+                Bool::TRUE
+            }
+            None => {
+                set_error(
+                    ERR_INVALID_ARGUMENT,
+                    "tyndall_spectral_transmittance: invalid arguments",
+                );
+                Bool::FALSE
+            }
+        }
     })
 }
