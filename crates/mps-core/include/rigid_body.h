@@ -179,6 +179,56 @@
 #define SOFT_PARAM_ACTIVATION 5
 
 /**
+ * 自碰撞接触摩擦系数 μ（需先开启自碰撞；0 ≤ μ ≤ 1）。
+ */
+#define SOFT_PARAM_SELF_COLLISION_FRICTION 6
+
+/**
+ * 跨体碰撞接触摩擦系数 μ（需先开启跨体碰撞；0 ≤ μ ≤ 1）。
+ */
+#define SOFT_PARAM_CROSS_COLLISION_FRICTION 7
+
+/**
+ * 体积守恒约束柔度（`0` = 硬/不可压缩）。
+ */
+#define SOFT_PARAM_VOLUME_CONSERVATION 8
+
+/**
+ * `soft_body_clear_param` 的属性编号。
+ *
+ * 复用 `set_param` 的编号空间：同一个属性"可设可清"时用同一个数字，
+ * 这样宿主只需记一份属性表。
+ */
+#define SOFT_CLEAR_WIND 0
+
+#define SOFT_CLEAR_PRESSURE 1
+
+#define SOFT_CLEAR_SELF_COLLISION 2
+
+#define SOFT_CLEAR_CROSS_COLLISION 3
+
+#define SOFT_CLEAR_VOLUME_CONSERVATION 4
+
+#define SOFT_CLEAR_COROTATED 5
+
+#define SOFT_CLEAR_NEO_HOOKEAN 6
+
+#define SOFT_CLEAR_COHESION 7
+
+/**
+ * `soft_body_set_indexed_param` 的属性编号。
+ */
+#define SOFT_IDX_SPRING_STIFFNESS 0
+
+#define SOFT_IDX_SPRING_ACTIVATION 1
+
+#define SOFT_IDX_DISTANCE_COMPLIANCE 2
+
+#define SOFT_IDX_DISTANCE_ACTIVATION 3
+
+#define SOFT_IDX_DISTANCE_COMPRESSION 4
+
+/**
  * `ForceKind::Custom` discriminator for soft-body internal spring/damping forces.
  * Routed through `force_containers` so they share the same `Persistent` lifecycle
  * and `compute_body_effective_forces` summation as gravity/thrust (Phase 2).
@@ -9557,8 +9607,9 @@ uint8_t soft_body_set_param_flag(struct WorldHandle *world,
  * `out` 为 null → `ERR_NULL_POINTER`；`param` 未分配或该属性不可读 →
  * `ERR_INVALID_ARGUMENT`。
  *
- * 本切片里 `substeps` 可读，其余五个都是"已开启/未开启 + 参数值"型，读取返回
- * 当前生效的参数值（未开启时返回 0）。
+ * 本切片里 `substeps` / `damping` / `pressure` 可读；`corotated` / `neo_hookean` /
+ * `activation` 与三个"需先开启前置特性"的属性都不可读——前者没有体级标量，
+ * 后者依赖 `Option` 载荷的状态，与其编一个数字不如明确报告不可读。
  *
  * # Safety
  * `world` 必须有效；`out` 必须指向至少一个可写 `f64`。
@@ -9567,6 +9618,45 @@ struct Bool soft_body_get_param(struct WorldHandle *world,
                                 uint32_t id,
                                 uint32_t param,
                                 double *out);
+
+/**
+ * 已分配的 clear 属性个数。与 `soft_body_param_abi_version` 独立计数，
+ * 因为两个通道的属性集不重合（例如 `damping` 可设但没有 clear）。
+ */
+uint32_t soft_body_clear_param_abi_version(void);
+
+/**
+ * 通用属性清除通道：把属性置回"不存在"。
+ *
+ * # Returns
+ * `Bool::TRUE` 成功；world 为 null → `ERR_NULL_POINTER`；`id` 未知 →
+ * `ERR_NOT_FOUND`；`param` 未分配 → `ERR_INVALID_ARGUMENT`。
+ *
+ * # Safety
+ * `world` 必须有效。
+ */
+struct Bool soft_body_clear_param(struct WorldHandle *world, uint32_t id, uint32_t param);
+
+/**
+ * 已分配的 indexed 属性个数。
+ */
+uint32_t soft_body_indexed_param_abi_version(void);
+
+/**
+ * 逐元素属性写入通道。
+ *
+ * # Returns
+ * `Bool::TRUE` 成功；world 为 null → `ERR_NULL_POINTER`；`id` 未知或 `index`
+ * 越界 → `ERR_NOT_FOUND`；`param` 未分配或值域非法 → `ERR_INVALID_ARGUMENT`。
+ *
+ * # Safety
+ * `world` 必须有效。
+ */
+struct Bool soft_body_set_indexed_param(struct WorldHandle *world,
+                                        uint32_t id,
+                                        uint32_t param,
+                                        uint32_t index,
+                                        double value);
 
 /**
  * # Safety

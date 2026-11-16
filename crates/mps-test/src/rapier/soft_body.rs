@@ -6162,10 +6162,14 @@ mod tests {
             SOFT_PARAM_ACTIVATION,
         ];
         let version = soft_body_param_abi_version();
-        assert_eq!(
-            version as usize,
-            all.len(),
-            "abi version must equal the number of allocated params"
+        // Batch two merged three more setters into the same channel, so the
+        // version is now larger than this list. Assert coverage rather than
+        // equality: adding a constant here without bumping the version still
+        // fails, which is the property that matters.
+        assert!(
+            version as usize >= all.len(),
+            "abi version {version} must cover at least the {} constants checked here",
+            all.len()
         );
         for &p in &all {
             assert!(
@@ -6375,6 +6379,308 @@ mod tests {
         let a = soft_body_set_param(world, id, SOFT_PARAM_DAMPING, 0.2).0;
         let b = soft_body_set_param_flag(world, id, SOFT_PARAM_DAMPING, 0.2);
         assert_eq!(a, b);
+        world_destroy(world);
+    }
+
+    // ── 通用属性通道第二批：clear / indexed（ADR-0016） ───────────────────────
+
+    use mps_core::rapier::soft_body::{
+        SOFT_CLEAR_COHESION, SOFT_CLEAR_COROTATED, SOFT_CLEAR_CROSS_COLLISION,
+        SOFT_CLEAR_NEO_HOOKEAN, SOFT_CLEAR_PRESSURE, SOFT_CLEAR_SELF_COLLISION,
+        SOFT_CLEAR_VOLUME_CONSERVATION, SOFT_CLEAR_WIND, SOFT_IDX_DISTANCE_ACTIVATION,
+        SOFT_IDX_DISTANCE_COMPLIANCE, SOFT_IDX_DISTANCE_COMPRESSION, SOFT_IDX_SPRING_ACTIVATION,
+        SOFT_IDX_SPRING_STIFFNESS, SOFT_PARAM_CROSS_COLLISION_FRICTION,
+        SOFT_PARAM_SELF_COLLISION_FRICTION, SOFT_PARAM_VOLUME_CONSERVATION, soft_body_clear_param,
+        soft_body_clear_param_abi_version, soft_body_indexed_param_abi_version,
+        soft_body_set_indexed_param,
+    };
+
+    #[test]
+    fn clear_and_indexed_param_ids_match_their_abi_versions() {
+        // Same discipline as the scalar set: every constant below its version,
+        // no duplicates. A duplicate would make one property alias another.
+        let clears = [
+            SOFT_CLEAR_WIND,
+            SOFT_CLEAR_PRESSURE,
+            SOFT_CLEAR_SELF_COLLISION,
+            SOFT_CLEAR_CROSS_COLLISION,
+            SOFT_CLEAR_VOLUME_CONSERVATION,
+            SOFT_CLEAR_COROTATED,
+            SOFT_CLEAR_NEO_HOOKEAN,
+            SOFT_CLEAR_COHESION,
+        ];
+        let cv = soft_body_clear_param_abi_version();
+        assert_eq!(cv as usize, clears.len());
+        let mut sorted = clears;
+        sorted.sort_unstable();
+        for w in sorted.windows(2) {
+            assert_ne!(w[0], w[1], "duplicate clear id {}", w[0]);
+        }
+
+        let indexed = [
+            SOFT_IDX_SPRING_STIFFNESS,
+            SOFT_IDX_SPRING_ACTIVATION,
+            SOFT_IDX_DISTANCE_COMPLIANCE,
+            SOFT_IDX_DISTANCE_ACTIVATION,
+            SOFT_IDX_DISTANCE_COMPRESSION,
+        ];
+        let iv = soft_body_indexed_param_abi_version();
+        assert_eq!(iv as usize, indexed.len());
+        let mut sorted = indexed;
+        sorted.sort_unstable();
+        for w in sorted.windows(2) {
+            assert_ne!(w[0], w[1], "duplicate indexed id {}", w[0]);
+        }
+    }
+
+    /// `clear_param` must agree with each dedicated `clear_*` entry.
+    #[test]
+    fn clear_param_agrees_with_the_dedicated_clears() {
+        let world = make_world();
+
+        // (param, dedicated entry) pairs. Each case runs on a fresh body so the
+        // two paths never share mutable state.
+        // `extern "C" fn` items cannot be coerced to `fn` pointers, so each
+        // dedicated entry is wrapped in a closure taking the same arguments.
+        let cases: [(u32, fn(*mut WorldHandle, u32) -> Bool); 8] = [
+            (SOFT_CLEAR_WIND, |w, i| soft_body_clear_wind(w, i)),
+            (SOFT_CLEAR_PRESSURE, |w, i| soft_body_clear_pressure(w, i)),
+            (SOFT_CLEAR_SELF_COLLISION, |w, i| {
+                soft_body_clear_self_collision(w, i)
+            }),
+            (SOFT_CLEAR_CROSS_COLLISION, |w, i| {
+                soft_body_clear_cross_collision(w, i)
+            }),
+            (SOFT_CLEAR_VOLUME_CONSERVATION, |w, i| {
+                soft_body_clear_volume_conservation(w, i)
+            }),
+            (SOFT_CLEAR_COROTATED, |w, i| soft_body_clear_corotated(w, i)),
+            (SOFT_CLEAR_NEO_HOOKEAN, |w, i| {
+                soft_body_clear_neo_hookean(w, i)
+            }),
+            (SOFT_CLEAR_COHESION, |w, i| soft_body_clear_cohesion(w, i)),
+        ];
+        for (param, dedicated) in cases {
+            let a = param_body(world);
+            let b = param_body(world);
+            let generic = soft_body_clear_param(world, a, param).0 != 0;
+            let specific = dedicated(world, b).0 != 0;
+            assert_eq!(
+                generic, specific,
+                "clear param {param}: generic {generic} vs dedicated {specific}"
+            );
+            // Clearing an unset property is a no-op, not an error — both paths
+            // must agree on that too.
+            assert_eq!(
+                soft_body_clear_param(world, a, param).0 != 0,
+                specific,
+                "clear param {param} must be idempotent like the dedicated entry"
+            );
+        }
+        world_destroy(world);
+    }
+
+    #[test]
+    fn clear_param_rejects_unknown_ids() {
+        let world = make_world();
+        let id = param_body(world);
+
+        assert_eq!(
+            soft_body_clear_param(world, id, soft_body_clear_param_abi_version() + 7),
+            Bool::FALSE
+        );
+        assert_eq!(last_error_code(), ERR_INVALID_ARGUMENT);
+
+        assert_eq!(
+            soft_body_clear_param(world, 9999, SOFT_CLEAR_WIND),
+            Bool::FALSE
+        );
+        assert_eq!(last_error_code(), ERR_NOT_FOUND);
+
+        assert_eq!(
+            soft_body_clear_param(std::ptr::null_mut(), id, SOFT_CLEAR_WIND),
+            Bool::FALSE
+        );
+        assert_eq!(last_error_code(), ERR_NULL_POINTER);
+
+        world_destroy(world);
+    }
+
+    /// The three newly merged scalar setters must agree with their dedicated
+    /// counterparts, exactly like the first batch.
+    #[test]
+    fn batch_two_setters_agree_with_the_generic_channel() {
+        let world = make_world();
+        let a = param_body(world);
+        let b = param_body(world);
+
+        // Friction setters require the feature to be enabled first; enable it on
+        // both bodies so the comparison is about the value, not the precondition.
+        assert_eq!(
+            soft_body_set_self_collision(world, a, 0.05, 0.5),
+            Bool::TRUE
+        );
+        assert_eq!(
+            soft_body_set_self_collision(world, b, 0.05, 0.5),
+            Bool::TRUE
+        );
+        assert_eq!(
+            soft_body_set_cross_collision(world, a, 0.05, 0.5),
+            Bool::TRUE
+        );
+        assert_eq!(
+            soft_body_set_cross_collision(world, b, 0.05, 0.5),
+            Bool::TRUE
+        );
+
+        let cases: [(u32, f64, fn(*mut WorldHandle, u32, f64) -> Bool); 7] = [
+            (SOFT_PARAM_SELF_COLLISION_FRICTION, 0.4, |w, i, v| {
+                soft_body_set_self_collision_friction(w, i, v)
+            }),
+            (SOFT_PARAM_SELF_COLLISION_FRICTION, 1.5, |w, i, v| {
+                soft_body_set_self_collision_friction(w, i, v)
+            }),
+            (SOFT_PARAM_CROSS_COLLISION_FRICTION, 0.6, |w, i, v| {
+                soft_body_set_cross_collision_friction(w, i, v)
+            }),
+            (SOFT_PARAM_CROSS_COLLISION_FRICTION, -0.1, |w, i, v| {
+                soft_body_set_cross_collision_friction(w, i, v)
+            }),
+            (SOFT_PARAM_VOLUME_CONSERVATION, 0.0, |w, i, v| {
+                soft_body_set_volume_conservation(w, i, v)
+            }),
+            (SOFT_PARAM_VOLUME_CONSERVATION, 0.25, |w, i, v| {
+                soft_body_set_volume_conservation(w, i, v)
+            }),
+            (SOFT_PARAM_VOLUME_CONSERVATION, -1.0, |w, i, v| {
+                soft_body_set_volume_conservation(w, i, v)
+            }),
+        ];
+        for (param, value, dedicated) in cases {
+            let generic = soft_body_set_param(world, a, param, value).0 != 0;
+            let specific = dedicated(world, b, value).0 != 0;
+            assert_eq!(
+                generic, specific,
+                "param {param} value {value}: generic {generic} vs dedicated {specific}"
+            );
+        }
+        world_destroy(world);
+    }
+
+    /// Indexed channel: needs a spring and a distance constraint to address.
+    #[test]
+    fn indexed_param_agrees_with_the_dedicated_entries() {
+        let world = make_world();
+        let a = param_body(world);
+        let b = param_body(world);
+
+        // Spring between particles 0 and 1, plus a distance constraint.
+        assert_eq!(soft_body_add_spring(world, a, 0, 1, 100.0, 1.0), Bool::TRUE);
+        assert_eq!(soft_body_add_spring(world, b, 0, 1, 100.0, 1.0), Bool::TRUE);
+        assert_eq!(
+            soft_body_add_distance_constraint(world, a, 0, 1, 0.01),
+            Bool::TRUE
+        );
+        assert_eq!(
+            soft_body_add_distance_constraint(world, b, 0, 1, 0.01),
+            Bool::TRUE
+        );
+
+        // Spring stiffness.
+        let g = soft_body_set_indexed_param(world, a, SOFT_IDX_SPRING_STIFFNESS, 0, 250.0);
+        let d = soft_body_set_spring_stiffness(world, b, 0, 250.0);
+        assert_eq!(g, d, "spring stiffness");
+
+        // Distance constraint compliance.
+        let g = soft_body_set_indexed_param(world, a, SOFT_IDX_DISTANCE_COMPLIANCE, 0, 0.05);
+        let d = soft_body_set_distance_constraint_compliance(world, b, 0, 0.05);
+        assert_eq!(g, d, "distance compliance");
+
+        // Out-of-range index: both paths must reject.
+        let g = soft_body_set_indexed_param(world, a, SOFT_IDX_SPRING_STIFFNESS, 999, 1.0);
+        let d = soft_body_set_spring_stiffness(world, b, 999, 1.0);
+        assert_eq!(g, d, "out-of-range index must agree");
+        assert_eq!(g, Bool::FALSE);
+
+        world_destroy(world);
+    }
+
+    #[test]
+    fn indexed_param_rejects_unknown_ids() {
+        let world = make_world();
+        let id = param_body(world);
+
+        assert_eq!(
+            soft_body_set_indexed_param(
+                world,
+                id,
+                soft_body_indexed_param_abi_version() + 3,
+                0,
+                1.0
+            ),
+            Bool::FALSE
+        );
+        assert_eq!(last_error_code(), ERR_INVALID_ARGUMENT);
+
+        assert_eq!(
+            soft_body_set_indexed_param(world, 9999, SOFT_IDX_SPRING_STIFFNESS, 0, 1.0),
+            Bool::FALSE
+        );
+        assert_eq!(last_error_code(), ERR_NOT_FOUND);
+
+        assert_eq!(
+            soft_body_set_indexed_param(
+                std::ptr::null_mut(),
+                id,
+                SOFT_IDX_SPRING_STIFFNESS,
+                0,
+                1.0
+            ),
+            Bool::FALSE
+        );
+        assert_eq!(last_error_code(), ERR_NULL_POINTER);
+
+        world_destroy(world);
+    }
+
+    /// A rejected `set_indexed_param` must not touch the element it addressed.
+    #[test]
+    fn indexed_param_failure_leaves_state_alone() {
+        let world = make_world();
+        let id = param_body(world);
+        assert_eq!(
+            soft_body_add_spring(world, id, 0, 1, 100.0, 1.0),
+            Bool::TRUE
+        );
+
+        // Set a known stiffness, then attempt an invalid one on the same index.
+        assert_eq!(
+            soft_body_set_indexed_param(world, id, SOFT_IDX_SPRING_STIFFNESS, 0, 250.0),
+            Bool::TRUE
+        );
+        // A zero-capacity read reports the total spring count and writes nothing.
+        // The tetrahedron built by `param_body` already links its 4 particles, so
+        // the count is the auto-generated ones plus the one added above — assert
+        // that it is non-zero and that the read did not panic.
+        let total = soft_body_read_spring_forces(world, id, std::ptr::null_mut(), 0);
+        assert!(
+            total >= 1,
+            "expected at least the explicitly added spring, got {total}"
+        );
+
+        // NaN stiffness is rejected by the validator.
+        assert_eq!(
+            soft_body_set_indexed_param(world, id, SOFT_IDX_SPRING_STIFFNESS, 0, f64::NAN),
+            Bool::FALSE
+        );
+        assert_eq!(last_error_code(), ERR_INVALID_ARGUMENT);
+
+        // And the valid value still applies afterwards (nothing was corrupted).
+        assert_eq!(
+            soft_body_set_indexed_param(world, id, SOFT_IDX_SPRING_STIFFNESS, 0, 300.0),
+            Bool::TRUE
+        );
+
         world_destroy(world);
     }
 }

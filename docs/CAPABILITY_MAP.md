@@ -11,10 +11,10 @@
 | 项 | 数量 |
 | --- | --- |
 | `mps-core` 里有 `extern "C"` 入口的源模块 | 63 |
-| `mps-core` C ABI 入口总数 | 953 |
-| 其中出现在生成头文件 `rigid_body.h` 里 | 953 |
+| `mps-core` C ABI 入口总数 | 957 |
+| 其中出现在生成头文件 `rigid_body.h` 里 | 957 |
 | 其中被 `mps-jni` 的 `jni!` 体引用 | 613 |
-| 其中被 `mps-test` 引用 | 717 |
+| 其中被 `mps-test` 引用 | 721 |
 | 既无 JNI 绑定也无测试引用 | 129 |
 
 ## 模块表
@@ -71,7 +71,7 @@
 | `rtree` | `rtree_*` | 10 | — | clear_param 1 / read_param 1 / topology 2 / dedicated 6 | [rtree.md](mps-core/rtree.md) | [rtree.rs](../crates/mps-test/src/rapier/rtree.rs) | 10 | 9 |
 | `sensor` | `sensor_zone_*` | 13 | — | set_param 4 / clear_param 1 / read_param 3 / dedicated 5 | [sensor.md](mps-core/sensor.md) | [sensor.rs](../crates/mps-test/src/rapier/sensor.rs) | 13 | 11 |
 | `servo_body` | `servo_body_*` | 10 | — | set_param 4 / read_param 3 / dedicated 3 | [servo_body.md](mps-core/servo_body.md) | [servo_body.rs](../crates/mps-test/src/rapier/servo_body.rs) | 10 | 10 |
-| `soft_body` | `soft_*` | 94 | — | set_param 32 / clear_param 8 / read_param 15 / topology 9 / dedicated 30 | [soft_body.md](mps-core/soft_body.md) | [soft_body.rs](../crates/mps-test/src/rapier/soft_body.rs) | 89 | 93 |
+| `soft_body` | `soft_*` | 98 | — | set_param 33 / clear_param 10 / read_param 15 / topology 9 / dedicated 31 | [soft_body.md](mps-core/soft_body.md) | [soft_body.rs](../crates/mps-test/src/rapier/soft_body.rs) | 89 | 97 |
 | `spaceflight/debris` | `space_*` | 2 | — | dedicated 2 | [spaceflight-debris.md](mps-core/spaceflight-debris.md) | [spaceflight.rs](../crates/mps-test/src/rapier/spaceflight.rs) | 0 | 2 |
 | `spaceflight/dynamics` | `space_*` | 14 | — | dedicated 14 | [spaceflight-dynamics.md](mps-core/spaceflight-dynamics.md) | [spaceflight.rs](../crates/mps-test/src/rapier/spaceflight.rs) | 0 | 14 |
 | `spaceflight/gnss` | `space_*` | 5 | — | dedicated 5 | [spaceflight-gnss.md](mps-core/spaceflight-gnss.md) | [spaceflight.rs](../crates/mps-test/src/rapier/spaceflight.rs) | 0 | 5 |
@@ -93,13 +93,13 @@
 
 | 组 | 含义 | 入口数 |
 | --- | --- | ---: |
-| `set_param` | `*_set_<prop>` → `*_set_param(e, PROP, v)` | 194 |
-| `clear_param` | `*_clear_<prop>` → `*_set_param(e, PROP, none)` | 30 |
+| `set_param` | `*_set_<prop>` → `*_set_param(e, PROP, v)` | 195 |
+| `clear_param` | `*_clear_<prop>` → `*_set_param(e, PROP, none)` | 32 |
 | `read_param` | `*_get_<prop>` / `*_read_<prop>` → `*_get_param(e, PROP, out)` | 118 |
 | `topology` | `*_add/insert/remove/detach/attach_*`（第二批） | 57 |
-| `dedicated` | 带真实逻辑，必须保留专用入口 | 554 |
+| `dedicated` | 带真实逻辑，必须保留专用入口 | 555 |
 
-**属性通道可直接吸收 342 个入口（占 953 的 35%）。**
+**属性通道可直接吸收 345 个入口（占 957 的 36%）。**
 
 ## 头文件声明了、默认构建里没有
 

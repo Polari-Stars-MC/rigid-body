@@ -5382,6 +5382,12 @@ pub const SOFT_PARAM_PRESSURE: u32 = 2;
 pub const SOFT_PARAM_DAMPING: u32 = 3;
 pub const SOFT_PARAM_SUBSTEPS: u32 = 4;
 pub const SOFT_PARAM_ACTIVATION: u32 = 5;
+/// 自碰撞接触摩擦系数 μ（需先开启自碰撞；0 ≤ μ ≤ 1）。
+pub const SOFT_PARAM_SELF_COLLISION_FRICTION: u32 = 6;
+/// 跨体碰撞接触摩擦系数 μ（需先开启跨体碰撞；0 ≤ μ ≤ 1）。
+pub const SOFT_PARAM_CROSS_COLLISION_FRICTION: u32 = 7;
+/// 体积守恒约束柔度（`0` = 硬/不可压缩）。
+pub const SOFT_PARAM_VOLUME_CONSERVATION: u32 = 8;
 
 /// 本切片已分配的标量属性个数。C 侧用它做前向兼容探测：
 /// 旧库返回小数字，宿主据此判断哪些 `SOFT_PARAM_*` 不可用。
@@ -5393,7 +5399,7 @@ pub extern "C" fn soft_body_param_abi_version() -> u32 {
     // entry to go through `ffi_guard` (catch_unwind). Keeping the rule uniform
     // also keeps the guard test a simple "every entry is wrapped" check rather
     // than growing a hand-maintained exemption list.
-    ffi_guard(0, || 6)
+    ffi_guard(0, || 9)
 }
 
 /// 通用标量属性写入通道。
@@ -5446,6 +5452,9 @@ pub extern "C" fn soft_body_set_param(
                 }
             }
             SOFT_PARAM_ACTIVATION => sb.set_activation(value),
+            SOFT_PARAM_SELF_COLLISION_FRICTION => sb.set_self_collision_friction(value),
+            SOFT_PARAM_CROSS_COLLISION_FRICTION => sb.set_cross_collision_friction(value),
+            SOFT_PARAM_VOLUME_CONSERVATION => sb.set_volume_conservation(value),
             _ => {
                 set_error(
                     ERR_INVALID_ARGUMENT,
@@ -5488,8 +5497,9 @@ pub extern "C" fn soft_body_set_param_flag(
 /// `out` 为 null → `ERR_NULL_POINTER`；`param` 未分配或该属性不可读 →
 /// `ERR_INVALID_ARGUMENT`。
 ///
-/// 本切片里 `substeps` 可读，其余五个都是"已开启/未开启 + 参数值"型，读取返回
-/// 当前生效的参数值（未开启时返回 0）。
+/// 本切片里 `substeps` / `damping` / `pressure` 可读；`corotated` / `neo_hookean` /
+/// `activation` 与三个"需先开启前置特性"的属性都不可读——前者没有体级标量，
+/// 后者依赖 `Option` 载荷的状态，与其编一个数字不如明确报告不可读。
 ///
 /// # Safety
 /// `world` 必须有效；`out` 必须指向至少一个可写 `f64`。
@@ -5518,10 +5528,16 @@ pub extern "C" fn soft_body_get_param(
             SOFT_PARAM_SUBSTEPS => sb.substeps as f64,
             SOFT_PARAM_DAMPING => sb.damping,
             SOFT_PARAM_PRESSURE => sb.pressure.unwrap_or(0.0),
-            SOFT_PARAM_COROTATED | SOFT_PARAM_NEO_HOOKEAN | SOFT_PARAM_ACTIVATION => {
+            SOFT_PARAM_COROTATED
+            | SOFT_PARAM_NEO_HOOKEAN
+            | SOFT_PARAM_ACTIVATION
+            | SOFT_PARAM_SELF_COLLISION_FRICTION
+            | SOFT_PARAM_CROSS_COLLISION_FRICTION
+            | SOFT_PARAM_VOLUME_CONSERVATION => {
                 // corotated / neo_hookean 记录的是 rest-shape 快照 + 刚度，语义上属于
-                // "是否开启"；activation 是逐弹簧/逐约束的，没有体级标量。与其编一个
-                // 数字，不如明确报告不可读。
+                // "是否开启"；activation 是逐弹簧/逐约束的，没有体级标量。后三个藏在
+                // `Option<…>` 载荷里，未开启时"当前值"没有定义。与其编一个数字，
+                // 不如明确报告不可读。
                 set_error(
                     ERR_INVALID_ARGUMENT,
                     "soft_body_get_param: that param is write-only in this ABI version",
@@ -5541,5 +5557,164 @@ pub extern "C" fn soft_body_get_param(
         }
         clear_error();
         Bool::TRUE
+    })
+}
+
+// ── clear 通道（ADR-0016 第二批） ────────────────────────────────────────────
+//
+// 8 个 `soft_body_clear_<prop>` 全部是 `(world, id) -> Bool`，清掉一个
+// `Option<…>` 载荷。合并成一个 `soft_body_clear_param(world, id, param)`。
+//
+// 语义上 clear 等价于「把属性设为不存在」，所以它和 `set_param` 是同一族的写
+// 操作，但**不能**用 `set_param(e, PROP, 0.0)` 代替 —— `0.0` 是合法的属性值
+// （比如体积守恒柔度 0 = 硬），"关闭"和"设为 0"是两件不同的事。
+
+/// `soft_body_clear_param` 的属性编号。
+///
+/// 复用 `set_param` 的编号空间：同一个属性"可设可清"时用同一个数字，
+/// 这样宿主只需记一份属性表。
+pub const SOFT_CLEAR_WIND: u32 = 0;
+pub const SOFT_CLEAR_PRESSURE: u32 = 1;
+pub const SOFT_CLEAR_SELF_COLLISION: u32 = 2;
+pub const SOFT_CLEAR_CROSS_COLLISION: u32 = 3;
+pub const SOFT_CLEAR_VOLUME_CONSERVATION: u32 = 4;
+pub const SOFT_CLEAR_COROTATED: u32 = 5;
+pub const SOFT_CLEAR_NEO_HOOKEAN: u32 = 6;
+pub const SOFT_CLEAR_COHESION: u32 = 7;
+
+/// 已分配的 clear 属性个数。与 `soft_body_param_abi_version` 独立计数，
+/// 因为两个通道的属性集不重合（例如 `damping` 可设但没有 clear）。
+#[unsafe(no_mangle)]
+pub extern "C" fn soft_body_clear_param_abi_version() -> u32 {
+    ffi_guard(0, || 8)
+}
+
+/// 通用属性清除通道：把属性置回"不存在"。
+///
+/// # Returns
+/// `Bool::TRUE` 成功；world 为 null → `ERR_NULL_POINTER`；`id` 未知 →
+/// `ERR_NOT_FOUND`；`param` 未分配 → `ERR_INVALID_ARGUMENT`。
+///
+/// # Safety
+/// `world` 必须有效。
+#[unsafe(no_mangle)]
+pub extern "C" fn soft_body_clear_param(world: *mut WorldHandle, id: u32, param: u32) -> Bool {
+    ffi_guard(Bool::FALSE, || {
+        let Some(world) = (unsafe { world.as_mut() }) else {
+            set_error(ERR_NULL_POINTER, "soft_body_clear_param: world is null");
+            return Bool::FALSE;
+        };
+        let sid = SoftBodyId(id);
+        let Some(sb) = world.inner.soft_bodies.get_mut(sid) else {
+            set_error(ERR_NOT_FOUND, "soft_body_clear_param: unknown id");
+            return Bool::FALSE;
+        };
+        match param {
+            SOFT_CLEAR_WIND => sb.clear_wind(),
+            SOFT_CLEAR_PRESSURE => sb.clear_pressure(),
+            SOFT_CLEAR_SELF_COLLISION => sb.clear_self_collision(),
+            SOFT_CLEAR_CROSS_COLLISION => sb.clear_cross_collision(),
+            SOFT_CLEAR_VOLUME_CONSERVATION => sb.clear_volume_conservation(),
+            SOFT_CLEAR_COROTATED => sb.clear_corotated(),
+            SOFT_CLEAR_NEO_HOOKEAN => sb.clear_neo_hookean(),
+            SOFT_CLEAR_COHESION => sb.clear_cohesion(),
+            _ => {
+                set_error(
+                    ERR_INVALID_ARGUMENT,
+                    "soft_body_clear_param: unknown param id \
+                     (see soft_body_clear_param_abi_version)",
+                );
+                return Bool::FALSE;
+            }
+        }
+        clear_error();
+        Bool::TRUE
+    })
+}
+
+// ── indexed 通道（ADR-0016 第三批） ──────────────────────────────────────────
+//
+// 5 个逐元素 setter 形如 `(world, id, index, value) -> Bool`：弹簧刚度、
+// 弹簧激活、距离约束柔度、距离约束激活、距离约束压缩比。它们比体级属性多一个
+// `index`，所以需要独立通道 —— 硬塞进 `set_param` 会让签名变成
+// `(world, id, param, value)` 而丢掉索引。
+//
+// `soft_body_set_fibre_direction` / `set_spring_fibre_direction` /
+// `set_particle_velocity` **不在**这一批：它们是 (index + 3 个分量)，需要向量
+// 通道，见 design doc 的向量段。
+
+/// `soft_body_set_indexed_param` 的属性编号。
+pub const SOFT_IDX_SPRING_STIFFNESS: u32 = 0;
+pub const SOFT_IDX_SPRING_ACTIVATION: u32 = 1;
+pub const SOFT_IDX_DISTANCE_COMPLIANCE: u32 = 2;
+pub const SOFT_IDX_DISTANCE_ACTIVATION: u32 = 3;
+pub const SOFT_IDX_DISTANCE_COMPRESSION: u32 = 4;
+
+/// 已分配的 indexed 属性个数。
+#[unsafe(no_mangle)]
+pub extern "C" fn soft_body_indexed_param_abi_version() -> u32 {
+    ffi_guard(0, || 5)
+}
+
+/// 逐元素属性写入通道。
+///
+/// # Returns
+/// `Bool::TRUE` 成功；world 为 null → `ERR_NULL_POINTER`；`id` 未知或 `index`
+/// 越界 → `ERR_NOT_FOUND`；`param` 未分配或值域非法 → `ERR_INVALID_ARGUMENT`。
+///
+/// # Safety
+/// `world` 必须有效。
+#[unsafe(no_mangle)]
+pub extern "C" fn soft_body_set_indexed_param(
+    world: *mut WorldHandle,
+    id: u32,
+    param: u32,
+    index: u32,
+    value: f64,
+) -> Bool {
+    ffi_guard(Bool::FALSE, || {
+        let Some(world) = (unsafe { world.as_mut() }) else {
+            set_error(
+                ERR_NULL_POINTER,
+                "soft_body_set_indexed_param: world is null",
+            );
+            return Bool::FALSE;
+        };
+        let sid = SoftBodyId(id);
+        let Some(sb) = world.inner.soft_bodies.get_mut(sid) else {
+            set_error(ERR_NOT_FOUND, "soft_body_set_indexed_param: unknown id");
+            return Bool::FALSE;
+        };
+        let ok = match param {
+            SOFT_IDX_SPRING_STIFFNESS => sb.set_spring_stiffness(index as usize, value),
+            SOFT_IDX_SPRING_ACTIVATION => sb.set_spring_activation(index as usize, value),
+            SOFT_IDX_DISTANCE_COMPLIANCE => {
+                sb.set_distance_constraint_compliance(index as usize, value)
+            }
+            SOFT_IDX_DISTANCE_ACTIVATION => {
+                sb.set_distance_constraint_activation(index as usize, value)
+            }
+            SOFT_IDX_DISTANCE_COMPRESSION => {
+                sb.set_distance_constraint_compression(index as usize, value)
+            }
+            _ => {
+                set_error(
+                    ERR_INVALID_ARGUMENT,
+                    "soft_body_set_indexed_param: unknown param id \
+                     (see soft_body_indexed_param_abi_version)",
+                );
+                return Bool::FALSE;
+            }
+        };
+        if ok {
+            clear_error();
+            Bool::TRUE
+        } else {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "soft_body_set_indexed_param: index out of range or value rejected",
+            );
+            Bool::FALSE
+        }
     })
 }
