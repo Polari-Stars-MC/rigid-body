@@ -9,15 +9,28 @@
 
 | 类别 | 提交数 | 行数（约） | 判断 |
 | --- | --- | --- | --- |
-| A. 软体 fork | 41 | ~6300 | ⚠️ **大部分与官方 0.36 重复** |
+| A. 软体 fork | 41 | ~6300 | ✅ **孤儿那套已删**（`4d4e941a`，净减 3723 行）；`fork_extras.rs` 保留 |
 | B. `linalg` 自研线代 | 4 | 2631 | ✅ **已删除**（`1957c0da`，净减 2629 行） |
 | C. 官方 issue 修复 | 5 | ~1500 | ✅ 真实价值（上游未修） |
-| D. 新增模块（granular/fluid/…） | 3 | ~800 | ⚠️ 官方无对应，但引用面很窄 |
+| D. 新增模块（granular/fluid/…） | 3 | ~800 | ✅ 官方无对应，查清后均有意为之 |
 | E. 我们新增能力 | 3 | ~700 | ✅ **必留**（电机相关，ADR-0010~0013） |
 | F. Merge 提交 | 4 | ~236k | — 合并上游，非自有改动 |
-| G. 杂项/可见性/格式 | 15 | ~2000 | 逐条判断 |
+| G. 杂项/可见性/格式 | 15 | ~2000 | ✅ 已逐个查清，并补了 ADR-0014/0015 |
 
-## A. 软体 fork（41 个提交，最大的一块）
+**累计净减：6352 行**（`linalg.rs` 2629 + `soft_body_fork.rs` 3723）。
+
+## A. 软体 fork（41 个提交，最大的一块）—— ✅ 第 1 套已删除
+
+**状态：2026-11-16 已删除 `soft_body_fork.rs`，fork commit `4d4e941a`，净减 3723 行。**
+
+验证为真正的零行为变化：
+
+```text
+rapier3d-f64 --lib   110 -> 101    （少的 9 项全是 soft_body_fork::tests::* 自带测试）
+mps-test --lib      1374 -> 1374   （真正的消费者一项不差）
+```
+
+以下是排查记录，留档。
 
 ### ⚠️ 重大更正：实际存在三套软体，fork 那套是孤儿
 
@@ -26,7 +39,7 @@
 
 | # | 是什么 | 位置 | 行数 | 谁在用 |
 | --- | --- | --- | --- | --- |
-| 1 | **fork 的独立软体系统** | `rapier/src/dynamics/soft_body_fork.rs` | 3640 | **无人用（见下）** |
+| 1 | ~~**fork 的独立软体系统**~~ | ~~`rapier/src/dynamics/soft_body_fork.rs`~~ | ~~3640~~ | ✅ **已删除** `4d4e941a` |
 | 2 | **官方软体求解器** | `rapier/src/dynamics/soft_body/` | — | `mps-core` 经 `soft_upstream` 调用 |
 | 3 | **`mps-core` 的数据层** | `crates/mps-core/src/rapier/soft_data.rs` | 1880 | `mps-core` 自己（69 处引用） |
 
@@ -292,8 +305,17 @@ narrow-phase 的 per-pair filter。文档写明了对称性和「设置跨 `step
 3. ~~**给 `894d34e3`（力模型重构）和 `33292dc3`（禁用碰撞对）补 ADR**~~ ✅ **已完成**
    → [ADR-0014](adr/0014-fork-force-containers.md) / [ADR-0015](adr/0015-explicit-collision-pair-disable.md)
 4. **把 C 类（官方 issue 修复）和 E 类（我们的能力）提 PR 给上游**
-5. **逐 Phase 核对软体 fork 与官方的行为差异**，能搬的搬、能删的删
+5. ~~**逐 Phase 核对软体 fork 与官方的行为差异**~~ ✅ **已完成**——结论不是「核对差异」，
+   而是发现第 1 套是孤儿并已删除（`4d4e941a`）
 6. **决定 D 类模块去留**（`87f7521c` 查清后倾向保留）
+
+## 剩余可做的
+
+- **第 3 套（`mps-core/soft_data.rs`，1880 行）是否还有必要**：它现在是纯数据类型
+  （零 `fn step`），求解已交给官方。如果 `soft_upstream` 的同步层能直接用官方类型，
+  这 1880 行也能减掉。但这需要改 `mps-core`，风险高于前面两次删除。
+- **`total_impulse` 是死方法**（`contact_constraint_element.rs:796`），加滚动阻力时留下的，
+  clippy 一直报 `never used`。小清理。
 
 ## 补 ADR 时查出的两处新事实
 
