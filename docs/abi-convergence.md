@@ -1,6 +1,6 @@
 # ABI 收敛设计
 
-**状态**：第一批切片已落地（[ADR-0016](adr/0016-generic-abi-property-channel.md)，提交 `d711790`）。后续批次待定。
+**状态**：前两批切片已落地（[ADR-0016](adr/0016-generic-abi-property-channel.md)，提交 `d711790` / `24580b7`）。`soft_body` 的体级标量、clear、indexed 三类形状已收敛；向量与复合载荷两类待做。
 
 ## 问题
 

@@ -53,18 +53,50 @@ struct Bool soft_body_get_param(struct WorldHandle *world, uint32_t id,
 **3. 每个 `param` 必须有文档化的属性名与值域。**
 否则调用方无法判断合法性，也就无法做前向兼容。
 
-## 为什么先做一个切片而不是一次全换
+## 为什么分批做而不是一次全换
 
-949 个入口一次重构会让失败定位变得极难——现有 1381 项测试是逐步积累的，一次性
-大改后，一个数值偏差可能来自任意一处。所以先把 6 个属性做完、验证、再决定是否
-继续。
+949 个入口一次重构会让失败定位变得极难——现有 1388 项测试是逐步积累的，一次性
+大改后，一个数值偏差可能来自任意一处。所以分批，每批验证后再决定是否继续。
 
-第一批切片选了 `soft_body` 的 6 个纯标量 setter：
-`COROTATED` / `NEO_HOOKEAN` / `PRESSURE` / `DAMPING` / `SUBSTEPS` / `ACTIVATION`。
+### 第一批（`d711790`）：体级纯标量 setter
+
+6 个属性：`COROTATED` / `NEO_HOOKEAN` / `PRESSURE` / `DAMPING` / `SUBSTEPS` /
+`ACTIVATION`。
 
 **没选 `set_tear_strain` / `set_tear_stress` / `set_tear_energy`**，因为它们带
-额外的 `enabled: u8` 参数，是双参数 setter，不属于"纯标量"这一类。把它们塞进
-`set_param` 会让 `param` 的语义变得含混。
+额外的 `enabled: u8` 参数，是双参数 setter，不属于"纯标量"这一类。
+
+### 第二批（`24580b7`）：clear 与 indexed
+
+`soft_body` 的属性访问有三类形状，第一批只覆盖了第一类：
+
+| 形状 | 数量 | 通道 |
+| --- | ---: | --- |
+| `(world, id, value)` 体级标量 | 9 | `set_param` / `get_param` |
+| `(world, id)` 清除 | 8 | `clear_param` |
+| `(world, id, index, value)` 逐元素 | 5 | `set_indexed_param` |
+
+**为什么 `clear` 要独立通道**：不能用 `set_param(e, PROP, 0.0)` 代替。`0.0` 是
+合法的属性值——体积守恒柔度 `0` 表示"硬/不可压缩"。**"关闭"和"设为 0"是两件
+不同的事。**
+
+`clear` 的属性编号与 `set` 独立计数（`soft_body_clear_param_abi_version`），
+因为两个集合不重合：`damping` 可设但没有 `clear`，`cohesion` 可清但没有 `set`。
+
+**为什么 `indexed` 要独立通道**：硬塞进 `set_param` 会让签名变成
+`(world, id, param, value)` 而丢掉索引。
+
+### 还没做的：向量与复合载荷
+
+`set_fibre_direction` / `set_spring_fibre_direction` / `set_particle_velocity` /
+`set_anisotropy` / `set_gravity` 都是 `(index + 3 个分量)`，需要
+`*_set_param_vec3` 一类的通道。
+
+`set_thermal`（4 个标量）、`set_plasticity`（2 个）、`set_cohesion` /
+`set_self_collision` / `set_cross_collision`（2~3 个）需要"复合载荷"通道，
+比向量更麻烦。
+
+这两类是下一批的事。
 
 ## 迁移路径（三步，每步可独立发布）
 
