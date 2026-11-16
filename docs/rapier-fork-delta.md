@@ -19,52 +19,76 @@
 
 ## A. 软体 fork（41 个提交，最大的一块）
 
-### 事实
+### ⚠️ 重大更正：实际存在三套软体，fork 那套是孤儿
 
-- `src/dynamics/soft_body_fork.rs`：**3640 行**，`physics_world.rs` 有 8 处引用 → **仍在用**
-- `src/dynamics/soft_body/fork_extras.rs`：410 行，已并入官方求解器作为**数据层**
-- 历史上有 `wip/remove-soft-body-fork` 分支和 `9f41817b soft_body: 删除 soft_body_fork` 提交，
-  但 `soft_body_fork.rs` **今天仍然存在且被引用** —— 那次删除没有真正完成
+逐个查清后发现，台账原先说「45% 是与官方重复的软体实现」**低估了混乱程度**。
+真实情况是**三套并存**：
 
-### 关键对照：官方 0.36 已覆盖我们所有 Phase
+| # | 是什么 | 位置 | 行数 | 谁在用 |
+| --- | --- | --- | --- | --- |
+| 1 | **fork 的独立软体系统** | `rapier/src/dynamics/soft_body_fork.rs` | 3640 | **无人用（见下）** |
+| 2 | **官方软体求解器** | `rapier/src/dynamics/soft_body/` | — | `mps-core` 经 `soft_upstream` 调用 |
+| 3 | **`mps-core` 的数据层** | `crates/mps-core/src/rapier/soft_data.rs` | 1880 | `mps-core` 自己（69 处引用） |
 
-在 `src/dynamics/soft_body/`（官方目录）里逐项 grep：
+`mps-core` 的 `PhysicsWorld` 里同时挂着两个集合：
 
-| 我们的 Phase | 官方命中次数 | 结论 |
-| --- | --- | --- |
-| 塑性变形（Phase 10） | 102 | 官方有 |
-| 撕裂（Phase 9/27） | 297 | 官方有 |
-| 簇 cluster | 405 | 官方有 |
-| FEM | 39 | 官方有 |
-| 弯曲约束（Phase 6） | 29 | 官方有 |
-| 阻尼（Phase 18） | 27 | 官方有 |
-| 四面体（Phase 3/21） | 14 | 官方有 |
-| 各向异性（Phase 19/27） | 14 | 官方有 |
-| 气压（Phase 11） | 13 | 官方有 |
-| 粘弹性（Phase 27） | 10 | 官方有 |
-| 自碰撞（Phase 12/14/20） | 9 | 官方有 |
-| 主动应变（Phase 31/32） | 8 | 官方有 |
-| 切割 cut | 4 | 官方有 |
-| 风（Phase 7） | 32 | 官方有 |
+```rust
+pub soft_bodies: SoftBodySet,                                     // 第 3 套：mps-core 自己的数据类型
+pub(crate) upstream_soft_bodies: rapier3d::dynamics::SoftBodySet, // 第 2 套：官方求解器
+```
 
-**14 项能力，官方全部有对应实现。**
+而 `soft_upstream::prepare` / `collect` 负责在两者之间同步。**第 1 套完全没被卷入。**
+
+### 第 1 套（`soft_body_fork.rs`）为什么是孤儿
+
+证据链：
+
+1. **`mps-core` / `mps-cosmos` / `mps-jni` / `mps-formula` 对它零代码引用。**
+   grep 到的 2 处（`events.rs:612`、`world.rs:327`）都是**注释**，且在描述历史。
+2. **`mps-test/src/rapier/soft_data.rs` 的注释直接说明了搬迁**：
+   > 这些类型从 rapier 的 `soft_body_fork` 搬到了 mps-core：求解交给官方软体，
+   > 这里只保留授权/查询所需的数据结构与纯数据操作
+3. **没有任何代码或测试插入过它**：`insert_soft_body_fork` / `ForkSoftBody`
+   在 `src/` 与 `crates/` 下**零调用点**。
+4. 但 `physics_world.rs` 每步仍在推进它：
+   ```rust
+   self.soft_bodies_fork.write_spring_forces(&mut self.bodies);
+   self.soft_bodies_fork.step(dt);
+   self.soft_bodies_fork.follow_rigid_bodies(&self.bodies);
+   ```
+   由于集合永远是空的，这是**空转**。
 
 ### 判断
 
-分三档：
+✅ **`soft_body_fork.rs` 可以删除，与 `linalg.rs` 同类。**
 
-- **可能可删**：与官方功能重复且 `fork_extras.rs` 已承接数据层的部分。
-  需要逐个 Phase 确认官方 API 是否覆盖到同样的行为，**不能只看 grep 命中**。
-- **可能需要保留**：官方没有精确等价物的（例如「撕裂三准则」里的 Griffith 能量判据、
-  肌纤维方向的主动收缩）。这类应搬进 `fork_extras.rs` 或提 PR 给上游。
-- **确定可删**：`step_implicit_euler`（提交 `fd9a856d` 自己写明是「纯参考求解器」，
-  生产路径不用）。
+但要拆的东西比 `linalg.rs` 多：
 
-### 风险
+- `src/dynamics/mod.rs:49` 的 `pub mod soft_body_fork;`
+- `physics_world.rs` 的 8 处：2 个 `use`、字段声明与初始化、3 处 step 接线、
+  `insert_soft_body_fork` / `soft_body_fork` / `soft_body_fork_mut` /
+  `sleep_soft_body_fork` / `wake_soft_body_fork` / `is_soft_body_fork_sleeping`
+  六个公开方法
 
-这是**最大的一块技术债**，但也是**风险最高的一块**：软体行为可能已经影响了上层的
-测试基线（`mps-test` 里有大量软体测试）。删之前必须先把「哪些测试依赖 fork 行为」
-查清楚，否则会看到一片红。
+**风险高于 `linalg.rs`**：`physics_world.rs` 是热路径，step 接线拆错会影响所有
+物理行为。必须先跑完整测试基线，逐处拆，每拆一处验证一次。
+
+### 官方 0.36 的能力覆盖（供后续核对）
+
+在 `src/dynamics/soft_body/`（官方目录）里逐项 grep，我们那 14 项 Phase 能力
+全部有对应实现：塑性 102 处、撕裂 297、簇 405、FEM 39、弯曲 29、自碰撞 9、
+主动应变 8……**但命中次数不等于行为等价**，删除第 1 套不需要这些等价性
+（它本来就没人用）；将来若要删第 3 套才需要逐项核对。
+
+### `fork_extras.rs` 的定位（不是孤儿）
+
+`src/dynamics/soft_body/fork_extras.rs`（410 行）是**活的**：它把 fork 独有的
+材质行为（撕裂三准则、肌纤维、主动应变、粘弹、热）作为**数据层**挂在官方
+`SoftBody` 上，由官方求解器消费。文档头写明了「official body is the only soft
+body, and the extra capabilities are stored here as data」。
+
+这一块**必须保留**——官方没有等价物，且已正确接进官方求解器。
+
 
 ## B. `linalg` 自研线性代数（4 个提交，2631 行）—— ✅ 已删除
 
