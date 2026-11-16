@@ -129,6 +129,7 @@ pub mod rapier {
     pub mod topology;
     pub mod trajectory;
     pub mod transmission;
+    pub mod tyndall;
     pub mod vehicle;
     pub mod volcano;
     pub mod voronoi;

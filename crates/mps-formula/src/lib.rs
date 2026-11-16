@@ -49,6 +49,7 @@ pub mod thermodynamics;
 pub mod topology;
 pub mod trajectory;
 pub mod transmission;
+pub mod tyndall;
 pub mod volcano;
 pub mod voronoi;
 pub mod wave_optics;

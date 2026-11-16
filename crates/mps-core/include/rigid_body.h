@@ -11238,6 +11238,50 @@ struct Bool electromagnetism_transmission_line_input_impedance(double z0,
                                                                double *out_real,
                                                                double *out_imag);
 
+struct Bool tyndall_size_parameter(double diameter, double wavelength, double *out);
+
+struct Bool tyndall_rayleigh_phase(double cos_theta, double *out);
+
+struct Bool tyndall_henyey_greenstein_phase(double cos_theta, double g, double *out);
+
+struct Bool tyndall_mie_scattering_efficiency(double size_param,
+                                              double refractive_index,
+                                              double *out);
+
+struct Bool tyndall_beer_lambert_transmittance(double sigma_ext,
+                                               double number_density,
+                                               double path_length,
+                                               double *out);
+
+struct Bool tyndall_optical_thickness(double sigma_ext,
+                                      double number_density,
+                                      double path_length,
+                                      double *out);
+
+struct Bool tyndall_single_scattering_albedo(double sigma_sca, double sigma_ext, double *out);
+
+/**
+ * 沿视线单次散射的累积亮度，见 `mps_formula::tyndall::inscatter_along_ray`。
+ */
+struct Bool tyndall_inscatter_along_ray(double sigma_sca,
+                                        double sigma_ext,
+                                        double number_density,
+                                        double phase,
+                                        double light_intensity,
+                                        double ray_length,
+                                        uint32_t steps,
+                                        double *out);
+
+/**
+ * 丁达尔可见度评分（`0..=1`），渲染层可直接用它调制光柱亮度。
+ */
+struct Bool tyndall_visibility_score(double sigma_sca,
+                                     double sigma_ext,
+                                     double number_density,
+                                     double path_length,
+                                     double g,
+                                     double *out);
+
 struct Bool material_mechanics_hookes_law_uniaxial(double stress,
                                                    double youngs_modulus,
                                                    double *out);

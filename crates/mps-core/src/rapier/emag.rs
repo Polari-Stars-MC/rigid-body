@@ -225,3 +225,122 @@ pub extern "C" fn electromagnetism_transmission_line_input_impedance(
         Bool::FALSE
     }
 }
+
+// ── 丁达尔效应 / 体积散射（ADR-0018）────────────────────────────────────────
+//
+// 纯计算器，不碰 WorldHandle。公式在 `mps_formula::tyndall`，这里只做 C ABI
+// 包装（与上文 em_* 同风格）。
+//
+// 这些入口给 Minecraft 侧渲染光柱用：宿主拿到散射系数、相函数值、沿视线的
+// 累积亮度，自己决定怎么画。物理层不关心渲染。
+
+#[unsafe(no_mangle)]
+pub extern "C" fn tyndall_size_parameter(diameter: f64, wavelength: f64, out: *mut f64) -> Bool {
+    ffi_scalar(out, || {
+        mps_formula::tyndall::size_parameter(diameter, wavelength)
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn tyndall_rayleigh_phase(cos_theta: f64, out: *mut f64) -> Bool {
+    ffi_scalar(out, || mps_formula::tyndall::rayleigh_phase(cos_theta))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn tyndall_henyey_greenstein_phase(cos_theta: f64, g: f64, out: *mut f64) -> Bool {
+    ffi_scalar(out, || {
+        mps_formula::tyndall::henyey_greenstein_phase(cos_theta, g)
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn tyndall_mie_scattering_efficiency(
+    size_param: f64,
+    refractive_index: f64,
+    out: *mut f64,
+) -> Bool {
+    ffi_scalar(out, || {
+        mps_formula::tyndall::mie_scattering_efficiency(size_param, refractive_index)
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn tyndall_beer_lambert_transmittance(
+    sigma_ext: f64,
+    number_density: f64,
+    path_length: f64,
+    out: *mut f64,
+) -> Bool {
+    ffi_scalar(out, || {
+        mps_formula::tyndall::beer_lambert_transmittance(sigma_ext, number_density, path_length)
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn tyndall_optical_thickness(
+    sigma_ext: f64,
+    number_density: f64,
+    path_length: f64,
+    out: *mut f64,
+) -> Bool {
+    ffi_scalar(out, || {
+        mps_formula::tyndall::optical_thickness(sigma_ext, number_density, path_length)
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn tyndall_single_scattering_albedo(
+    sigma_sca: f64,
+    sigma_ext: f64,
+    out: *mut f64,
+) -> Bool {
+    ffi_scalar(out, || {
+        mps_formula::tyndall::single_scattering_albedo(sigma_sca, sigma_ext)
+    })
+}
+
+/// 沿视线单次散射的累积亮度，见 `mps_formula::tyndall::inscatter_along_ray`。
+#[unsafe(no_mangle)]
+pub extern "C" fn tyndall_inscatter_along_ray(
+    sigma_sca: f64,
+    sigma_ext: f64,
+    number_density: f64,
+    phase: f64,
+    light_intensity: f64,
+    ray_length: f64,
+    steps: u32,
+    out: *mut f64,
+) -> Bool {
+    ffi_scalar(out, || {
+        mps_formula::tyndall::inscatter_along_ray(
+            sigma_sca,
+            sigma_ext,
+            number_density,
+            phase,
+            light_intensity,
+            ray_length,
+            steps,
+        )
+    })
+}
+
+/// 丁达尔可见度评分（`0..=1`），渲染层可直接用它调制光柱亮度。
+#[unsafe(no_mangle)]
+pub extern "C" fn tyndall_visibility_score(
+    sigma_sca: f64,
+    sigma_ext: f64,
+    number_density: f64,
+    path_length: f64,
+    g: f64,
+    out: *mut f64,
+) -> Bool {
+    ffi_scalar(out, || {
+        mps_formula::tyndall::tyndall_visibility(
+            sigma_sca,
+            sigma_ext,
+            number_density,
+            path_length,
+            g,
+        )
+    })
+}
