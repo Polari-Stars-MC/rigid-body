@@ -1044,7 +1044,8 @@ jni!(double worldMultibodyJointGetMaxForce(long world, long handle, int axis) {
 // 权威的广义速度：求解器每步用它在内部覆盖刚体速度，算转矩包络必须读这个。
 jni!(double worldMultibodyJointGetVelocity(long world, long handle, int axis) {
     jo::world_multibody_joint_get_velocity(wm(world), handle as u64, axis as u32)
-});jni!(boolean worldRemoveMultibodyJoint(long world, long handle, int wake_up) {
+});
+jni!(boolean worldRemoveMultibodyJoint(long world, long handle, int wake_up) {
     jo::world_remove_multibody_joint(m::<WH>(world), handle as u64, jb(wake_up)).0 as jbyte
 });
 
