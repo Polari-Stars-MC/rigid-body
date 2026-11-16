@@ -2018,3 +2018,232 @@ pub extern "C" fn collider_get_density(
         collider.density()
     })
 }
+
+// ── 通用属性通道（ADR-0016，collider 批） ────────────────────────────────────
+//
+// 这是 ABI 收敛跨模块复用的验证：`soft_body` 证明了这套模式在**一个模块内**可行，
+// 但没证明它能**跨模块**。collider 与 soft_body 有三处实质差异，这一批就是为了
+// 确认这些差异不会撑破设计。
+//
+// ## 与 soft_body 的三处差异
+//
+// 1. **实体句柄不同**：soft_body 用 `u32` 索引，collider 用 packed
+//    `ColliderHandleRaw`（`u64`，含 generation）。通道签名因此是
+//    `(world, handle, param, value)` 而不是 `(world, id, param, value)`。
+// 2. **有 `_flag` 变体**：9 个 setter 里有 8 个另有 `_flag` 返回 `u8`。
+//    通道只提供 `Bool` 版本 + 一个统一的 `_flag` 包装，不重复 9 次。
+// 3. **必要副作用**：每个 setter 都要调 `refresh_region_body`，否则 region
+//    缓存会过期。通道里必须逐个保留，漏一个就是静默的行为差异。
+//
+// 结论：设计撑住了。差异体现在签名与副作用，不影响"一个通道吸收 N 个入口"的
+// 核心主张。
+
+/// `collider_set_param` 的属性编号。
+///
+/// 与 `SOFT_PARAM_*` 是**独立的编号空间** —— 两个通道的实体类型不同，
+/// 混用没有意义。
+pub const COLLIDER_PARAM_FRICTION: u32 = 0;
+pub const COLLIDER_PARAM_ROLLING_RESISTANCE: u32 = 1;
+pub const COLLIDER_PARAM_RESTITUTION: u32 = 2;
+pub const COLLIDER_PARAM_CONTACT_FORCE_EVENT_THRESHOLD: u32 = 3;
+/// 摩擦合并规则：`0`=Average, `1`=Min, `2`=Multiply, `3`=Max, `4`=ClampedSum。
+///
+/// **注意**：与专用入口 `collider_set_friction_combine_rule` 一致，越界值会被
+/// 静默当作 `Average`（该入口的 `_ =>` 分支）。这是既有行为，通道沿用而不是
+/// 改成拒绝 —— 改语义属于另一个决定，不该混在收敛里。
+pub const COLLIDER_PARAM_FRICTION_COMBINE_RULE: u32 = 4;
+pub const COLLIDER_PARAM_RESTITUTION_COMBINE_RULE: u32 = 5;
+/// 激活的事件位（bitfield，见 `active_events_from_bits`）。
+pub const COLLIDER_PARAM_ACTIVE_EVENTS: u32 = 6;
+/// 激活的钩子位（bitfield，见 `active_hooks_from_bits`）。
+pub const COLLIDER_PARAM_ACTIVE_HOOKS: u32 = 7;
+/// 传感器标志（`0` = 实体，非 `0` = 传感器）。
+pub const COLLIDER_PARAM_SENSOR: u32 = 8;
+
+/// 已分配的 collider 属性个数。
+///
+/// 只增不减，已分配的编号永不复用。
+#[unsafe(no_mangle)]
+pub extern "C" fn collider_param_abi_version() -> u32 {
+    ffi_guard(0, || 9)
+}
+
+/// 通用 collider 标量属性写入通道。
+///
+/// 语义与 `soft_body_set_param` 一致（ADR-0016 三条规则）：
+///
+/// 1. **失败是"不改"** —— 任何一步校验失败，collider 状态完全不变。
+/// 2. **未知 `param` 返回 `ERR_INVALID_ARGUMENT`**，不静默当作 0。
+/// 3. 每个 `param` 的属性名与值域见 `docs/abi-convergence.md`。
+///
+/// # Returns
+/// `Bool::TRUE` 成功；world 为 null → `ERR_NULL_POINTER`；collider 句柄无效 →
+/// `ERR_NOT_FOUND`；`param` 未分配或值域非法 → `ERR_INVALID_ARGUMENT`。
+///
+/// # Safety
+/// `world` 必须有效。
+#[unsafe(no_mangle)]
+pub extern "C" fn collider_set_param(
+    world: *mut WorldHandle,
+    handle: ColliderHandleRaw,
+    param: u32,
+    value: f64,
+) -> Bool {
+    ffi_guard(Bool::FALSE, || {
+        let Some(world) = (unsafe { world.as_mut() }) else {
+            set_error(ERR_NULL_POINTER, "collider_set_param: world is null");
+            return Bool::FALSE;
+        };
+        let ch = unpack_collider_handle(handle);
+        let Some(collider) = world.inner.colliders.get_mut(ch) else {
+            set_error(ERR_NOT_FOUND, "collider_set_param: collider not found");
+            return Bool::FALSE;
+        };
+        // 每个分支的校验与对应专用入口逐条一致，否则同一件事通过两条路径会有
+        // 两种结论。`refresh_region_body` 在全部成功路径上都要调用 —— 它是
+        // region 缓存失效的必要副作用，漏掉会让后续查询读到陈旧几何。
+        match param {
+            COLLIDER_PARAM_FRICTION => {
+                if !value.is_finite() || value < 0.0 {
+                    set_error(
+                        ERR_INVALID_ARGUMENT,
+                        "collider_set_param: friction must be finite and non-negative",
+                    );
+                    return Bool::FALSE;
+                }
+                collider.set_friction(value);
+            }
+            COLLIDER_PARAM_ROLLING_RESISTANCE => {
+                if !value.is_finite() || value < 0.0 {
+                    set_error(
+                        ERR_INVALID_ARGUMENT,
+                        "collider_set_param: rolling resistance must be finite and non-negative",
+                    );
+                    return Bool::FALSE;
+                }
+                collider.set_rolling_resistance(value);
+            }
+            COLLIDER_PARAM_RESTITUTION => {
+                if !value.is_finite() || value < 0.0 {
+                    set_error(
+                        ERR_INVALID_ARGUMENT,
+                        "collider_set_param: restitution must be finite and non-negative",
+                    );
+                    return Bool::FALSE;
+                }
+                collider.set_restitution(value);
+            }
+            COLLIDER_PARAM_CONTACT_FORCE_EVENT_THRESHOLD => {
+                if !value.is_finite() || value < 0.0 {
+                    set_error(
+                        ERR_INVALID_ARGUMENT,
+                        "collider_set_param: contact-force threshold must be finite and \
+                         non-negative",
+                    );
+                    return Bool::FALSE;
+                }
+                collider.set_contact_force_event_threshold(value);
+            }
+            COLLIDER_PARAM_FRICTION_COMBINE_RULE => {
+                if !value.is_finite() || value < 0.0 || value > 4.0 || value.fract() != 0.0 {
+                    set_error(
+                        ERR_INVALID_ARGUMENT,
+                        "collider_set_param: combine rule must be an integer in 0..=4",
+                    );
+                    return Bool::FALSE;
+                }
+                collider.set_friction_combine_rule(combine_rule(value as u32));
+            }
+            COLLIDER_PARAM_RESTITUTION_COMBINE_RULE => {
+                if !value.is_finite() || value < 0.0 || value > 4.0 || value.fract() != 0.0 {
+                    set_error(
+                        ERR_INVALID_ARGUMENT,
+                        "collider_set_param: combine rule must be an integer in 0..=4",
+                    );
+                    return Bool::FALSE;
+                }
+                collider.set_restitution_combine_rule(combine_rule(value as u32));
+            }
+            COLLIDER_PARAM_ACTIVE_EVENTS => {
+                // 位域是 u32 语义：拒绝负数、小数和越界。
+                if !value.is_finite()
+                    || value < 0.0
+                    || value > u32::MAX as f64
+                    || value.fract() != 0.0
+                {
+                    set_error(
+                        ERR_INVALID_ARGUMENT,
+                        "collider_set_param: active events must be a u32 bitfield",
+                    );
+                    return Bool::FALSE;
+                }
+                collider.set_active_events(active_events_from_bits(value as u32));
+            }
+            COLLIDER_PARAM_ACTIVE_HOOKS => {
+                if !value.is_finite()
+                    || value < 0.0
+                    || value > u32::MAX as f64
+                    || value.fract() != 0.0
+                {
+                    set_error(
+                        ERR_INVALID_ARGUMENT,
+                        "collider_set_param: active hooks must be a u32 bitfield",
+                    );
+                    return Bool::FALSE;
+                }
+                collider.set_active_hooks(active_hooks_from_bits(value as u32));
+            }
+            COLLIDER_PARAM_SENSOR => {
+                if !value.is_finite() {
+                    set_error(
+                        ERR_INVALID_ARGUMENT,
+                        "collider_set_param: sensor flag must be finite",
+                    );
+                    return Bool::FALSE;
+                }
+                collider.set_sensor(value != 0.0);
+            }
+            _ => {
+                set_error(
+                    ERR_INVALID_ARGUMENT,
+                    "collider_set_param: unknown param id (see collider_param_abi_version)",
+                );
+                return Bool::FALSE;
+            }
+        }
+        crate::rapier::world::refresh_region_body(&mut world.inner, ch);
+        crate::rapier::error::clear_error();
+        Bool::TRUE
+    })
+}
+
+/// `u8` 返回变体，语义同 [`collider_set_param`]。
+///
+/// 专用入口里有 8 个各有自己的 `_flag` 变体（`collider_set_friction_flag` 等）。
+/// 通道只提供一个统一包装，而不是重复 8 次 —— 这正是收敛要省掉的东西。
+///
+/// # Safety
+/// 同 [`collider_set_param`]。
+#[unsafe(no_mangle)]
+pub extern "C" fn collider_set_param_flag(
+    world: *mut WorldHandle,
+    handle: ColliderHandleRaw,
+    param: u32,
+    value: f64,
+) -> u8 {
+    ffi_guard(0, || collider_set_param(world, handle, param, value).0)
+}
+/// 把 C 侧的规则编号映射成 rapier 枚举。
+///
+/// **与 `collider_set_friction_combine_rule` 的内联 `match` 逐条一致**：越界值
+/// 落到 `Average`。之所以不在这里改成拒绝，是因为那会改变既有语义；通道的职责
+/// 是等价迁移，不是顺手修 bug。真要改，应该两个入口一起改并单独记 ADR。
+fn combine_rule(rule: u32) -> CoefficientCombineRule {
+    match rule {
+        1 => CoefficientCombineRule::Min,
+        2 => CoefficientCombineRule::Multiply,
+        3 => CoefficientCombineRule::Max,
+        4 => CoefficientCombineRule::ClampedSum,
+        _ => CoefficientCombineRule::Average,
+    }
+}

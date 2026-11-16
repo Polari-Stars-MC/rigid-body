@@ -41,6 +41,46 @@
  */
 #define CLOTH_MAX_PARTICLES 262144
 
+/**
+ * `collider_set_param` 的属性编号。
+ *
+ * 与 `SOFT_PARAM_*` 是**独立的编号空间** —— 两个通道的实体类型不同，
+ * 混用没有意义。
+ */
+#define COLLIDER_PARAM_FRICTION 0
+
+#define COLLIDER_PARAM_ROLLING_RESISTANCE 1
+
+#define COLLIDER_PARAM_RESTITUTION 2
+
+#define COLLIDER_PARAM_CONTACT_FORCE_EVENT_THRESHOLD 3
+
+/**
+ * 摩擦合并规则：`0`=Average, `1`=Min, `2`=Multiply, `3`=Max, `4`=ClampedSum。
+ *
+ * **注意**：与专用入口 `collider_set_friction_combine_rule` 一致，越界值会被
+ * 静默当作 `Average`（该入口的 `_ =>` 分支）。这是既有行为，通道沿用而不是
+ * 改成拒绝 —— 改语义属于另一个决定，不该混在收敛里。
+ */
+#define COLLIDER_PARAM_FRICTION_COMBINE_RULE 4
+
+#define COLLIDER_PARAM_RESTITUTION_COMBINE_RULE 5
+
+/**
+ * 激活的事件位（bitfield，见 `active_events_from_bits`）。
+ */
+#define COLLIDER_PARAM_ACTIVE_EVENTS 6
+
+/**
+ * 激活的钩子位（bitfield，见 `active_hooks_from_bits`）。
+ */
+#define COLLIDER_PARAM_ACTIVE_HOOKS 7
+
+/**
+ * 传感器标志（`0` = 实体，非 `0` = 传感器）。
+ */
+#define COLLIDER_PARAM_SENSOR 8
+
 #define ERR_OK 0
 
 #define ERR_NULL_POINTER 1
@@ -3618,6 +3658,48 @@ uint8_t collider_set_contact_force_event_threshold_flag(struct WorldHandle *worl
  * `world` must be a valid pointer returned by `world_create` and not yet destroyed.
  */
 double collider_get_density(const struct WorldHandle *world, ColliderHandleRaw handle);
+
+/**
+ * 已分配的 collider 属性个数。
+ *
+ * 只增不减，已分配的编号永不复用。
+ */
+uint32_t collider_param_abi_version(void);
+
+/**
+ * 通用 collider 标量属性写入通道。
+ *
+ * 语义与 `soft_body_set_param` 一致（ADR-0016 三条规则）：
+ *
+ * 1. **失败是"不改"** —— 任何一步校验失败，collider 状态完全不变。
+ * 2. **未知 `param` 返回 `ERR_INVALID_ARGUMENT`**，不静默当作 0。
+ * 3. 每个 `param` 的属性名与值域见 `docs/abi-convergence.md`。
+ *
+ * # Returns
+ * `Bool::TRUE` 成功；world 为 null → `ERR_NULL_POINTER`；collider 句柄无效 →
+ * `ERR_NOT_FOUND`；`param` 未分配或值域非法 → `ERR_INVALID_ARGUMENT`。
+ *
+ * # Safety
+ * `world` 必须有效。
+ */
+struct Bool collider_set_param(struct WorldHandle *world,
+                               ColliderHandleRaw handle,
+                               uint32_t param,
+                               double value);
+
+/**
+ * `u8` 返回变体，语义同 [`collider_set_param`]。
+ *
+ * 专用入口里有 8 个各有自己的 `_flag` 变体（`collider_set_friction_flag` 等）。
+ * 通道只提供一个统一包装，而不是重复 8 次 —— 这正是收敛要省掉的东西。
+ *
+ * # Safety
+ * 同 [`collider_set_param`]。
+ */
+uint8_t collider_set_param_flag(struct WorldHandle *world,
+                                ColliderHandleRaw handle,
+                                uint32_t param,
+                                double value);
 
 /**
  * Creates a world with a default collider policy (0=None, 1=Simple, 2=Compound, 3=Adaptive).

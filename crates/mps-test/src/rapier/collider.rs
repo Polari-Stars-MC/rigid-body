@@ -1156,4 +1156,228 @@ mod tests {
             "μ_r = 0.02 must not brake the ball to a stop within 2 s: |ωz| = {with}"
         );
     }
+
+    // ── 通用属性通道：collider 批（ADR-0016 跨模块验证） ──────────────────────
+
+    use mps_core::rapier::collider::{
+        COLLIDER_PARAM_ACTIVE_EVENTS, COLLIDER_PARAM_ACTIVE_HOOKS,
+        COLLIDER_PARAM_CONTACT_FORCE_EVENT_THRESHOLD, COLLIDER_PARAM_FRICTION,
+        COLLIDER_PARAM_FRICTION_COMBINE_RULE, COLLIDER_PARAM_RESTITUTION,
+        COLLIDER_PARAM_RESTITUTION_COMBINE_RULE, COLLIDER_PARAM_ROLLING_RESISTANCE,
+        COLLIDER_PARAM_SENSOR, collider_param_abi_version, collider_set_param,
+        collider_set_param_flag,
+    };
+
+    #[test]
+    fn collider_param_ids_match_the_abi_version() {
+        let all = [
+            COLLIDER_PARAM_FRICTION,
+            COLLIDER_PARAM_ROLLING_RESISTANCE,
+            COLLIDER_PARAM_RESTITUTION,
+            COLLIDER_PARAM_CONTACT_FORCE_EVENT_THRESHOLD,
+            COLLIDER_PARAM_FRICTION_COMBINE_RULE,
+            COLLIDER_PARAM_RESTITUTION_COMBINE_RULE,
+            COLLIDER_PARAM_ACTIVE_EVENTS,
+            COLLIDER_PARAM_ACTIVE_HOOKS,
+            COLLIDER_PARAM_SENSOR,
+        ];
+        let version = collider_param_abi_version();
+        assert_eq!(
+            version as usize,
+            all.len(),
+            "abi version must equal the number of allocated params"
+        );
+        let mut sorted = all;
+        sorted.sort_unstable();
+        for w in sorted.windows(2) {
+            assert_ne!(w[0], w[1], "duplicate collider param id {}", w[0]);
+        }
+    }
+
+    /// The migration premise: every dedicated collider setter and the generic
+    /// channel must reach the same conclusion, for accept and reject alike.
+    #[test]
+    fn collider_setters_agree_with_the_generic_channel() {
+        let world = make_world();
+        let a = insert_ball(world);
+        let b = insert_ball(world);
+
+        // (param, value, dedicated entry) — includes the reject cases.
+        let cases: [(
+            u32,
+            f64,
+            fn(*mut WorldHandle, ColliderHandleRaw, f64) -> Bool,
+        ); 12] = [
+            (COLLIDER_PARAM_FRICTION, 0.7, |w, h, v| {
+                collider_set_friction(w, h, v)
+            }),
+            (COLLIDER_PARAM_FRICTION, -0.5, |w, h, v| {
+                collider_set_friction(w, h, v)
+            }),
+            (COLLIDER_PARAM_ROLLING_RESISTANCE, 0.05, |w, h, v| {
+                collider_set_rolling_resistance(w, h, v)
+            }),
+            (COLLIDER_PARAM_ROLLING_RESISTANCE, -1.0, |w, h, v| {
+                collider_set_rolling_resistance(w, h, v)
+            }),
+            (COLLIDER_PARAM_RESTITUTION, 0.4, |w, h, v| {
+                collider_set_restitution(w, h, v)
+            }),
+            (COLLIDER_PARAM_RESTITUTION, f64::NAN, |w, h, v| {
+                collider_set_restitution(w, h, v)
+            }),
+            (
+                COLLIDER_PARAM_CONTACT_FORCE_EVENT_THRESHOLD,
+                10.0,
+                |w, h, v| collider_set_contact_force_event_threshold(w, h, v),
+            ),
+            (
+                COLLIDER_PARAM_CONTACT_FORCE_EVENT_THRESHOLD,
+                -3.0,
+                |w, h, v| collider_set_contact_force_event_threshold(w, h, v),
+            ),
+            // Combine rules take a u32; only whole numbers in 0..=4 reach them.
+            (COLLIDER_PARAM_FRICTION_COMBINE_RULE, 2.0, |w, h, v| {
+                collider_set_friction_combine_rule(w, h, v as u32)
+            }),
+            (COLLIDER_PARAM_RESTITUTION_COMBINE_RULE, 4.0, |w, h, v| {
+                collider_set_restitution_combine_rule(w, h, v as u32)
+            }),
+            (COLLIDER_PARAM_ACTIVE_EVENTS, 3.0, |w, h, v| {
+                collider_set_active_events(w, h, v as u32)
+            }),
+            (COLLIDER_PARAM_ACTIVE_HOOKS, 1.0, |w, h, v| {
+                collider_set_active_hooks(w, h, v as u32)
+            }),
+        ];
+
+        for (param, value, dedicated) in cases {
+            let generic = collider_set_param(world, a, param, value).0 != 0;
+            let specific = dedicated(world, b, value).0 != 0;
+            assert_eq!(
+                generic, specific,
+                "collider param {param} value {value}: generic {generic} vs dedicated {specific}"
+            );
+        }
+        world_destroy(world);
+    }
+
+    /// The sensor flag is `Bool` on the dedicated entry, `f64` on the channel.
+    #[test]
+    fn collider_sensor_flag_agrees_with_the_dedicated_entry() {
+        let world = make_world();
+        // The return value is "the call succeeded", not "the flag is now true" —
+        // `value == 0.0` successfully clears the sensor bit and still returns
+        // TRUE. So this test compares the two paths, it does not assert the bit.
+        for value in [1.0, 0.0, 2.0, -1.0] {
+            let a = insert_ball(world);
+            let b = insert_ball(world);
+            let generic = collider_set_param(world, a, COLLIDER_PARAM_SENSOR, value).0 != 0;
+            let specific = collider_set_sensor(world, b, Bool(value as u8)).0 != 0;
+            assert_eq!(
+                generic, specific,
+                "sensor value {value}: generic {generic} vs dedicated {specific}"
+            );
+            assert!(generic, "setting a sensor flag is a successful call");
+        }
+        // NaN is rejected by the channel (the dedicated entry takes a Bool, so
+        // there is no equivalent input to compare against).
+        let a = insert_ball(world);
+        assert_eq!(
+            collider_set_param(world, a, COLLIDER_PARAM_SENSOR, f64::NAN),
+            Bool::FALSE
+        );
+        assert_eq!(last_error_code(), ERR_INVALID_ARGUMENT);
+        world_destroy(world);
+    }
+
+    #[test]
+    fn collider_set_param_rejects_unknown_ids_without_touching_state() {
+        let world = make_world();
+        let handle = insert_ball(world);
+
+        // Known state first.
+        assert_eq!(
+            collider_set_param(world, handle, COLLIDER_PARAM_FRICTION, 0.42),
+            Bool::TRUE
+        );
+
+        let bogus = collider_param_abi_version() + 50;
+        assert_eq!(collider_set_param(world, handle, bogus, 1.0), Bool::FALSE);
+        assert_eq!(last_error_code(), ERR_INVALID_ARGUMENT);
+
+        // A rejected set must not disturb the earlier value.
+        assert_eq!(
+            collider_set_param(world, handle, COLLIDER_PARAM_FRICTION, 0.42),
+            Bool::TRUE
+        );
+
+        world_destroy(world);
+    }
+
+    #[test]
+    fn collider_set_param_validates_the_error_channels() {
+        let world = make_world();
+        let handle = insert_ball(world);
+
+        assert_eq!(
+            collider_set_param(std::ptr::null_mut(), handle, COLLIDER_PARAM_FRICTION, 0.5),
+            Bool::FALSE
+        );
+        assert_eq!(last_error_code(), ERR_NULL_POINTER);
+
+        // A handle that was never allocated.
+        assert_eq!(
+            collider_set_param(world, 0xDEAD_BEEF, COLLIDER_PARAM_FRICTION, 0.5),
+            Bool::FALSE
+        );
+        assert_eq!(last_error_code(), ERR_NOT_FOUND);
+
+        world_destroy(world);
+    }
+
+    /// `_flag` must be the same verdict as the `Bool` variant — the whole point
+    /// of not duplicating eight dedicated `_flag` entries.
+    #[test]
+    fn collider_set_param_flag_matches_the_bool_variant() {
+        let world = make_world();
+        let handle = insert_ball(world);
+
+        for (param, value) in [
+            (COLLIDER_PARAM_FRICTION, 0.3),
+            (COLLIDER_PARAM_FRICTION, -0.3),
+            (COLLIDER_PARAM_SENSOR, 1.0),
+            (collider_param_abi_version() + 1, 1.0),
+        ] {
+            let b = collider_set_param(world, handle, param, value).0;
+            let f = collider_set_param_flag(world, handle, param, value);
+            assert_eq!(b, f, "param {param} value {value}: Bool {b} vs flag {f}");
+        }
+        world_destroy(world);
+    }
+
+    /// Combine rules: fractional and out-of-range values are rejected by the
+    /// channel even though the dedicated entry silently maps them to `Average`.
+    #[test]
+    fn collider_combine_rule_rejects_non_integer_and_out_of_range() {
+        let world = make_world();
+        let handle = insert_ball(world);
+
+        for bad in [1.5, -1.0, 5.0, f64::NAN] {
+            assert_eq!(
+                collider_set_param(world, handle, COLLIDER_PARAM_FRICTION_COMBINE_RULE, bad),
+                Bool::FALSE,
+                "combine rule {bad} must be rejected"
+            );
+            assert_eq!(last_error_code(), ERR_INVALID_ARGUMENT);
+        }
+        for good in [0.0, 1.0, 2.0, 3.0, 4.0] {
+            assert_eq!(
+                collider_set_param(world, handle, COLLIDER_PARAM_FRICTION_COMBINE_RULE, good),
+                Bool::TRUE,
+                "combine rule {good} must be accepted"
+            );
+        }
+        world_destroy(world);
+    }
 }
