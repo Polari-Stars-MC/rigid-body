@@ -123,19 +123,47 @@ _ => CoefficientCombineRule::Average,
 但通道的**入参校验**比专用入口严：分数、负数、`> 4` 全部返回
 `ERR_INVALID_ARGUMENT`，不会走到那个兜底分支。
 
-### 还没做的：向量与复合载荷
+### 第四批（`d468fc6`）：向量与复合载荷 —— 测出设计上限
 
-`set_fibre_direction` / `set_spring_fibre_direction` / `set_particle_velocity` /
-`set_anisotropy` / `set_gravity` 都是 `(index + 3 个分量)`，需要
-`*_set_param_vec3` 一类的通道。
+前三批都是纯标量。这一批处理两类不同形状的载荷，目的是测出这套设计的**真实
+上限**，而不是继续在舒适区里加批次。
+
+**结论：两类都能收敛，但代价不同。**
+
+| 载荷形状 | 通道 | 收敛性质 |
+| --- | --- | --- |
+| 标量 `f64` | `set_param` | **形状级**：任何标量属性都能进来 |
+| 向量 `Vec3` / `Quat` | `set_vec3_param` / `set_quat_param` | **形状级**：3 或 4 个 `f64` 的属性都能进来 |
+| 复合 `2 × u32` | `set_u32x2_param` | **宽度级**：只能吸收恰好 2 个 `u32` 的 |
+
+这就是边界：**标量与向量的收敛是"形状级"的，复合载荷的收敛是"宽度级"的。**
+载荷变成 3 个字段、或含混合类型（比如 `f64` + `u32`）时，必须再开一个通道。
+复合载荷不能无限扩展。
+
+顺带一个观察：`InteractionGroupsDesc` 只有 2 个 `u32`，其实可以塞进一个 `u64`
+（高 32 位 `memberships`，低 32 位 `filter`）。但那样会让 C 侧调用者手工做位移，
+容易错。展开成两个参数更清楚，代价是通道签名固定。
+
+本批吸收 5 个入口：`set_pose` / `set_translation` / `set_rotation` /
+`set_collision_groups` / `set_solver_groups`。
+
+### 剩余的形状：`(index + 向量)`
+
+`set_fibre_direction` / `set_spring_fibre_direction` / `set_particle_velocity`
+是 `(world, id, index, x, y, z)` —— 索引 + 向量。理论上可以再加一个
+`set_indexed_vec3_param`，但那会让通道族变成二维（索引 × 形状）。
+
+`set_anisotropy` / `set_gravity` 则是 `(world, id, x, y, z)`，不带索引，能被
+`set_vec3_param` 直接吸收。
 
 `set_thermal`（4 个标量）、`set_plasticity`（2 个）、`set_cohesion` /
-`set_self_collision` / `set_cross_collision`（2~3 个）需要"复合载荷"通道，
-比向量更麻烦。
+`set_self_collision` / `set_cross_collision`（2~3 个）属于复合载荷，受宽度级
+限制，需要按宽度分别开通道或改用 `payload + len` 的通用形式。
 
-`collider` 侧同样有这两类：`set_pose` / `set_translation` / `set_rotation`
-（`Vec3`/`Quat`）与 `set_collision_groups` / `set_solver_groups`
-（`InteractionGroupsDesc`）。
+**这里的取舍值得记下**：与其为 2/3/4 个字段各开一个通道，不如一次性采用
+`(opaque payload pointer, len)` 的形式。但那会失去类型安全，且和 ADR 的三条语义
+规则（尤其是"失败不改"）更难保证。所以这一批**故意停在宽度级**，把
+`payload + len` 留作将来真需要时的选项。
 
 这两类是下一批的事。
 
