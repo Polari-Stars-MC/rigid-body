@@ -265,10 +265,26 @@ narrow-phase 的 per-pair filter。文档写明了对称性和「设置跨 `step
 
 1. ~~**删 `linalg.rs`**（2631 行，零引用，零风险）~~ ✅ **已完成** `1957c0da`
 2. ~~**补齐 5 个无信息量提交的说明**~~ ✅ **已完成**（见 G' 节；结论是全部有真实意图，没有垃圾）
-3. **给 `894d34e3`（力模型重构）和 `33292dc3`（禁用碰撞对）补 ADR** ← 当前欠账
+3. ~~**给 `894d34e3`（力模型重构）和 `33292dc3`（禁用碰撞对）补 ADR**~~ ✅ **已完成**
+   → [ADR-0014](adr/0014-fork-force-containers.md) / [ADR-0015](adr/0015-explicit-collision-pair-disable.md)
 4. **把 C 类（官方 issue 修复）和 E 类（我们的能力）提 PR 给上游**
 5. **逐 Phase 核对软体 fork 与官方的行为差异**，能搬的搬、能删的删
 6. **决定 D 类模块去留**（`87f7521c` 查清后倾向保留）
+
+## 补 ADR 时查出的两处新事实
+
+**1. `894d34e3` 是纯增量，不是替换。** 原先台账写它「重构了核心力模型」，措辞不准。
+核实：原生 `add_force` 仍是 `self.forces.user_force += force`，`reset_forces` 仍只清
+`user_force`，**老代码完全不受影响**。它新增的是并行的容器路径。
+
+但有一条**必须记住的坑**：`rb.forces.force` 的写入点现在是唯一的
+（`force_containers.rs:318`，另一处是 `quarantine.rs` 清零）。任何直接改
+`forces.force` 的代码会在下一步被静默覆盖。改力必须走容器或原生 `add_force`。
+
+**2. 求解器涌现的力 kind 是只读观测。** `Friction` / `ContactReaction` 由
+`bridge_solver_contact_forces` 写入，但 `compute_body_effective_forces` 显式跳过它们——
+接触求解器已经施加了那些冲量，再求和就是双重施力，会直接让求解器失稳。
+
 
 ## 为什么不是「同步 0.37.0」
 
