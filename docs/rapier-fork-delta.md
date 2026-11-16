@@ -309,11 +309,90 @@ narrow-phase 的 per-pair filter。文档写明了对称性和「设置跨 `step
    而是发现第 1 套是孤儿并已删除（`4d4e941a`）
 6. **决定 D 类模块去留**（`87f7521c` 查清后倾向保留）
 
+## A'' 调查结论：soft_data 的算法搬不走，因为它和官方是两套不同机制
+
+原计划「把 `soft_data` 的 7 个授权层方法搬到官方 `fork_extras`，让 `soft_data`
+退化为纯结构体」。**调查后该计划不成立**，原因有三层。
+
+### 第一层：这些方法不是死代码，每步都在跑
+
+`soft_upstream.rs:558-561` 每步调用：
+
+```rust
+fork.apply_self_collision();
+fork.apply_cross_collision();
+fork.apply_cohesion();
+```
+
+外加 `:544` 的 `body.apply_plasticity()`、`:549` 的 `body.tear()`。
+`soft_body.rs:1807/1837/1778/2643` 另有多处调用。
+
+### 第二层：官方已独立实现同名能力，接入点是「参数层」
+
+`soft_constraint_prepare.rs` 里官方求解器**已经在消费** `fork_extras` 的字段：
+
+| 能力 | 位置 | 形式 |
+| --- | --- | --- |
+| 气压 | `pressure_forces(sb, p)` | 逐边界面分配，转成每粒子力 |
+| 风阻 | `accel += wind.accel - p.velocity * wind.drag` | 直接进加速度 |
+| 黏连 | `sb.fork.cohesion` 跨体吸引 | 含 `break_distance` 渐变 |
+
+`soft_element_constraint_assembly.rs` 消费 `rest_scale`（热膨胀）与
+`thermal_softening`（温度软化）。
+
+**所以 `fork_extras` 只是参数载体 + 官方接入点，它没有算法。**
+
+### 第三层：`soft_data` 是「粒子级几何处理」，官方走「碰撞网格」
+
+这是搬不动的根本原因。以自碰撞为例：
+
+| | `soft_data::apply_self_collision` | 官方 |
+| --- | --- | --- |
+| 层级 | 粒子级 | 碰撞网格级 |
+| 机制 | 200 次迭代，逐对粒子 XPBD 位置投影推开 | `soft_self_contacts(surface_handle)` + `self_contact_excluded` |
+| 数据 | 直接读写 `particles[i].pos/.vel` | 走 narrow-phase 的 soft 接触装配 |
+
+目的相同（防自穿透），但**机制与粒度不同**。把 `apply_self_collision` 搬到官方侧，
+等于在官方已有的碰撞网格自碰撞之外**再叠一层粒子级推开**——那是行为改变，
+不是等价迁移。
+
+黏连同理。`soft_upstream.rs:234` 有一行：
+
+```rust
+let _ = sim.set_cohesion_glue(None); // handled in authorized layer (apply_cohesion)
+```
+
+**官方黏连被显式关掉，改由授权层做。** 这是刻意的，不是遗漏。
+
+### 结论：净可减行数为 0
+
+| 部分 | 能否减 |
+| --- | --- |
+| 数据结构（`particles` / `springs` / `tetrahedra` / `skin_targets` …） | ❌ `soft_upstream` 直接读写字段 |
+| 授权层算法（`apply_self_collision` / `apply_cross_collision` / `apply_cohesion` / `tear` / `apply_plasticity` / `spring_damping_forces` / `subdivide_tetrahedra`） | ❌ 每步执行，且与官方机制不同，不可等价替换 |
+| 已失效的求解器（`step_xpbd` / `step_mass_spring` / `compute_forces`） | ✅ **早就没了**（0 个 `fn step`） |
+
+原估算「1880 行可减」是错的——我看到「零 `fn step`」就推断整块可删，**但没查它
+是否还有非求解性质的活代码**。
+
+这与前两次删除（`linalg.rs`、`soft_body_fork.rs`）性质完全不同：那两次有
+**「零引用」这个硬判据**，这次没有。
+
+### 附：调查中发现的真问题（不在本次范围）
+
+1. `apply_self_collision` / `apply_cross_collision` 内部是 `for _ in 0..200`
+   硬编码迭代，与 `solver.iterations` 无关。可疑，但不能确认是 bug。
+2. `fork_extras` 的 `thermal_stretch` / `is_inert` / `active_strain` /
+   `self_contact` / `cross_contact` 五个字段在 rapier 内部**零消费点**——
+   官方接入不完整，只在 `mps-core` 侧被读写。
+
+这两项都属于「功能完善」而非「清理」，要改会动行为。
+
 ## 剩余可做的
 
-- **第 3 套（`mps-core/soft_data.rs`，1880 行）是否还有必要**：它现在是纯数据类型
-  （零 `fn step`），求解已交给官方。如果 `soft_upstream` 的同步层能直接用官方类型，
-  这 1880 行也能减掉。但这需要改 `mps-core`，风险高于前面两次删除。
+- ~~**第 3 套（`mps-core/soft_data.rs`，1880 行）是否还有必要**~~ ✅ **已调查，
+  结论是不该删**（见上一节 A'' 调查结论）。净可减 0 行，因为它不是死代码，
+  且其算法与官方是两套不同机制，不可等价替换。
 - **`total_impulse` 是死方法**（`contact_constraint_element.rs:796`），加滚动阻力时留下的，
   clippy 一直报 `never used`。小清理。
 
