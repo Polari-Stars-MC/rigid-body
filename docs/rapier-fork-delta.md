@@ -127,20 +127,24 @@ mps-test --lib      1374 -> 1374   （上游消费者一项不差）
 
 ## D. 新增模块（granular / fluid / direction_hull / user_index / recorder）
 
-| 模块 | 行数 | 外部引用 | 判断 |
-| --- | --- | --- | --- |
-| `granular.rs` | 411 | 5 | 官方无颗粒 DEM |
-| `fluid.rs` | 400 | 16 | 官方无 SPH |
-| `direction_hull.rs` | 214 | 2 | 用途不明，需查 |
-| `user_index.rs` | 285 | 1 | 用途不明，需查 |
-| `recorder.rs` | 227 | 1 | 录制/回放 |
+| 模块 | 行数 | 外部引用 | 是什么 | 判断 |
+| --- | --- | --- | --- | --- |
+| `granular.rs` | 411 | 5 | 颗粒 DEM（官方无） | 保留 |
+| `fluid.rs` | 400 | 16 | SPH 流体（官方无） | 保留 |
+| `direction_hull.rs` | 214 | 2 | k-DOP / 固定方向凸包 | 保留（见 G'） |
+| `user_index.rs` | 285 | 1 | 用户空间 AABB R-tree | 保留（见 G'） |
+| `recorder.rs` | 227 | 1 | 整世界录制/回放 | 保留 |
+| `compound_baker.rs` | 133 | — | 烘焙式复合碰撞（serde 门控） | 保留（见 G'） |
 
 ### 判断
 
-⚠️ 官方没有对应能力，所以**不能简单删**。但引用面很窄（2~16 处），说明是边缘功能。
+官方没有对应能力，所以**不能简单删**。原先标为「用途不明」的 `direction_hull.rs`
+和 `user_index.rs`，在查清 `87f7521c` 后确认都有明确设计意图（见 G' 节），
+不是实验残留。
 
-**需要你决定**：这些是产品需求还是实验残留？我无法从代码判断。
-`direction_hull.rs` 和 `user_index.rs` 各只有 1~2 处引用，最可疑。
+**剩下的真问题**：这些模块引用面很窄（1~16 处），说明是边缘功能。需要确认
+它们是否真的被 `mps-core` / `mps-cosmos` 用到 —— 如果只是 fork 里的孤儿，
+那和 `linalg.rs` 是同一类问题，只是小一些。
 
 ## E. 我们新增的能力（3 个提交，~700 行）
 
@@ -170,20 +174,101 @@ mps-test --lib      1374 -> 1374   （上游消费者一项不差）
 - **force containers**：`372d1252` 接触求解器桥（标注 observation-only）
 - **并行优化**：`9383b01a` wake/sleep 两趟 rayon fold
 - **子模块**：`731d9e0a` / `085ad954` / `079afe53`（nalgebra、parry 子模块增删）
-- **格式/杂项**：`f3391e57` rustfmt、`7c5c76ed` 测试修 12 参数、`02f6beaf`/`894d34e3`/`87f7521c`/`b989b8be`/`33292dc3` 消息无信息量
+- **格式**：`f3391e57` rustfmt、`7c5c76ed` 测试修 12 参数
 
-⚠️ **5 个提交的消息是纯日期或「Update xxx.rs」，无法从历史判断意图** —— 这是台账
-最大的信息缺口。需要逐个看 diff。
+## G'. 5 个「无信息量」提交——已逐个查清
+
+这 5 个提交的消息是纯日期或「Update xxx.rs」，约 2900 行，原先无法从历史判断意图。
+逐个读 diff 后的结果：
+
+### `87f7521c`（514 行）→ D 类：`direction_hull` + `user_index` 的诞生
+
+两个模块的**初始提交**，之前 D 类表格里「用途不明」的疑问在这里有答案：
+
+- `direction_hull.rs`：**k-DOP / 固定方向凸包**。把点云投影到一组方向得到 slab 边界，
+  再求半空间交得到凸包顶点，喂给 `ColliderBuilder::convex_hull`。文档明确说是
+  「通用几何工具，不绑定碰撞管线，也可被 compound baking 或用户空间查询复用」。
+- `user_index.rs`：**用户空间 AABB R-tree**。独立于引擎内部 `BroadPhaseBvh`，
+  给宿主用任意 `u64` id 做区域查询（游戏实体分桶之类）。
+
+**判断**：不是实验残留，是有明确设计意图的通用工具。保留，但引用面窄（各 1~2 处）。
+
+### `b989b8be`（863 行）→ 三个独立能力
+
+- `compound_baker.rs`（133 行）：**Phase C 烘焙式复合碰撞**。把 parry `Compound`
+  的 BVH 连同质量属性序列化，加载时直接复用不重建。`cfg(feature = "serde-serialize")` 门控。
+- `recorder.rs`（228 行）：**Phase D 录制/回放**。整世界快照序列化，回放时还原。
+- `wheel_joint.rs`（207 行）：车轮关节。
+- 附带 `narrow_phase/test.rs` 的 121 行测试。
+
+**判断**：都是真实能力，且 `compound_baker` 有 `crates/rapier3d-f64/tests/` 的测试覆盖。
+
+### `894d34e3`（600 行）→ force containers 的诞生
+
+`src/dynamics/force_containers.rs`（303 行）+ `rigid_body.rs`（253 行）+ 管线接线。
+
+文档头写得很清楚：替代 rapier 的「扁平」力模型。原生模型里用户力每步被
+`reset_forces` 抹掉，持久力（推力、磁力锚点）必须每帧重新 `add_force`；而这个
+模块用 **{persistent, transient} 双生命周期 + 按 kind 分类的容器**解决它。
+
+**判断**：真实需求（本项目确实需要持久推力）。但这是**改动了核心力模型**，
+影响面大 —— `force_containers` 外部引用 55 处，是 G 类里影响最大的一个。
+
+### `33292dc3`（979 行，36 个文件）→ 「显式禁用碰撞对」+ 一轮横向清理
+
+主体是 `disabled_collider_pairs`：允许宿主指定两个碰撞体永不碰撞，
+**无视 collision groups、solver hooks 和是否被关节连接**。
+
+实现要点（从 diff 注释读出）：
+
+- 每步清扫 `contact_graph` 与 `intersection_graph`，清掉已禁用对的陈旧 manifold
+  和 intersecting 标志
+- 移除碰撞体时 `retain` 掉引用它的禁用项（否则陈旧项会永远留在扫描里）
+- 拆除语义对齐 `remove_pair`（清 solver color、唤醒 partner、发 `Stopped` 事件、
+  断持久岛链接），但**保留边**，所以重新启用不需要走一遍 broad-phase
+
+同时夹带了 `ccd_solver` / `fluid` / `granular` / `soft_body_fork` / `collider` /
+`force_containers` 的一轮小改（各几十行），以及 `crates/rapier3d-f64/Cargo.toml`
+加 dev-dependency 和 `tests/force_container_determinism.rs`（118 行）。
+
+**判断**：核心能力（禁用碰撞对）是真实的，且有确定性测试。但**提交混杂**——
+一个「禁用碰撞对」的改动里夹了 7 个模块的顺手改，这是它消息无信息量的原因，
+也是将来如果要拆分的难点。
+
+### `02f6beaf`（34 行）→ `33292dc3` 的 `PhysicsWorld` 入口
+
+只加两个方法：`set_collision_enabled` / `is_collision_enabled`，转发到
+narrow-phase 的 per-pair filter。文档写明了对称性和「设置跨 `step` 持久」的语义。
+
+**判断**：`33292dc3` 的配套，两者应视为一件事。
+
+### 小结
+
+**5 个提交全部是有意为之的功能，没有一个是垃圾。** 原先的「无信息量」只是
+提交消息的问题，不是代码的问题。这条信息缺口的实际影响是：
+
+| 提交 | 真实性质 | 建议 |
+| --- | --- | --- |
+| `87f7521c` | 通用几何/空间索引工具 | 保留；评估是否提 PR |
+| `b989b8be` | 烘焙复合 + 录制回放 + 车轮关节 | 保留；`compound_baker` 可提 PR |
+| `894d34e3` | 重构核心力模型（影响面最大） | 保留；**该写 ADR** |
+| `33292dc3` | 禁用碰撞对 + 横向清理 | 保留；**该写 ADR**，并考虑拆分提交 |
+| `02f6beaf` | 上一个的 API 入口 | 与 `33292dc3` 合并看待 |
+
+**两个缺口**：`894d34e3`（重构力模型）和 `33292dc3`（禁用碰撞对）都是
+**改动核心行为却没有 ADR** 的，按本仓库 ADR-0008 的补丁纪律这是欠账。
+应该补两份 ADR，说明为什么必须改核心、官方方案为什么不够。
 
 ## 建议的处理顺序
 
 按「收益/风险比」排序：
 
 1. ~~**删 `linalg.rs`**（2631 行，零引用，零风险）~~ ✅ **已完成** `1957c0da`
-2. **补齐 5 个无信息量提交的说明**（`33292dc3`/`894d34e3`/`87f7521c`/`b989b8be`/`02f6beaf`）
-3. **把 C 类（官方 issue 修复）和 E 类（我们的能力）提 PR 给上游**
-4. **逐 Phase 核对软体 fork 与官方的行为差异**，能搬的搬、能删的删
-5. **决定 D 类模块去留**（需要产品判断）
+2. ~~**补齐 5 个无信息量提交的说明**~~ ✅ **已完成**（见 G' 节；结论是全部有真实意图，没有垃圾）
+3. **给 `894d34e3`（力模型重构）和 `33292dc3`（禁用碰撞对）补 ADR** ← 当前欠账
+4. **把 C 类（官方 issue 修复）和 E 类（我们的能力）提 PR 给上游**
+5. **逐 Phase 核对软体 fork 与官方的行为差异**，能搬的搬、能删的删
+6. **决定 D 类模块去留**（`87f7521c` 查清后倾向保留）
 
 ## 为什么不是「同步 0.37.0」
 
