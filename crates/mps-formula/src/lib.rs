@@ -32,6 +32,7 @@ pub mod integrators;
 pub mod material_mechanics;
 pub mod math;
 pub mod molecular;
+pub mod motors;
 pub mod nuclear;
 pub mod physchem;
 pub mod planetary_science;

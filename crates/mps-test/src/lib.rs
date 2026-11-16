@@ -88,6 +88,7 @@ pub mod rapier {
     pub mod matmech;
     pub mod minecraft;
     pub mod molecular;
+    pub mod motors;
     pub mod neural;
     pub mod nuclear;
     pub mod nucphys;
