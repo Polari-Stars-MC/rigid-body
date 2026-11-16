@@ -9,9 +9,9 @@
 //! * 可见度在光学厚度 ≈ 1 附近最大
 
 use mps_formula::tyndall::{
-    beer_lambert_transmittance, henyey_greenstein_phase, inscatter_along_ray,
-    mie_scattering_efficiency, optical_thickness, rayleigh_phase, single_scattering_albedo,
-    size_parameter, tyndall_visibility,
+    MAX_SCATTER_ORDERS, beer_lambert_transmittance, henyey_greenstein_phase, inscatter_along_ray,
+    inscatter_along_ray_multiple, mie_scattering_efficiency, optical_thickness, rayleigh_phase,
+    single_scattering_albedo, size_parameter, tyndall_visibility,
 };
 
 const EPS: f64 = 1e-12;
@@ -442,4 +442,113 @@ fn abi_end_to_end_visibility_pipeline() {
     );
     assert!((0.0..=1.0).contains(&vis), "visibility = {vis}");
     assert!(vis > 0.0, "a light beam should be visible here, got {vis}");
+}
+// ── 多次散射（ADR-0022）─────────────────────────────────────────────────────
+
+/// `orders = 1` 必须与单次散射**逐位相同** —— 这是递推的基础项。
+#[test]
+fn single_order_matches_the_one_scatter_function() {
+    let (ss, se, n, ph, li, l) = (1e-12, 2e-12, 1e12, 1.0, 1.0, 5.0);
+    let single = inscatter_along_ray(ss, se, n, ph, li, l, 64).unwrap();
+    let multi = inscatter_along_ray_multiple(ss, se, n, ph, li, l, 64, 1, 0.5).unwrap();
+    assert!(
+        (multi - single).abs() <= single * 1e-15,
+        "orders=1 must equal the single-scatter result: {multi} vs {single}"
+    );
+}
+
+/// 多次散射必须**只增不减**，且随阶数收敛。
+#[test]
+fn multiple_scattering_increases_and_converges() {
+    let (ss, se, n, ph, li, l) = (1e-12, 2e-12, 1e12, 1.0, 1.0, 5.0);
+    let l1 = inscatter_along_ray_multiple(ss, se, n, ph, li, l, 64, 1, 0.5).unwrap();
+    let l2 = inscatter_along_ray_multiple(ss, se, n, ph, li, l, 64, 2, 0.5).unwrap();
+    let l4 = inscatter_along_ray_multiple(ss, se, n, ph, li, l, 64, 4, 0.5).unwrap();
+    let l16 = inscatter_along_ray_multiple(ss, se, n, ph, li, l, 64, 16, 0.5).unwrap();
+
+    assert!(l2 > l1, "order 2 must exceed order 1");
+    assert!(l4 > l2, "order 4 must exceed order 2");
+    assert!(l16 > l4, "order 16 must exceed order 4");
+    // 收敛：16 阶相对 8 阶的增量应很小（r = ω·g = 0.25）。
+    let l8 = inscatter_along_ray_multiple(ss, se, n, ph, li, l, 64, 8, 0.5).unwrap();
+    assert!(
+        (l16 - l8) / l16 < 1e-4,
+        "series must converge: l8={l8} l16={l16}"
+    );
+}
+
+/// 厚介质里多次散射的**修正倍数**应显著大于 1 —— 这正是它存在的理由。
+#[test]
+fn multiple_scattering_corrects_thick_media_underestimation() {
+    // 高反照率（纯散射）使高阶贡献重要。
+    let (ss, se, n, ph, li, l) = (1e-12, 1e-12, 1e13, 1.0, 1.0, 10.0);
+    let single = inscatter_along_ray(ss, se, n, ph, li, l, 128).unwrap();
+    let multi = inscatter_along_ray_multiple(ss, se, n, ph, li, l, 128, 16, 0.5).unwrap();
+    let ratio = multi / single;
+    assert!(
+        ratio > 1.5,
+        "multiple scattering must add significantly in thick media, got ratio {ratio}"
+    );
+    // 但不能无界：纯散射 + g=0.5 时极限是 1/(1-0.5) = 2。
+    assert!(
+        ratio < 2.1,
+        "ratio must stay bounded for g=0.5, got {ratio}"
+    );
+}
+
+/// 低反照率（强吸收）时高阶贡献应该很小。
+#[test]
+fn low_albedo_suppresses_higher_orders() {
+    // 散射只占消光的 10%。
+    let (ss, se, n, ph, li, l) = (1e-13, 1e-12, 1e13, 1.0, 1.0, 10.0);
+    let single = inscatter_along_ray(ss, se, n, ph, li, l, 128).unwrap();
+    let multi = inscatter_along_ray_multiple(ss, se, n, ph, li, l, 128, 16, 0.5).unwrap();
+    let ratio = multi / single;
+    assert!(
+        ratio < 1.1,
+        "strong absorption must keep higher orders negligible, got {ratio}"
+    );
+    assert!(
+        ratio >= 1.0,
+        "multiple scattering can never reduce brightness"
+    );
+}
+
+/// `geometric_factor` 越小，高阶贡献越少。
+#[test]
+fn geometric_factor_controls_the_series() {
+    let (ss, se, n, ph, li, l) = (1e-12, 1e-12, 1e13, 1.0, 1.0, 10.0);
+    let small = inscatter_along_ray_multiple(ss, se, n, ph, li, l, 128, 16, 0.1).unwrap();
+    let large = inscatter_along_ray_multiple(ss, se, n, ph, li, l, 128, 16, 0.9).unwrap();
+    assert!(
+        large > small,
+        "larger geometric factor must collect more: {large} vs {small}"
+    );
+}
+
+#[test]
+fn multiple_scattering_rejects_invalid_arguments() {
+    let (ss, se, n, ph, li, l) = (1e-12, 1e-12, 1e12, 1.0, 1.0, 5.0);
+    // orders = 0
+    assert!(inscatter_along_ray_multiple(ss, se, n, ph, li, l, 64, 0, 0.5).is_none());
+    // orders 超上限
+    assert!(
+        inscatter_along_ray_multiple(ss, se, n, ph, li, l, 64, MAX_SCATTER_ORDERS + 1, 0.5)
+            .is_none()
+    );
+    // geometric_factor = 0 / 负 / >1
+    assert!(inscatter_along_ray_multiple(ss, se, n, ph, li, l, 64, 2, 0.0).is_none());
+    assert!(inscatter_along_ray_multiple(ss, se, n, ph, li, l, 64, 2, -0.1).is_none());
+    assert!(inscatter_along_ray_multiple(ss, se, n, ph, li, l, 64, 2, 1.5).is_none());
+    // 底层参数非法（散射 > 消光）
+    assert!(inscatter_along_ray_multiple(2e-12, 1e-12, n, ph, li, l, 64, 2, 0.5).is_none());
+}
+
+/// 纯散射 + `g = 1` 的退化情形不能死循环，也不能除零。
+#[test]
+fn pure_scattering_with_unit_geometric_factor_stays_finite() {
+    let (ss, se, n, ph, li, l) = (1e-12, 1e-12, 1e12, 1.0, 1.0, 5.0);
+    let v = inscatter_along_ray_multiple(ss, se, n, ph, li, l, 64, 8, 1.0).unwrap();
+    assert!(v.is_finite(), "degenerate r=1 case must stay finite: {v}");
+    assert!(v > 0.0);
 }

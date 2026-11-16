@@ -11356,6 +11356,28 @@ struct Bool tyndall_spectral_transmittance(double sigma_ext_r,
                                            double *out_g,
                                            double *out_b);
 
+/**
+ * 多次散射的沿视线累积亮度（ADR-0022）。
+ *
+ * `orders = 1` 时与 `tyndall_inscatter_along_ray` 逐位相同；`orders > 1` 时
+ * 按等比级数叠加高阶散射，修正厚介质的低估。
+ */
+struct Bool tyndall_inscatter_multiple(double sigma_sca,
+                                       double sigma_ext,
+                                       double number_density,
+                                       double phase,
+                                       double light_intensity,
+                                       double ray_length,
+                                       uint32_t steps,
+                                       uint32_t orders,
+                                       double geometric_factor,
+                                       double *out);
+
+/**
+ * 多次散射的阶数上限（C 侧探测用）。
+ */
+uint32_t tyndall_max_scatter_orders(void);
+
 struct Bool material_mechanics_hookes_law_uniaxial(double stress,
                                                    double youngs_modulus,
                                                    double *out);

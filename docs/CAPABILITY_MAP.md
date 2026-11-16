@@ -11,11 +11,11 @@
 | 项 | 数量 |
 | --- | --- |
 | `mps-core` 里有 `extern "C"` 入口的源模块 | 64 |
-| `mps-core` C ABI 入口总数 | 990 |
-| 其中出现在生成头文件 `rigid_body.h` 里 | 990 |
+| `mps-core` C ABI 入口总数 | 992 |
+| 其中出现在生成头文件 `rigid_body.h` 里 | 992 |
 | 其中被 `mps-jni` 的 `jni!` 体引用 | 613 |
 | 其中被 `mps-test` 引用 | 751 |
-| 既无 JNI 绑定也无测试引用 | 133 |
+| 既无 JNI 绑定也无测试引用 | 135 |
 
 ## 模块表
 
@@ -44,7 +44,7 @@
 | `debug_recording` | `debug_recording_*` | 7 | — | dedicated 7 | [debug_recording.md](mps-core/debug_recording.md) | [debug_recording.rs](../crates/mps-test/src/rapier/debug_recording.rs) | 7 | 7 |
 | `disasters` | `disaster_*` | 9 | — | clear_param 1 / topology 4 / dedicated 4 | [disasters.md](mps-core/disasters.md) | [disasters.rs](../crates/mps-test/src/rapier/disasters.rs) | 9 | 9 |
 | `dop` | `collider_builder_create_*` | 2 | — | dedicated 2 | [dop.md](mps-core/dop.md) | [dop.rs](../crates/mps-test/src/rapier/dop.rs) | 2 | 0 |
-| `emag` | — | 34 | — | dedicated 34 | [emag.md](mps-core/emag.md) | [emag.rs](../crates/mps-test/src/rapier/emag.rs) | 0 | 16 |
+| `emag` | — | 36 | — | dedicated 36 | [emag.md](mps-core/emag.md) | [emag.rs](../crates/mps-test/src/rapier/emag.rs) | 0 | 16 |
 | `error` | — | 4 | — | clear_param 1 / dedicated 3 | [error.md](mps-core/error.md) | [error.rs](../crates/mps-test/src/rapier/error.rs) | 2 | 4 |
 | `events` | `world_*` | 66 | — | set_param 25 / clear_param 15 / read_param 11 / dedicated 15 | [events.md](mps-core/events.md) | [events.rs](../crates/mps-test/src/rapier/events.rs) | 42 | 58 |
 | `ffi/force_queue` | — | 1 | — | dedicated 1 | [ffi-force-queue.md](mps-core/ffi-force-queue.md) | [ffi.rs](../crates/mps-test/src/rapier/ffi.rs) | 1 | 1 |
@@ -98,9 +98,9 @@
 | `clear_param` | `*_clear_<prop>` → `*_set_param(e, PROP, none)` | 32 |
 | `read_param` | `*_get_<prop>` / `*_read_<prop>` → `*_get_param(e, PROP, out)` | 118 |
 | `topology` | `*_add/insert/remove/detach/attach_*`（第二批） | 57 |
-| `dedicated` | 带真实逻辑，必须保留专用入口 | 580 |
+| `dedicated` | 带真实逻辑，必须保留专用入口 | 582 |
 
-**属性通道可直接吸收 353 个入口（占 990 的 35%）。**
+**属性通道可直接吸收 353 个入口（占 992 的 35%）。**
 
 ## 头文件声明了、默认构建里没有
 
@@ -128,7 +128,7 @@ cbindgen 不按 feature 过滤，所以这些符号出现在 `rigid_body.h` 里�
 | `aerodynamics` | 3 |
 | `anvilkit` | 4 |
 | `astrocalc` | 18 |
-| `emag` | 18 |
+| `emag` | 20 |
 | `joints` | 13 |
 | `nucphys` | 10 |
 | `qphys` | 21 |

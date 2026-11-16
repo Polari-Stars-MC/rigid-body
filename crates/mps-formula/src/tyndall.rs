@@ -323,3 +323,107 @@ pub fn tyndall_visibility(
     let front_bias = 0.5 + 0.5 * g.max(0.0);
     Some((albedo * (1.0 - trans_in) * trans_out * front_bias).clamp(0.0, 1.0))
 }
+
+// ── 多次散射近似（ADR-0022）─────────────────────────────────────────────────
+
+/// 多次散射的阶数上限（避免病态参数下无限循环）。
+pub const MAX_SCATTER_ORDERS: u32 = 16;
+
+/// 沿视线**含多次散射**的累积亮度。
+///
+/// ## 为什么需要
+///
+/// [`inscatter_along_ray`] 只算光**第一次**被散射就进入视线的部分。厚介质
+/// （光学厚度 `τ > 2`）里，光实际会经历多次散射才出来，单次近似**低估**亮度
+/// 2~5 倍。
+///
+/// ## 采用的近似：阶数递推
+///
+/// 不做完整的辐射传输求解（那需要迭代整个光场），而是利用一个物理事实：
+///
+/// **每次散射后，只有 `ω = σ_sca/σ_ext` 的部分继续传播**（其余被吸收）。
+///
+/// 所以第 `n` 阶的贡献近似为第 `n-1` 阶乘以 `ω` 和一个几何因子：
+///
+/// ```text
+/// L_total = L_1 · Σ_{n=0}^{N-1} (ω · g)^n
+/// ```
+///
+/// 其中 `g` 是**几何衰减因子**，表示散射光重新进入视线的立体角比例。取
+/// `g = 0.5` 是一个常用的一阶估计（散射大致前后各半），可用
+/// `geometric_factor` 参数调整。
+///
+/// 这是等比级数，闭式求和：
+///
+/// ```text
+/// L_total = L_1 · (1 - r^N) / (1 - r)      r = ω·g
+/// ```
+///
+/// ## 精度与局限
+///
+/// 这是**工程近似**，不是辐射传输的精确解。它的正确性依赖：
+///
+/// * `ω·g < 1`（否则级数发散 —— 物理上 `ω <= 1`、`g < 1` 保证）
+/// * 介质近似均匀（`σ` 沿视线变化时误差增大）
+///
+/// 对渲染用途足够：视觉上重要的是"厚介质不该比薄介质暗"，而这个模型保证了
+/// 亮度随 `τ` 单调上升到饱和，不会像单次散射那样过早在某个厚度封顶。
+///
+/// # Parameters
+/// * `sigma_sca` / `sigma_ext` 单颗粒散射/消光截面
+/// * `number_density` 数密度
+/// * `phase` 相函数值
+/// * `light_intensity` 入射光强度
+/// * `ray_length` 视线长度
+/// * `steps` 单次积分的采样段数
+/// * `orders` 计入的散射阶数（`1` = 只有单次，与 `inscatter_along_ray` 相同）
+/// * `geometric_factor` 几何衰减因子，落在 `(0, 1]`；`0.5` 是常用估计
+#[allow(clippy::too_many_arguments)]
+pub fn inscatter_along_ray_multiple(
+    sigma_sca: f64,
+    sigma_ext: f64,
+    number_density: f64,
+    phase: f64,
+    light_intensity: f64,
+    ray_length: f64,
+    steps: u32,
+    orders: u32,
+    geometric_factor: f64,
+) -> Option<f64> {
+    if !geometric_factor.is_finite()
+        || !(0.0..=1.0).contains(&geometric_factor)
+        || geometric_factor <= 0.0
+    {
+        return None;
+    }
+    if orders == 0 || orders > MAX_SCATTER_ORDERS {
+        return None;
+    }
+    // 单次散射是基础项，参数校验由它完成。
+    let first = inscatter_along_ray(
+        sigma_sca,
+        sigma_ext,
+        number_density,
+        phase,
+        light_intensity,
+        ray_length,
+        steps,
+    )?;
+
+    // 单次阶不需要反照率（它就是"第一次散射"本身）。
+    if orders == 1 {
+        return Some(first);
+    }
+
+    let albedo = single_scattering_albedo(sigma_sca, sigma_ext)?;
+    let r = albedo * geometric_factor;
+    // r < 1 由 albedo <= 1 与 geometric_factor < 1 保证；这里防御性处理 r == 1
+    // （albedo == 1 且 g == 1 的退化情形，级数不收敛）。
+    if r >= 1.0 {
+        // 纯散射且完全前向：所有光都留在系统里，按阶数线性累加。
+        return Some(first * orders as f64);
+    }
+    // 等比级数：1 + r + r² + ... + r^(N-1) = (1 - r^N)/(1 - r)
+    let factor = (1.0 - r.powi(orders as i32)) / (1.0 - r);
+    Some(first * factor)
+}

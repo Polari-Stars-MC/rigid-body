@@ -571,3 +571,41 @@ pub extern "C" fn tyndall_spectral_transmittance(
         }
     })
 }
+/// 多次散射的沿视线累积亮度（ADR-0022）。
+///
+/// `orders = 1` 时与 `tyndall_inscatter_along_ray` 逐位相同；`orders > 1` 时
+/// 按等比级数叠加高阶散射，修正厚介质的低估。
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub extern "C" fn tyndall_inscatter_multiple(
+    sigma_sca: f64,
+    sigma_ext: f64,
+    number_density: f64,
+    phase: f64,
+    light_intensity: f64,
+    ray_length: f64,
+    steps: u32,
+    orders: u32,
+    geometric_factor: f64,
+    out: *mut f64,
+) -> Bool {
+    ffi_scalar(out, || {
+        mps_formula::tyndall::inscatter_along_ray_multiple(
+            sigma_sca,
+            sigma_ext,
+            number_density,
+            phase,
+            light_intensity,
+            ray_length,
+            steps,
+            orders,
+            geometric_factor,
+        )
+    })
+}
+
+/// 多次散射的阶数上限（C 侧探测用）。
+#[unsafe(no_mangle)]
+pub extern "C" fn tyndall_max_scatter_orders() -> u32 {
+    ffi_guard(0, || mps_formula::tyndall::MAX_SCATTER_ORDERS)
+}
