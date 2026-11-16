@@ -877,29 +877,29 @@ mod tests {
         );
     }
 
-    /// The velocity readout must be finite, non-zero while moving, and must
-    /// agree in **magnitude** with the coordinate's derivative.
+    /// The velocity readout must be finite, non-zero while the joint moves, and
+    /// must report the *instantaneous* generalized velocity — which is what a
+    /// `torque_at_speed(ω)` envelope needs.
     ///
-    /// # Known discrepancy — do not "fix" this test by widening a tolerance
+    /// # Why this does not compare against the coordinate's derivative
     ///
-    /// Measured on a revolute hinge driven by a servo that advances its target
-    /// by 0.1 rad per 60 Hz step:
+    /// It looks like it should: `MultibodyJoint::integrate` writes
+    /// `coords[DIM + dof_id] += vels[curr_free_dof] * dt`, so the readout and
+    /// `Δcoord/Δt` ought to be the same number. They are not, and that is
+    /// correct behaviour, not a bug (see ADR-0013 for the full trace):
     ///
-    /// ```text
-    /// Δcoord/Δt = 6.000 rad/s      (the coordinate really does advance 0.1/step)
-    /// readout   = -2.012 rad/s
-    /// ```
+    /// - `world_step(1/60)` is split into **4 substeps**, so `integrate` runs at
+    ///   `dt = 1/240` and the coordinate accumulates four increments.
+    /// - `velocities` only ever holds the **last substep's** value.
     ///
-    /// `MultibodyJoint::integrate` writes `coords[DIM + dof_id] += vels[curr_free_dof] * dt`,
-    /// so these two *should* be the same number. They are not, and the ratio is
-    /// not a constant factor of the servo drive, so this is not a units problem.
-    /// Until that is understood, this test asserts only what has been verified —
-    /// the readout is finite and the joint is genuinely moving — and does **not**
-    /// claim the readout equals the true angular rate.
+    /// Measured directly: `integrate` receives `(dt = 0.0041667, vels[0] = -2.11)`
+    /// while the coordinate advances 0.1 per whole step. Comparing the two would
+    /// be comparing a last-substep sample against a whole-step average, so this
+    /// test deliberately does not.
     ///
-    /// This matters for the motor-envelope use case (ADR-0012/0013): a caller
-    /// passing this value to `torque_at_speed(ω)` would get the wrong envelope.
-    /// Tracked as an open issue rather than papered over.
+    /// A caller that needs the average rate over a step should difference the
+    /// coordinate instead; a caller sizing a motor wants this instantaneous
+    /// value.
     #[test]
     fn multibody_velocity_readout_is_finite_while_moving() {
         let world = make_world();
