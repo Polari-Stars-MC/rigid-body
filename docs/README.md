@@ -27,6 +27,7 @@
 | [body-spatial-index.md](body-spatial-index.md) | 刚体中心 BVH：区域查询，不替代碰撞体 BVH |
 | [world-step-benchmarks.md](world-step-benchmarks.md) | `world_step` 性能矩阵怎么跑、CSV 是什么 |
 | [cosmos-arena.md](cosmos-arena.md) | cosmos 共享竞技场的偏移表、槽位和上限（跨语言 ABI） |
+| [tyndall-mc-integration.md](tyndall-mc-integration.md) | 丁达尔效应：MC 侧集成指南（23 个 C ABI 怎么用） |
 | [abi-merge-scan.md](abi-merge-scan.md) | dedicated 入口的可合并性扫描（确切数字与修正后的判据） |
 | [abi-convergence.md](abi-convergence.md) | 949 个 C ABI 怎么收敛成通用属性通道（设计稿） |
 | [rapier-fork-delta.md](rapier-fork-delta.md) | fork 相对官方 v0.36.1 改了什么、为什么、哪些该删 |
