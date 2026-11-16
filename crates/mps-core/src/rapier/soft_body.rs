@@ -785,33 +785,19 @@ pub extern "C" fn soft_body_set_corotated(
     id: u32,
     stiffness: f64,
 ) -> Bool {
+    // Shim (ADR-0016 迁移第 2 步): 转发到通用属性通道。
+    //
+    // 这个入口的**签名、失败哨兵、错误码语义都不变**，只是实现改成一行转发。
+    // 它和 `soft_body_set_param(world, id, SOFT_PARAM_COROTATED, stiffness)`
+    // 现在是同一段代码，所以"新旧等价"从测试断言变成了实现事实。
+    //
+    // 校验（`0 < stiffness <= 1`）仍由 `SoftBody::set_corotated` 自己完成，
+    // 通道不重复校验 —— 否则两条路径会有两种结论。
+    //
+    // 外层保留 `ffi_guard`：`verify_ffi_guard` 要求每个 `extern "C"` 入口
+    // 直接包含它，而不是依赖被调用者内部的守卫。
     ffi_guard(Bool::FALSE, || {
-        let Some(world) = (unsafe { world.as_mut() }) else {
-            set_error(ERR_NULL_POINTER, "world is null");
-            return Bool::FALSE;
-        };
-        if !stiffness.is_finite() || stiffness <= 0.0 || stiffness > 1.0 {
-            set_error(
-                ERR_INVALID_ARGUMENT,
-                "soft_body_set_corotated: stiffness must be in (0, 1]",
-            );
-            return Bool::FALSE;
-        }
-        let sid = crate::rapier::soft_data::SoftBodyId(id);
-        let Some(sb) = world.inner.soft_bodies.get_mut(sid) else {
-            set_error(ERR_NOT_FOUND, "soft_body_set_corotated: unknown id");
-            return Bool::FALSE;
-        };
-        if sb.set_corotated(stiffness) {
-            clear_error();
-            Bool::TRUE
-        } else {
-            set_error(
-                ERR_INVALID_ARGUMENT,
-                "soft_body_set_corotated: rejected by validator",
-            );
-            Bool::FALSE
-        }
+        soft_body_set_param(world, id, SOFT_PARAM_COROTATED, stiffness)
     })
 }
 
@@ -860,26 +846,13 @@ pub extern "C" fn soft_body_set_neo_hookean(
     id: u32,
     stiffness: f64,
 ) -> Bool {
+    // Shim (ADR-0016 迁移第 2 步): 转发到通用属性通道。签名、失败哨兵、
+    // 错误码都不变；值域校验仍由 `soft_data` 的 setter 自己完成。
+    //
+    // 外层保留 `ffi_guard`：`verify_ffi_guard` 要求每个 `extern "C"` 入口
+    // 直接包含它，而不是依赖被调用者内部的守卫。
     ffi_guard(Bool::FALSE, || {
-        let Some(world) = (unsafe { world.as_mut() }) else {
-            set_error(ERR_NULL_POINTER, "world is null");
-            return Bool::FALSE;
-        };
-        let sid = crate::rapier::soft_data::SoftBodyId(id);
-        let Some(sb) = world.inner.soft_bodies.get_mut(sid) else {
-            set_error(ERR_NOT_FOUND, "soft_body_set_neo_hookean: unknown id");
-            return Bool::FALSE;
-        };
-        if sb.set_neo_hookean(stiffness) {
-            clear_error();
-            Bool::TRUE
-        } else {
-            set_error(
-                ERR_INVALID_ARGUMENT,
-                "soft_body_set_neo_hookean: non-finite/negative stiffness",
-            );
-            Bool::FALSE
-        }
+        soft_body_set_param(world, id, SOFT_PARAM_NEO_HOOKEAN, stiffness)
     })
 }
 
@@ -922,26 +895,13 @@ pub extern "C" fn soft_body_clear_neo_hookean(world: *mut WorldHandle, id: u32) 
 /// `world` 必须有效。
 #[unsafe(no_mangle)]
 pub extern "C" fn soft_body_set_activation(world: *mut WorldHandle, id: u32, gamma: f64) -> Bool {
+    // Shim (ADR-0016 迁移第 2 步): 转发到通用属性通道。签名、失败哨兵、
+    // 错误码都不变；值域校验仍由 `soft_data` 的 setter 自己完成。
+    //
+    // 外层保留 `ffi_guard`：`verify_ffi_guard` 要求每个 `extern "C"` 入口
+    // 直接包含它，而不是依赖被调用者内部的守卫。
     ffi_guard(Bool::FALSE, || {
-        let Some(world) = (unsafe { world.as_mut() }) else {
-            set_error(ERR_NULL_POINTER, "world is null");
-            return Bool::FALSE;
-        };
-        let sid = crate::rapier::soft_data::SoftBodyId(id);
-        let Some(sb) = world.inner.soft_bodies.get_mut(sid) else {
-            set_error(ERR_NOT_FOUND, "soft_body_set_activation: unknown id");
-            return Bool::FALSE;
-        };
-        if sb.set_activation(gamma) {
-            clear_error();
-            Bool::TRUE
-        } else {
-            set_error(
-                ERR_INVALID_ARGUMENT,
-                "soft_body_set_activation: activation must be in [0, 1]",
-            );
-            Bool::FALSE
-        }
+        soft_body_set_param(world, id, SOFT_PARAM_ACTIVATION, gamma)
     })
 }
 
@@ -1864,26 +1824,13 @@ pub extern "C" fn soft_body_read_spring_forces(
 /// `world` 必须有效；`pressure` 需为有限值。
 #[unsafe(no_mangle)]
 pub extern "C" fn soft_body_set_pressure(world: *mut WorldHandle, id: u32, pressure: f64) -> Bool {
+    // Shim (ADR-0016 迁移第 2 步): 转发到通用属性通道。签名、失败哨兵、
+    // 错误码都不变；值域校验仍由 `soft_data` 的 setter 自己完成。
+    //
+    // 外层保留 `ffi_guard`：`verify_ffi_guard` 要求每个 `extern "C"` 入口
+    // 直接包含它，而不是依赖被调用者内部的守卫。
     ffi_guard(Bool::FALSE, || {
-        let Some(world) = (unsafe { world.as_mut() }) else {
-            set_error(ERR_NULL_POINTER, "world is null");
-            return Bool::FALSE;
-        };
-        if !pressure.is_finite() {
-            set_error(
-                ERR_INVALID_ARGUMENT,
-                "soft_body_set_pressure: non-finite pressure",
-            );
-            return Bool::FALSE;
-        }
-        let sid = crate::rapier::soft_data::SoftBodyId(id);
-        let Some(sb) = world.inner.soft_bodies.get_mut(sid) else {
-            set_error(ERR_NOT_FOUND, "soft_body_set_pressure: unknown id");
-            return Bool::FALSE;
-        };
-        sb.set_pressure(pressure);
-        clear_error();
-        Bool::TRUE
+        soft_body_set_param(world, id, SOFT_PARAM_PRESSURE, pressure)
     })
 }
 
@@ -2133,29 +2080,13 @@ pub extern "C" fn soft_body_set_self_collision_friction(
     id: u32,
     mu: f64,
 ) -> Bool {
+    // Shim (ADR-0016 迁移第 2 步): 转发到通用属性通道。签名、失败哨兵、
+    // 错误码都不变；值域校验仍由 `soft_data` 的 setter 自己完成。
+    //
+    // 外层保留 `ffi_guard`：`verify_ffi_guard` 要求每个 `extern "C"` 入口
+    // 直接包含它，而不是依赖被调用者内部的守卫。
     ffi_guard(Bool::FALSE, || {
-        let Some(world) = (unsafe { world.as_mut() }) else {
-            set_error(ERR_NULL_POINTER, "world is null");
-            return Bool::FALSE;
-        };
-        let sid = crate::rapier::soft_data::SoftBodyId(id);
-        let Some(sb) = world.inner.soft_bodies.get_mut(sid) else {
-            set_error(
-                ERR_NOT_FOUND,
-                "soft_body_set_self_collision_friction: unknown id",
-            );
-            return Bool::FALSE;
-        };
-        if sb.set_self_collision_friction(mu) {
-            clear_error();
-            Bool::TRUE
-        } else {
-            set_error(
-                ERR_INVALID_ARGUMENT,
-                "soft_body_set_self_collision_friction: μ 非有限/越界(0≤μ≤1)或未开启自碰撞",
-            );
-            Bool::FALSE
-        }
+        soft_body_set_param(world, id, SOFT_PARAM_SELF_COLLISION_FRICTION, mu)
     })
 }
 
@@ -2170,29 +2101,13 @@ pub extern "C" fn soft_body_set_cross_collision_friction(
     id: u32,
     mu: f64,
 ) -> Bool {
+    // Shim (ADR-0016 迁移第 2 步): 转发到通用属性通道。签名、失败哨兵、
+    // 错误码都不变；值域校验仍由 `soft_data` 的 setter 自己完成。
+    //
+    // 外层保留 `ffi_guard`：`verify_ffi_guard` 要求每个 `extern "C"` 入口
+    // 直接包含它，而不是依赖被调用者内部的守卫。
     ffi_guard(Bool::FALSE, || {
-        let Some(world) = (unsafe { world.as_mut() }) else {
-            set_error(ERR_NULL_POINTER, "world is null");
-            return Bool::FALSE;
-        };
-        let sid = crate::rapier::soft_data::SoftBodyId(id);
-        let Some(sb) = world.inner.soft_bodies.get_mut(sid) else {
-            set_error(
-                ERR_NOT_FOUND,
-                "soft_body_set_cross_collision_friction: unknown id",
-            );
-            return Bool::FALSE;
-        };
-        if sb.set_cross_collision_friction(mu) {
-            clear_error();
-            Bool::TRUE
-        } else {
-            set_error(
-                ERR_INVALID_ARGUMENT,
-                "soft_body_set_cross_collision_friction: μ 非有限/越界(0≤μ≤1)或未开启跨体碰撞",
-            );
-            Bool::FALSE
-        }
+        soft_body_set_param(world, id, SOFT_PARAM_CROSS_COLLISION_FRICTION, mu)
     })
 }
 
@@ -2215,36 +2130,13 @@ pub extern "C" fn soft_body_set_volume_conservation(
     id: u32,
     compliance: f64,
 ) -> Bool {
+    // Shim (ADR-0016 迁移第 2 步): 转发到通用属性通道。签名、失败哨兵、
+    // 错误码都不变；值域校验仍由 `soft_data` 的 setter 自己完成。
+    //
+    // 外层保留 `ffi_guard`：`verify_ffi_guard` 要求每个 `extern "C"` 入口
+    // 直接包含它，而不是依赖被调用者内部的守卫。
     ffi_guard(Bool::FALSE, || {
-        let Some(world) = (unsafe { world.as_mut() }) else {
-            set_error(ERR_NULL_POINTER, "world is null");
-            return Bool::FALSE;
-        };
-        if !compliance.is_finite() {
-            set_error(
-                ERR_INVALID_ARGUMENT,
-                "soft_body_set_volume_conservation: non-finite compliance",
-            );
-            return Bool::FALSE;
-        }
-        let sid = crate::rapier::soft_data::SoftBodyId(id);
-        let Some(sb) = world.inner.soft_bodies.get_mut(sid) else {
-            set_error(
-                ERR_NOT_FOUND,
-                "soft_body_set_volume_conservation: unknown id",
-            );
-            return Bool::FALSE;
-        };
-        if sb.set_volume_conservation(compliance) {
-            clear_error();
-            Bool::TRUE
-        } else {
-            set_error(
-                ERR_INVALID_ARGUMENT,
-                "soft_body_set_volume_conservation: negative/non-finite compliance",
-            );
-            Bool::FALSE
-        }
+        soft_body_set_param(world, id, SOFT_PARAM_VOLUME_CONSERVATION, compliance)
     })
 }
 
@@ -2261,33 +2153,13 @@ pub extern "C" fn soft_body_set_volume_conservation(
 /// `world` 必须有效;`d` 需为有限且 `0 <= d < 1`。
 #[unsafe(no_mangle)]
 pub extern "C" fn soft_body_set_damping(world: *mut WorldHandle, id: u32, d: f64) -> Bool {
+    // Shim (ADR-0016 迁移第 2 步): 转发到通用属性通道。签名、失败哨兵、
+    // 错误码都不变；值域校验仍由 `soft_data` 的 setter 自己完成。
+    //
+    // 外层保留 `ffi_guard`：`verify_ffi_guard` 要求每个 `extern "C"` 入口
+    // 直接包含它，而不是依赖被调用者内部的守卫。
     ffi_guard(Bool::FALSE, || {
-        let Some(world) = (unsafe { world.as_mut() }) else {
-            set_error(ERR_NULL_POINTER, "world is null");
-            return Bool::FALSE;
-        };
-        if !d.is_finite() {
-            set_error(
-                ERR_INVALID_ARGUMENT,
-                "soft_body_set_damping: non-finite damping",
-            );
-            return Bool::FALSE;
-        }
-        let sid = crate::rapier::soft_data::SoftBodyId(id);
-        let Some(sb) = world.inner.soft_bodies.get_mut(sid) else {
-            set_error(ERR_NOT_FOUND, "soft_body_set_damping: unknown id");
-            return Bool::FALSE;
-        };
-        if sb.set_damping(d) {
-            clear_error();
-            Bool::TRUE
-        } else {
-            set_error(
-                ERR_INVALID_ARGUMENT,
-                "soft_body_set_damping: need 0 <= d < 1",
-            );
-            Bool::FALSE
-        }
+        soft_body_set_param(world, id, SOFT_PARAM_DAMPING, d)
     })
 }
 
@@ -5435,10 +5307,24 @@ pub extern "C" fn soft_body_set_param(
         };
         // 每个属性自己校验值域，与对应专用入口的校验逐条一致 —— 否则同一件事
         // 通过两条路径会有两种结论。
+        //
+        // 失败时**保留该属性自己的错误消息**，而不是统一回一句泛泛的
+        // "rejected by validator"。原因：专用入口转成 shim 之后（迁移第 2 步），
+        // 错误消息是宿主唯一能看到的线索，泛化会让"刚度过大"和"id 不存在"
+        // 变得无法区分。
+        let fail_msg = |msg: &str| {
+            set_error(ERR_INVALID_ARGUMENT, msg);
+            Bool::FALSE
+        };
         let ok = match param {
             SOFT_PARAM_COROTATED => sb.set_corotated(value),
             SOFT_PARAM_NEO_HOOKEAN => sb.set_neo_hookean(value),
             SOFT_PARAM_PRESSURE => {
+                // 气压没有值域限制（可正可负），但必须有限 —— 专用入口原本就
+                // 拒收 NaN/Inf，通道不能放宽。
+                if !value.is_finite() {
+                    return fail_msg("soft_body_set_param: non-finite pressure");
+                }
                 sb.set_pressure(value);
                 true
             }
@@ -5446,10 +5332,9 @@ pub extern "C" fn soft_body_set_param(
             SOFT_PARAM_SUBSTEPS => {
                 // 子步是 u32 语义的标量：非整数、超过上限、或 0 都拒绝。
                 if !value.is_finite() || value < 1.0 || value > 64.0 || value.fract() != 0.0 {
-                    false
-                } else {
-                    sb.set_substeps(value as u32)
+                    return fail_msg("soft_body_set_param: substeps must be an integer in 1..=64");
                 }
+                sb.set_substeps(value as u32)
             }
             SOFT_PARAM_ACTIVATION => sb.set_activation(value),
             SOFT_PARAM_SELF_COLLISION_FRICTION => sb.set_self_collision_friction(value),

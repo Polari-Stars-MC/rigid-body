@@ -1442,19 +1442,11 @@ pub extern "C" fn rigid_body_enable_ccd(
     handle: RigidBodyHandleRaw,
     enabled: Bool,
 ) -> Bool {
+    // Shim (ADR-0016 迁移第 2 步): 转发到通用属性通道。`Bool` 按 0/1 映射成`f64`。
+    // 外层保留 `ffi_guard`：`verify_ffi_guard` 要求每个 `extern "C"` 入口
+    // 直接包含它，而不是依赖被调用者内部的守卫。
     ffi_guard(Bool::FALSE, || {
-        let Some(world) = (unsafe { world.as_mut() }) else {
-            set_error(ERR_NULL_POINTER, "world is null");
-            return Bool::FALSE;
-        };
-        let Some(body) = world.inner.bodies.get_mut(unpack_rigid_body_handle(handle)) else {
-            set_error(ERR_NOT_FOUND, "body was not found");
-            return Bool::FALSE;
-        };
-
-        body.enable_ccd(enabled.0 != 0);
-        clear_error();
-        Bool::TRUE
+        rigid_body_set_param(world, handle, RIGID_BODY_PARAM_ENABLE_CCD, enabled.0 as f64)
     })
 }
 
@@ -1508,19 +1500,11 @@ pub extern "C" fn rigid_body_wake_up(
     handle: RigidBodyHandleRaw,
     strong: Bool,
 ) -> Bool {
+    // Shim (ADR-0016 迁移第 2 步): 转发到通用属性通道。`Bool` 按 0/1 映射成`f64`。
+    // 外层保留 `ffi_guard`：`verify_ffi_guard` 要求每个 `extern "C"` 入口
+    // 直接包含它，而不是依赖被调用者内部的守卫。
     ffi_guard(Bool::FALSE, || {
-        let Some(world) = (unsafe { world.as_mut() }) else {
-            set_error(ERR_NULL_POINTER, "world is null");
-            return Bool::FALSE;
-        };
-        let Some(body) = world.inner.bodies.get_mut(unpack_rigid_body_handle(handle)) else {
-            set_error(ERR_NOT_FOUND, "body was not found");
-            return Bool::FALSE;
-        };
-
-        body.wake_up(strong.0 != 0);
-        clear_error();
-        Bool::TRUE
+        rigid_body_set_param(world, handle, RIGID_BODY_PARAM_WAKE_UP, strong.0 as f64)
     })
 }
 

@@ -1530,30 +1530,13 @@ pub extern "C" fn collider_set_friction(
     handle: ColliderHandleRaw,
     friction: f64,
 ) -> Bool {
+    // Shim (ADR-0016 迁移第 2 步): 转发到通用属性通道。
+    //
+    // 外层保留 `ffi_guard`：`verify_ffi_guard` 要求每个 `extern "C"` 入口直接
+    // 包含它，而不是依赖被调用者内部的守卫。多一层 catch_unwind 也确实是必要
+    // 的——万一将来 `collider_set_param` 内部 panic，这里还能兜住。
     ffi_guard(Bool::FALSE, || {
-        let Some(world) = (unsafe { world.as_mut() }) else {
-            set_error(ERR_NULL_POINTER, "world is null");
-            return Bool::FALSE;
-        };
-        let Some(collider) = world
-            .inner
-            .colliders
-            .get_mut(unpack_collider_handle(handle))
-        else {
-            set_error(ERR_NOT_FOUND, "collider not found");
-            return Bool::FALSE;
-        };
-        if !friction.is_finite() || friction < 0.0 {
-            set_error(
-                ERR_INVALID_ARGUMENT,
-                "friction must be finite and non-negative",
-            );
-            return Bool::FALSE;
-        }
-
-        collider.set_friction(friction);
-        crate::rapier::world::refresh_region_body(&mut world.inner, unpack_collider_handle(handle));
-        Bool::TRUE
+        collider_set_param(world, handle, COLLIDER_PARAM_FRICTION, friction)
     })
 }
 
@@ -1590,30 +1573,17 @@ pub extern "C" fn collider_set_rolling_resistance(
     handle: ColliderHandleRaw,
     coefficient: f64,
 ) -> Bool {
+    // Shim (ADR-0016 迁移第 2 步): 转发到通用属性通道。
+    //
+    // 外层保留 `ffi_guard`：`verify_ffi_guard` 要求每个 `extern "C"` 入口直接
+    // 包含它，而不是依赖被调用者内部的守卫。
     ffi_guard(Bool::FALSE, || {
-        let Some(world) = (unsafe { world.as_mut() }) else {
-            set_error(ERR_NULL_POINTER, "world is null");
-            return Bool::FALSE;
-        };
-        let Some(collider) = world
-            .inner
-            .colliders
-            .get_mut(unpack_collider_handle(handle))
-        else {
-            set_error(ERR_NOT_FOUND, "collider not found");
-            return Bool::FALSE;
-        };
-        if !coefficient.is_finite() || coefficient < 0.0 {
-            set_error(
-                ERR_INVALID_ARGUMENT,
-                "rolling_resistance must be finite and non-negative",
-            );
-            return Bool::FALSE;
-        }
-
-        collider.set_rolling_resistance(coefficient);
-        crate::rapier::world::refresh_region_body(&mut world.inner, unpack_collider_handle(handle));
-        Bool::TRUE
+        collider_set_param(
+            world,
+            handle,
+            COLLIDER_PARAM_ROLLING_RESISTANCE,
+            coefficient,
+        )
     })
 }
 
@@ -1668,30 +1638,11 @@ pub extern "C" fn collider_set_restitution(
     handle: ColliderHandleRaw,
     restitution: f64,
 ) -> Bool {
+    // Shim (ADR-0016 迁移第 2 步): 转发到通用属性通道。
+    // 外层保留 `ffi_guard`：`verify_ffi_guard` 要求每个 `extern "C"` 入口
+    // 直接包含它，而不是依赖被调用者内部的守卫。
     ffi_guard(Bool::FALSE, || {
-        let Some(world) = (unsafe { world.as_mut() }) else {
-            set_error(ERR_NULL_POINTER, "world is null");
-            return Bool::FALSE;
-        };
-        let Some(collider) = world
-            .inner
-            .colliders
-            .get_mut(unpack_collider_handle(handle))
-        else {
-            set_error(ERR_NOT_FOUND, "collider not found");
-            return Bool::FALSE;
-        };
-        if !restitution.is_finite() || restitution < 0.0 {
-            set_error(
-                ERR_INVALID_ARGUMENT,
-                "restitution must be finite and non-negative",
-            );
-            return Bool::FALSE;
-        }
-
-        collider.set_restitution(restitution);
-        crate::rapier::world::refresh_region_body(&mut world.inner, unpack_collider_handle(handle));
-        Bool::TRUE
+        collider_set_param(world, handle, COLLIDER_PARAM_RESTITUTION, restitution)
     })
 }
 
@@ -1956,30 +1907,17 @@ pub extern "C" fn collider_set_contact_force_event_threshold(
     handle: ColliderHandleRaw,
     threshold: f64,
 ) -> Bool {
+    // Shim (ADR-0016 迁移第 2 步): 转发到通用属性通道。
+    //
+    // 外层保留 `ffi_guard`：`verify_ffi_guard` 要求每个 `extern "C"` 入口直接
+    // 包含它，而不是依赖被调用者内部的守卫。
     ffi_guard(Bool::FALSE, || {
-        let Some(world) = (unsafe { world.as_mut() }) else {
-            set_error(ERR_NULL_POINTER, "world is null");
-            return Bool::FALSE;
-        };
-        let Some(collider) = world
-            .inner
-            .colliders
-            .get_mut(unpack_collider_handle(handle))
-        else {
-            set_error(ERR_NOT_FOUND, "collider not found");
-            return Bool::FALSE;
-        };
-        if !threshold.is_finite() || threshold < 0.0 {
-            set_error(
-                ERR_INVALID_ARGUMENT,
-                "threshold must be finite and non-negative",
-            );
-            return Bool::FALSE;
-        }
-
-        collider.set_contact_force_event_threshold(threshold);
-        crate::rapier::world::refresh_region_body(&mut world.inner, unpack_collider_handle(handle));
-        Bool::TRUE
+        collider_set_param(
+            world,
+            handle,
+            COLLIDER_PARAM_CONTACT_FORCE_EVENT_THRESHOLD,
+            threshold,
+        )
     })
 }
 
