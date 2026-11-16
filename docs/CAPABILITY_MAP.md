@@ -21,71 +21,85 @@
 
 `入口` 是该模块的 C ABI 数量；`门控` 是其中带 `#[cfg(feature = …)]`、默认构建里**不存在**的数量；`JNI` / `测试` 是该模块入口被 `mps-jni` 宏体 / `mps-test` 引用到的数量。
 
-| 模块 | 前缀 | 入口 | 门控 | 导览页 | 镜像测试 | JNI | 测试 |
-| --- | --- | ---: | ---: | --- | --- | ---: | ---: |
-| `acoustics_ffi` | `acoustics_*` | 12 | — | [acoustics_ffi.md](mps-core/acoustics_ffi.md) | [acoustics_ffi.rs](../crates/mps-test/src/rapier/acoustics_ffi.rs) | 0 | 5 |
-| `aerodynamics` | `aero_*` | 5 | — | [aerodynamics.md](mps-core/aerodynamics.md) | [aerodynamics.rs](../crates/mps-test/src/rapier/aerodynamics.rs) | 1 | 2 |
-| `anvilkit` | — | 22 | — | [anvilkit.md](mps-core/anvilkit.md) | [anvilkit.rs](../crates/mps-test/src/rapier/anvilkit.rs) | 13 | 8 |
-| `articulation` | `articulation_body_*` | 4 | — | [articulation.md](mps-core/articulation.md) | [articulation.rs](../crates/mps-test/src/rapier/articulation.rs) | 4 | 4 |
-| `astrocalc` | `astrophysics_*` | 26 | — | [astrocalc.md](mps-core/astrocalc.md) | [astrocalc.rs](../crates/mps-test/src/rapier/astrocalc.rs) | 0 | 8 |
-| `balloon` | — | 1 | — | [balloon.md](mps-core/balloon.md) | [balloon.rs](../crates/mps-test/src/rapier/balloon.rs) | 1 | 1 |
-| `batch` | — | 5 | — | [batch.md](mps-core/batch.md) | [batch.rs](../crates/mps-test/src/rapier/batch.rs) | 0 | 5 |
-| `bounds` | — | 30 | — | [bounds.md](mps-core/bounds.md) | [bounds.rs](../crates/mps-test/src/rapier/bounds.rs) | 30 | 13 |
-| `character_body` | `character_body_*` | 20 | — | [character_body.md](mps-core/character_body.md) | [character_body.rs](../crates/mps-test/src/rapier/character_body.rs) | 20 | 15 |
-| `cloth` | — | 1 | — | [cloth.md](mps-core/cloth.md) | [cloth.rs](../crates/mps-test/src/rapier/cloth.rs) | 1 | 1 |
-| `collider` | — | 67 | — | [collider.md](mps-core/collider.md) | [collider.rs](../crates/mps-test/src/rapier/collider.rs) | 54 | 65 |
-| `collision_mode` | `world_*` | 4 | — | [collision_mode.md](mps-core/collision_mode.md) | [collision_mode.rs](../crates/mps-test/src/rapier/collision_mode.rs) | 4 | 4 |
-| `compat` | — | 4 | — | [compat.md](mps-core/compat.md) | [compat.rs](../crates/mps-test/src/rapier/compat.rs) | 4 | 4 |
-| `controller` | `character_controller_*` | 14 | — | [controller.md](mps-core/controller.md) | [controller.rs](../crates/mps-test/src/rapier/controller.rs) | 14 | 13 |
-| `crbtree` | `crb_tree_*` | 10 | — | [crbtree.md](mps-core/crbtree.md) | [crbtree.rs](../crates/mps-test/src/rapier/crbtree.rs) | 9 | 10 |
-| `cross_validate` | `world_*` | 5 | — | [cross_validate.md](mps-core/cross_validate.md) | [cross_validate.rs](../crates/mps-test/src/rapier/cross_validate.rs) | 0 | 5 |
-| `debug_recording` | `debug_recording_*` | 7 | — | [debug_recording.md](mps-core/debug_recording.md) | [debug_recording.rs](../crates/mps-test/src/rapier/debug_recording.rs) | 7 | 7 |
-| `disasters` | `disaster_*` | 9 | — | [disasters.md](mps-core/disasters.md) | [disasters.rs](../crates/mps-test/src/rapier/disasters.rs) | 9 | 9 |
-| `dop` | `collider_builder_create_*` | 2 | — | [dop.md](mps-core/dop.md) | [dop.rs](../crates/mps-test/src/rapier/dop.rs) | 2 | 0 |
-| `emag` | `electromagnetism_*` | 21 | — | [emag.md](mps-core/emag.md) | [emag.rs](../crates/mps-test/src/rapier/emag.rs) | 0 | 7 |
-| `error` | — | 4 | — | [error.md](mps-core/error.md) | [error.rs](../crates/mps-test/src/rapier/error.rs) | 2 | 4 |
-| `events` | `world_*` | 66 | — | [events.md](mps-core/events.md) | [events.rs](../crates/mps-test/src/rapier/events.rs) | 42 | 58 |
-| `ffi/force_queue` | — | 1 | — | [ffi-force-queue.md](mps-core/ffi-force-queue.md) | [ffi.rs](../crates/mps-test/src/rapier/ffi.rs) | 1 | 1 |
-| `fluid` | `fluid_*` | 11 | — | [fluid.md](mps-core/fluid.md) | [fluid.rs](../crates/mps-test/src/rapier/fluid.rs) | 1 | 11 |
-| `fluid_sph` | `fluid_*` | 6 | — | [fluid_sph.md](mps-core/fluid_sph.md) | [fluid_sph.rs](../crates/mps-test/src/rapier/fluid_sph.rs) | 0 | 6 |
-| `fracture` | — | 7 | — | [fracture.md](mps-core/fracture.md) | [fracture.rs](../crates/mps-test/src/rapier/fracture.rs) | 7 | 7 |
-| `fracture_mesh` | — | 13 | — | [fracture_mesh.md](mps-core/fracture_mesh.md) | [fracture_mesh.rs](../crates/mps-test/src/rapier/fracture_mesh.rs) | 13 | 13 |
-| `granular` | `granular_*` | 8 | — | [granular.md](mps-core/granular.md) | [granular.rs](../crates/mps-test/src/rapier/granular.rs) | 8 | 8 |
-| `hair` | `hair_system_*` | 6 | — | [hair.md](mps-core/hair.md) | [hair.rs](../crates/mps-test/src/rapier/hair.rs) | 6 | 6 |
-| `joints` | — | 36 | — | [joints.md](mps-core/joints.md) | [joints.rs](../crates/mps-test/src/rapier/joints.rs) | 19 | 22 |
-| `matmech` | `material_mechanics_*` | 24 | — | [matmech.md](mps-core/matmech.md) | [matmech.rs](../crates/mps-test/src/rapier/matmech.rs) | 24 | 9 |
-| `minecraft` | — | 1 | — | — | [minecraft.rs](../crates/mps-test/src/rapier/minecraft.rs) | 1 | 0 |
-| `molecular` | `molecular_*` | 8 | — | [molecular.md](mps-core/molecular.md) | [molecular.rs](../crates/mps-test/src/rapier/molecular.rs) | 5 | 5 |
-| `neural` | — | 6 | — | [neural.md](mps-core/neural.md) | [neural.rs](../crates/mps-test/src/rapier/neural.rs) | 6 | 3 |
-| `nucphys` | `nuclear_*` | 18 | — | [nucphys.md](mps-core/nucphys.md) | [nucphys.rs](../crates/mps-test/src/rapier/nucphys.rs) | 0 | 8 |
-| `parallel` | `parallel_*` | 2 | — | [parallel.md](mps-core/parallel.md) | [parallel.rs](../crates/mps-test/src/rapier/parallel.rs) | 0 | 2 |
-| `plasma_ffi` | `plasma_*` | 5 | — | [plasma_ffi.md](mps-core/plasma_ffi.md) | [plasma_ffi.rs](../crates/mps-test/src/rapier/plasma_ffi.rs) | 0 | 5 |
-| `qphys` | `quantum_*` | 27 | — | [qphys.md](mps-core/qphys.md) | [qphys.rs](../crates/mps-test/src/rapier/qphys.rs) | 0 | 6 |
-| `query` | `query_*` | 24 | — | [query.md](mps-core/query.md) | [query.rs](../crates/mps-test/src/rapier/query.rs) | 24 | 18 |
-| `rel` | `relativity_*` | 29 | — | [rel.md](mps-core/rel.md) | [rel.rs](../crates/mps-test/src/rapier/rel.rs) | 0 | 7 |
-| `rigid_body` | — | 67 | 4 | [rigid_body.md](mps-core/rigid_body.md) | [rigid_body.rs](../crates/mps-test/src/rapier/rigid_body.rs) | 51 | 63 |
-| `rope` | — | 1 | — | [rope.md](mps-core/rope.md) | [rope.rs](../crates/mps-test/src/rapier/rope.rs) | 1 | 1 |
-| `rope_knot` | `rope_knot_*` | 5 | — | [rope_knot.md](mps-core/rope_knot.md) | [rope_knot.rs](../crates/mps-test/src/rapier/rope_knot.rs) | 5 | 5 |
-| `rtree` | `rtree_*` | 10 | — | [rtree.md](mps-core/rtree.md) | [rtree.rs](../crates/mps-test/src/rapier/rtree.rs) | 10 | 9 |
-| `sensor` | `sensor_zone_*` | 13 | — | [sensor.md](mps-core/sensor.md) | [sensor.rs](../crates/mps-test/src/rapier/sensor.rs) | 13 | 11 |
-| `servo_body` | `servo_body_*` | 10 | — | [servo_body.md](mps-core/servo_body.md) | [servo_body.rs](../crates/mps-test/src/rapier/servo_body.rs) | 10 | 10 |
-| `soft_body` | `soft_*` | 90 | — | [soft_body.md](mps-core/soft_body.md) | [soft_body.rs](../crates/mps-test/src/rapier/soft_body.rs) | 89 | 89 |
-| `spaceflight/debris` | `space_*` | 2 | — | [spaceflight-debris.md](mps-core/spaceflight-debris.md) | [spaceflight.rs](../crates/mps-test/src/rapier/spaceflight.rs) | 0 | 2 |
-| `spaceflight/dynamics` | `space_*` | 14 | — | [spaceflight-dynamics.md](mps-core/spaceflight-dynamics.md) | [spaceflight.rs](../crates/mps-test/src/rapier/spaceflight.rs) | 0 | 14 |
-| `spaceflight/gnss` | `space_*` | 5 | — | [spaceflight-gnss.md](mps-core/spaceflight-gnss.md) | [spaceflight.rs](../crates/mps-test/src/rapier/spaceflight.rs) | 0 | 5 |
-| `spaceflight/kepler` | `space_*` | 8 | — | [spaceflight-kepler.md](mps-core/spaceflight-kepler.md) | [spaceflight.rs](../crates/mps-test/src/rapier/spaceflight.rs) | 3 | 8 |
-| `spaceflight/perturbation` | `space_*` | 15 | — | [spaceflight-perturbation.md](mps-core/spaceflight-perturbation.md) | [spaceflight.rs](../crates/mps-test/src/rapier/spaceflight.rs) | 5 | 15 |
-| `spaceflight/propulsion` | `space_*` | 7 | — | [spaceflight-propulsion.md](mps-core/spaceflight-propulsion.md) | [spaceflight.rs](../crates/mps-test/src/rapier/spaceflight.rs) | 0 | 7 |
-| `spaceflight/rotation` | `space_*` | 16 | — | [spaceflight-rotation.md](mps-core/spaceflight-rotation.md) | [spaceflight.rs](../crates/mps-test/src/rapier/spaceflight.rs) | 5 | 16 |
-| `spaceflight/thermal` | `space_*` | 7 | — | [spaceflight-thermal.md](mps-core/spaceflight-thermal.md) | [spaceflight.rs](../crates/mps-test/src/rapier/spaceflight.rs) | 0 | 7 |
-| `terrain_gravity` | `terrain_*` | 6 | — | [terrain_gravity.md](mps-core/terrain_gravity.md) | [terrain_gravity.rs](../crates/mps-test/src/rapier/terrain_gravity.rs) | 0 | 0 |
-| `thermo` | `thermodynamics_*` | 5 | — | [thermo.md](mps-core/thermo.md) | [thermo.rs](../crates/mps-test/src/rapier/thermo.rs) | 5 | 5 |
-| `tire_model` | `tire_model_*` | 5 | — | [tire_model.md](mps-core/tire_model.md) | [tire_model.rs](../crates/mps-test/src/rapier/tire_model.rs) | 5 | 5 |
-| `trajectory` | `trajectory_*` | 6 | — | [trajectory.md](mps-core/trajectory.md) | [trajectory.rs](../crates/mps-test/src/rapier/trajectory.rs) | 1 | 4 |
-| `vehicle` | `vehicle_controller_*` | 12 | — | [vehicle.md](mps-core/vehicle.md) | [vehicle.rs](../crates/mps-test/src/rapier/vehicle.rs) | 12 | 10 |
-| `volcano` | `volcano_*` | 9 | — | [volcano.md](mps-core/volcano.md) | [volcano.rs](../crates/mps-test/src/rapier/volcano.rs) | 9 | 9 |
-| `voxel` | — | 23 | — | [voxel.md](mps-core/voxel.md) | [voxel.rs](../crates/mps-test/src/rapier/voxel.rs) | 21 | 8 |
-| `world` | — | 42 | 5 | [world.md](mps-core/world.md) | [world.rs](../crates/mps-test/src/rapier/world.rs) | 36 | 25 |
+`可合并组` 只按符号名的动词段机械判定，供 [abi-convergence.md](abi-convergence.md) 的收敛设计使用：`set_param` / `clear_param` / `read_param` 三类合计就是通用属性通道能吸收的入口数；`topology` 是增删元素（可合并但载荷差异大，属第二批）；`dedicated` 带真实逻辑，必须保留专用入口。
+
+| 模块 | 前缀 | 入口 | 门控 | 可合并组 | 导览页 | 镜像测试 | JNI | 测试 |
+| --- | --- | ---: | ---: | --- | --- | --- | ---: | ---: |
+| `acoustics_ffi` | `acoustics_*` | 12 | — | dedicated 12 | [acoustics_ffi.md](mps-core/acoustics_ffi.md) | [acoustics_ffi.rs](../crates/mps-test/src/rapier/acoustics_ffi.rs) | 0 | 5 |
+| `aerodynamics` | `aero_*` | 5 | — | dedicated 5 | [aerodynamics.md](mps-core/aerodynamics.md) | [aerodynamics.rs](../crates/mps-test/src/rapier/aerodynamics.rs) | 1 | 2 |
+| `anvilkit` | — | 22 | — | set_param 2 / topology 1 / dedicated 19 | [anvilkit.md](mps-core/anvilkit.md) | [anvilkit.rs](../crates/mps-test/src/rapier/anvilkit.rs) | 13 | 8 |
+| `articulation` | `articulation_body_*` | 4 | — | set_param 1 / read_param 1 / dedicated 2 | [articulation.md](mps-core/articulation.md) | [articulation.rs](../crates/mps-test/src/rapier/articulation.rs) | 4 | 4 |
+| `astrocalc` | `astrophysics_*` | 26 | — | dedicated 26 | [astrocalc.md](mps-core/astrocalc.md) | [astrocalc.rs](../crates/mps-test/src/rapier/astrocalc.rs) | 0 | 8 |
+| `balloon` | — | 1 | — | dedicated 1 | [balloon.md](mps-core/balloon.md) | [balloon.rs](../crates/mps-test/src/rapier/balloon.rs) | 1 | 1 |
+| `batch` | — | 5 | — | topology 1 / dedicated 4 | [batch.md](mps-core/batch.md) | [batch.rs](../crates/mps-test/src/rapier/batch.rs) | 0 | 5 |
+| `bounds` | — | 30 | — | read_param 12 / dedicated 18 | [bounds.md](mps-core/bounds.md) | [bounds.rs](../crates/mps-test/src/rapier/bounds.rs) | 30 | 13 |
+| `character_body` | `character_body_*` | 20 | — | set_param 9 / read_param 3 / dedicated 8 | [character_body.md](mps-core/character_body.md) | [character_body.rs](../crates/mps-test/src/rapier/character_body.rs) | 20 | 15 |
+| `cloth` | — | 1 | — | dedicated 1 | [cloth.md](mps-core/cloth.md) | [cloth.rs](../crates/mps-test/src/rapier/cloth.rs) | 1 | 1 |
+| `collider` | — | 67 | — | set_param 37 / read_param 7 / topology 4 / dedicated 19 | [collider.md](mps-core/collider.md) | [collider.rs](../crates/mps-test/src/rapier/collider.rs) | 54 | 65 |
+| `collision_mode` | `world_*` | 4 | — | set_param 1 / read_param 1 / topology 1 / dedicated 1 | [collision_mode.md](mps-core/collision_mode.md) | [collision_mode.rs](../crates/mps-test/src/rapier/collision_mode.rs) | 4 | 4 |
+| `compat` | — | 4 | — | read_param 1 / topology 2 / dedicated 1 | [compat.md](mps-core/compat.md) | [compat.rs](../crates/mps-test/src/rapier/compat.rs) | 4 | 4 |
+| `controller` | `character_controller_*` | 14 | — | set_param 7 / read_param 2 / dedicated 5 | [controller.md](mps-core/controller.md) | [controller.rs](../crates/mps-test/src/rapier/controller.rs) | 14 | 13 |
+| `crbtree` | `crb_tree_*` | 10 | — | clear_param 1 / read_param 1 / topology 3 / dedicated 5 | [crbtree.md](mps-core/crbtree.md) | [crbtree.rs](../crates/mps-test/src/rapier/crbtree.rs) | 9 | 10 |
+| `cross_validate` | `world_*` | 5 | — | set_param 2 / clear_param 1 / read_param 1 / dedicated 1 | [cross_validate.md](mps-core/cross_validate.md) | [cross_validate.rs](../crates/mps-test/src/rapier/cross_validate.rs) | 0 | 5 |
+| `debug_recording` | `debug_recording_*` | 7 | — | dedicated 7 | [debug_recording.md](mps-core/debug_recording.md) | [debug_recording.rs](../crates/mps-test/src/rapier/debug_recording.rs) | 7 | 7 |
+| `disasters` | `disaster_*` | 9 | — | clear_param 1 / topology 4 / dedicated 4 | [disasters.md](mps-core/disasters.md) | [disasters.rs](../crates/mps-test/src/rapier/disasters.rs) | 9 | 9 |
+| `dop` | `collider_builder_create_*` | 2 | — | dedicated 2 | [dop.md](mps-core/dop.md) | [dop.rs](../crates/mps-test/src/rapier/dop.rs) | 2 | 0 |
+| `emag` | `electromagnetism_*` | 21 | — | dedicated 21 | [emag.md](mps-core/emag.md) | [emag.rs](../crates/mps-test/src/rapier/emag.rs) | 0 | 7 |
+| `error` | — | 4 | — | clear_param 1 / dedicated 3 | [error.md](mps-core/error.md) | [error.rs](../crates/mps-test/src/rapier/error.rs) | 2 | 4 |
+| `events` | `world_*` | 66 | — | set_param 25 / clear_param 15 / read_param 11 / dedicated 15 | [events.md](mps-core/events.md) | [events.rs](../crates/mps-test/src/rapier/events.rs) | 42 | 58 |
+| `ffi/force_queue` | — | 1 | — | dedicated 1 | [ffi-force-queue.md](mps-core/ffi-force-queue.md) | [ffi.rs](../crates/mps-test/src/rapier/ffi.rs) | 1 | 1 |
+| `fluid` | `fluid_*` | 11 | — | dedicated 11 | [fluid.md](mps-core/fluid.md) | [fluid.rs](../crates/mps-test/src/rapier/fluid.rs) | 1 | 11 |
+| `fluid_sph` | `fluid_*` | 6 | — | read_param 2 / topology 1 / dedicated 3 | [fluid_sph.md](mps-core/fluid_sph.md) | [fluid_sph.rs](../crates/mps-test/src/rapier/fluid_sph.rs) | 0 | 6 |
+| `fracture` | — | 7 | — | dedicated 7 | [fracture.md](mps-core/fracture.md) | [fracture.rs](../crates/mps-test/src/rapier/fracture.rs) | 7 | 7 |
+| `fracture_mesh` | — | 13 | — | set_param 3 / read_param 1 / topology 2 / dedicated 7 | [fracture_mesh.md](mps-core/fracture_mesh.md) | [fracture_mesh.rs](../crates/mps-test/src/rapier/fracture_mesh.rs) | 13 | 13 |
+| `granular` | `granular_*` | 8 | — | read_param 3 / topology 1 / dedicated 4 | [granular.md](mps-core/granular.md) | [granular.rs](../crates/mps-test/src/rapier/granular.rs) | 8 | 8 |
+| `hair` | `hair_system_*` | 6 | — | set_param 2 / topology 1 / dedicated 3 | [hair.md](mps-core/hair.md) | [hair.rs](../crates/mps-test/src/rapier/hair.rs) | 6 | 6 |
+| `joints` | — | 36 | — | set_param 19 / read_param 3 / topology 5 / dedicated 9 | [joints.md](mps-core/joints.md) | [joints.rs](../crates/mps-test/src/rapier/joints.rs) | 19 | 22 |
+| `matmech` | `material_mechanics_*` | 24 | — | dedicated 24 | [matmech.md](mps-core/matmech.md) | [matmech.rs](../crates/mps-test/src/rapier/matmech.rs) | 24 | 9 |
+| `minecraft` | — | 1 | — | dedicated 1 | — | [minecraft.rs](../crates/mps-test/src/rapier/minecraft.rs) | 1 | 0 |
+| `molecular` | `molecular_*` | 8 | — | dedicated 8 | [molecular.md](mps-core/molecular.md) | [molecular.rs](../crates/mps-test/src/rapier/molecular.rs) | 5 | 5 |
+| `neural` | — | 6 | — | read_param 3 / dedicated 3 | [neural.md](mps-core/neural.md) | [neural.rs](../crates/mps-test/src/rapier/neural.rs) | 6 | 3 |
+| `nucphys` | `nuclear_*` | 18 | — | dedicated 18 | [nucphys.md](mps-core/nucphys.md) | [nucphys.rs](../crates/mps-test/src/rapier/nucphys.rs) | 0 | 8 |
+| `parallel` | `parallel_*` | 2 | — | set_param 1 / read_param 1 | [parallel.md](mps-core/parallel.md) | [parallel.rs](../crates/mps-test/src/rapier/parallel.rs) | 0 | 2 |
+| `plasma_ffi` | `plasma_*` | 5 | — | dedicated 5 | [plasma_ffi.md](mps-core/plasma_ffi.md) | [plasma_ffi.rs](../crates/mps-test/src/rapier/plasma_ffi.rs) | 0 | 5 |
+| `qphys` | `quantum_*` | 27 | — | dedicated 27 | [qphys.md](mps-core/qphys.md) | [qphys.rs](../crates/mps-test/src/rapier/qphys.rs) | 0 | 6 |
+| `query` | `query_*` | 24 | — | read_param 8 / dedicated 16 | [query.md](mps-core/query.md) | [query.rs](../crates/mps-test/src/rapier/query.rs) | 24 | 18 |
+| `rel` | `relativity_*` | 29 | — | dedicated 29 | [rel.md](mps-core/rel.md) | [rel.rs](../crates/mps-test/src/rapier/rel.rs) | 0 | 7 |
+| `rigid_body` | — | 67 | 4 | set_param 25 / read_param 11 / topology 12 / dedicated 19 | [rigid_body.md](mps-core/rigid_body.md) | [rigid_body.rs](../crates/mps-test/src/rapier/rigid_body.rs) | 51 | 63 |
+| `rope` | — | 1 | — | dedicated 1 | [rope.md](mps-core/rope.md) | [rope.rs](../crates/mps-test/src/rapier/rope.rs) | 1 | 1 |
+| `rope_knot` | `rope_knot_*` | 5 | — | set_param 1 / topology 1 / dedicated 3 | [rope_knot.md](mps-core/rope_knot.md) | [rope_knot.rs](../crates/mps-test/src/rapier/rope_knot.rs) | 5 | 5 |
+| `rtree` | `rtree_*` | 10 | — | clear_param 1 / read_param 1 / topology 2 / dedicated 6 | [rtree.md](mps-core/rtree.md) | [rtree.rs](../crates/mps-test/src/rapier/rtree.rs) | 10 | 9 |
+| `sensor` | `sensor_zone_*` | 13 | — | set_param 4 / clear_param 1 / read_param 3 / dedicated 5 | [sensor.md](mps-core/sensor.md) | [sensor.rs](../crates/mps-test/src/rapier/sensor.rs) | 13 | 11 |
+| `servo_body` | `servo_body_*` | 10 | — | set_param 4 / read_param 3 / dedicated 3 | [servo_body.md](mps-core/servo_body.md) | [servo_body.rs](../crates/mps-test/src/rapier/servo_body.rs) | 10 | 10 |
+| `soft_body` | `soft_*` | 90 | — | set_param 30 / clear_param 8 / read_param 14 / topology 9 / dedicated 29 | [soft_body.md](mps-core/soft_body.md) | [soft_body.rs](../crates/mps-test/src/rapier/soft_body.rs) | 89 | 89 |
+| `spaceflight/debris` | `space_*` | 2 | — | dedicated 2 | [spaceflight-debris.md](mps-core/spaceflight-debris.md) | [spaceflight.rs](../crates/mps-test/src/rapier/spaceflight.rs) | 0 | 2 |
+| `spaceflight/dynamics` | `space_*` | 14 | — | dedicated 14 | [spaceflight-dynamics.md](mps-core/spaceflight-dynamics.md) | [spaceflight.rs](../crates/mps-test/src/rapier/spaceflight.rs) | 0 | 14 |
+| `spaceflight/gnss` | `space_*` | 5 | — | dedicated 5 | [spaceflight-gnss.md](mps-core/spaceflight-gnss.md) | [spaceflight.rs](../crates/mps-test/src/rapier/spaceflight.rs) | 0 | 5 |
+| `spaceflight/kepler` | `space_*` | 8 | — | dedicated 8 | [spaceflight-kepler.md](mps-core/spaceflight-kepler.md) | [spaceflight.rs](../crates/mps-test/src/rapier/spaceflight.rs) | 3 | 8 |
+| `spaceflight/perturbation` | `space_*` | 15 | — | dedicated 15 | [spaceflight-perturbation.md](mps-core/spaceflight-perturbation.md) | [spaceflight.rs](../crates/mps-test/src/rapier/spaceflight.rs) | 5 | 15 |
+| `spaceflight/propulsion` | `space_*` | 7 | — | dedicated 7 | [spaceflight-propulsion.md](mps-core/spaceflight-propulsion.md) | [spaceflight.rs](../crates/mps-test/src/rapier/spaceflight.rs) | 0 | 7 |
+| `spaceflight/rotation` | `space_*` | 16 | — | dedicated 16 | [spaceflight-rotation.md](mps-core/spaceflight-rotation.md) | [spaceflight.rs](../crates/mps-test/src/rapier/spaceflight.rs) | 5 | 16 |
+| `spaceflight/thermal` | `space_*` | 7 | — | dedicated 7 | [spaceflight-thermal.md](mps-core/spaceflight-thermal.md) | [spaceflight.rs](../crates/mps-test/src/rapier/spaceflight.rs) | 0 | 7 |
+| `terrain_gravity` | `terrain_*` | 6 | — | read_param 2 / dedicated 4 | [terrain_gravity.md](mps-core/terrain_gravity.md) | [terrain_gravity.rs](../crates/mps-test/src/rapier/terrain_gravity.rs) | 0 | 0 |
+| `thermo` | `thermodynamics_*` | 5 | — | dedicated 5 | [thermo.md](mps-core/thermo.md) | [thermo.rs](../crates/mps-test/src/rapier/thermo.rs) | 5 | 5 |
+| `tire_model` | `tire_model_*` | 5 | — | set_param 1 / read_param 1 / topology 1 / dedicated 2 | [tire_model.md](mps-core/tire_model.md) | [tire_model.rs](../crates/mps-test/src/rapier/tire_model.rs) | 5 | 5 |
+| `trajectory` | `trajectory_*` | 6 | — | dedicated 6 | [trajectory.md](mps-core/trajectory.md) | [trajectory.rs](../crates/mps-test/src/rapier/trajectory.rs) | 1 | 4 |
+| `vehicle` | `vehicle_controller_*` | 12 | — | set_param 4 / read_param 2 / topology 1 / dedicated 5 | [vehicle.md](mps-core/vehicle.md) | [vehicle.rs](../crates/mps-test/src/rapier/vehicle.rs) | 12 | 10 |
+| `volcano` | `volcano_*` | 9 | — | set_param 1 / clear_param 1 / topology 2 / dedicated 5 | [volcano.md](mps-core/volcano.md) | [volcano.rs](../crates/mps-test/src/rapier/volcano.rs) | 9 | 9 |
+| `voxel` | — | 23 | — | set_param 1 / read_param 3 / topology 2 / dedicated 17 | [voxel.md](mps-core/voxel.md) | [voxel.rs](../crates/mps-test/src/rapier/voxel.rs) | 21 | 8 |
+| `world` | — | 42 | 5 | set_param 12 / read_param 16 / topology 1 / dedicated 13 | [world.md](mps-core/world.md) | [world.rs](../crates/mps-test/src/rapier/world.rs) | 36 | 25 |
+
+### 可合并组汇总
+
+| 组 | 含义 | 入口数 |
+| --- | --- | ---: |
+| `set_param` | `*_set_<prop>` → `*_set_param(e, PROP, v)` | 192 |
+| `clear_param` | `*_clear_<prop>` → `*_set_param(e, PROP, none)` | 30 |
+| `read_param` | `*_get_<prop>` / `*_read_<prop>` → `*_get_param(e, PROP, out)` | 117 |
+| `topology` | `*_add/insert/remove/detach/attach_*`（第二批） | 57 |
+| `dedicated` | 带真实逻辑，必须保留专用入口 | 553 |
+
+**属性通道可直接吸收 339 个入口（占 949 的 35%）。**
 
 ## 头文件声明了、默认构建里没有
 

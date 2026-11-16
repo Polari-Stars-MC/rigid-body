@@ -36,6 +36,81 @@ struct Entry {
     feature: Option<String>,
 }
 
+/// Which mergeability class a symbol belongs to.
+///
+/// This is the input to the ABI-convergence plan
+/// ([docs/abi-convergence.md](../abi-convergence.md)): it answers "if we replace
+/// the 949 dedicated entry points with a generic property channel, which ones
+/// disappear and which have to stay".
+///
+/// The classification is deliberately mechanical — it reads only the symbol
+/// name — so it can be regenerated and cannot silently drift from the sources.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum MergeGroup {
+    /// `*_set_<prop>` — becomes one `*_set_param(entity, PROP, value)`.
+    SetParam,
+    /// `*_clear_<prop>` — becomes `*_set_param(entity, PROP, none)`.
+    ClearParam,
+    /// `*_get_<prop>` / `*_read_<prop>` — becomes `*_get_param(entity, PROP, out)`.
+    ReadParam,
+    /// `*_add_<element>` / `*_insert_<element>` / `*_remove_<element>` — topology
+    /// edits. Mergeable in principle (a `*_edit(entity, OP, ...)` channel) but
+    /// the payloads differ a lot, so treat as a separate, harder batch.
+    TopologyEdit,
+    /// Everything else: world/lifecycle/solve/query entry points that carry real
+    /// logic and must stay dedicated.
+    Dedicated,
+}
+
+impl MergeGroup {
+    /// Column label used in the generated table.
+    fn label(self) -> &'static str {
+        match self {
+            MergeGroup::SetParam => "set_param",
+            MergeGroup::ClearParam => "clear_param",
+            MergeGroup::ReadParam => "read_param",
+            MergeGroup::TopologyEdit => "topology",
+            MergeGroup::Dedicated => "dedicated",
+        }
+    }
+
+    /// Whether the group is expected to collapse into a generic channel.
+    fn is_mergeable(self) -> bool {
+        matches!(
+            self,
+            MergeGroup::SetParam | MergeGroup::ClearParam | MergeGroup::ReadParam
+        )
+    }
+}
+
+/// Bucket a symbol by its verb segment.
+///
+/// The C ABI naming convention is `模块_动词[_对象]`, but compound module names
+/// put the verb later — `world_set_gravity` has the verb in segment 2,
+/// `soft_body_set_coriolis` in segment 3, `rigid_body_set_ccd_enabled` in
+/// segment 3. So the verb is **the first segment that is a known verb**, not a
+/// fixed position.
+///
+/// Verb must come before the object: `set_gravity` is a setter; `world_get_count`
+/// is a reader. If no segment is a known verb the symbol is behaviour, not data.
+fn merge_group(name: &str) -> MergeGroup {
+    for part in name.split('_') {
+        match part {
+            // Property accessors: readable/writable scalar state.
+            "set" => return MergeGroup::SetParam,
+            "clear" => return MergeGroup::ClearParam,
+            "get" | "read" | "count" => return MergeGroup::ReadParam,
+            // Topology edits: change the element set, not a scalar. Mergeable in
+            // principle but the payloads differ a lot, so a separate batch.
+            "add" | "insert" | "remove" | "detach" | "attach" => {
+                return MergeGroup::TopologyEdit;
+            }
+            _ => {}
+        }
+    }
+    MergeGroup::Dedicated
+}
+
 /// Everything the map reports for one source module.
 struct ModuleRow {
     /// Source-relative module path, e.g. `rapier/rigid_body`.
@@ -50,6 +125,12 @@ struct ModuleRow {
     test_hits: usize,
     /// Symbols with neither a JNI wrapper nor a test reference.
     unlinked: Vec<String>,
+    /// Per-group symbol counts, in `MergeGroup` declaration order.
+    ///
+    /// The `set_param` / `clear_param` / `read_param` counts in aggregate are the
+    /// "how many entry points a property channel would absorb" number from
+    /// [docs/abi-convergence.md](../abi-convergence.md).
+    merge_groups: [usize; 5],
 }
 
 pub(crate) fn run(root: &Path, check: bool) -> Result<String, String> {
@@ -353,6 +434,13 @@ fn render(root: &Path) -> Result<String, String> {
             jni_covered: names.iter().filter(|n| jni.contains(*n)).count(),
             test_hits: names.iter().filter(|n| tested.contains(*n)).count(),
             unlinked,
+            merge_groups: {
+                let mut counts = [0usize; 5];
+                for name in &names {
+                    counts[merge_group(name) as usize] += 1;
+                }
+                counts
+            },
         });
     }
     // Fail loudly rather than emit a map that silently under-reports.
@@ -422,10 +510,23 @@ fn render(root: &Path) -> Result<String, String> {
     writeln!(out).ok();
     writeln!(
         out,
-        "| 模块 | 前缀 | 入口 | 门控 | 导览页 | 镜像测试 | JNI | 测试 |"
+        "`可合并组` 只按符号名的动词段机械判定，供 [abi-convergence.md](abi-convergence.md) \
+         的收敛设计使用：`set_param` / `clear_param` / `read_param` 三类合计就是通用属性通道\
+         能吸收的入口数；`topology` 是增删元素（可合并但载荷差异大，属第二批）；\
+         `dedicated` 带真实逻辑，必须保留专用入口。"
     )
     .ok();
-    writeln!(out, "| --- | --- | ---: | ---: | --- | --- | ---: | ---: |").ok();
+    writeln!(out).ok();
+    writeln!(
+        out,
+        "| 模块 | 前缀 | 入口 | 门控 | 可合并组 | 导览页 | 镜像测试 | JNI | 测试 |"
+    )
+    .ok();
+    writeln!(
+        out,
+        "| --- | --- | ---: | ---: | --- | --- | --- | ---: | ---: |"
+    )
+    .ok();
     for row in &rows {
         // `docs/CAPABILITY_MAP.md` lives in `docs/`, so links to `docs/mps-core/`
         // are `mps-core/…` and links to anything else climb one level.
@@ -446,13 +547,112 @@ fn render(root: &Path) -> Result<String, String> {
         } else {
             row.feature_gated.to_string()
         };
+        // Only show the groups that actually occur, keeping the row narrow: a
+        // module with 60 property accessors and 3 real functions should say
+        // `set 40 / clear 12 / read 8 / dedicated 3`, not five zeros.
+        let group_cell = {
+            let mut parts: Vec<String> = Vec::new();
+            for group in [
+                MergeGroup::SetParam,
+                MergeGroup::ClearParam,
+                MergeGroup::ReadParam,
+                MergeGroup::TopologyEdit,
+                MergeGroup::Dedicated,
+            ] {
+                let n = row.merge_groups[group as usize];
+                if n > 0 {
+                    parts.push(format!("{} {}", group.label(), n));
+                }
+            }
+            parts.join(" / ")
+        };
         writeln!(
             out,
-            "| `{}` | {} | {} | {} | {} | {} | {} | {} |",
-            row.module, prefix, row.entries, gated, doc, mirror, row.jni_covered, row.test_hits
+            "| `{}` | {} | {} | {} | {} | {} | {} | {} | {} |",
+            row.module,
+            prefix,
+            row.entries,
+            gated,
+            group_cell,
+            doc,
+            mirror,
+            row.jni_covered,
+            row.test_hits
         )
         .ok();
     }
+    writeln!(out).ok();
+
+    // --- merge groups in aggregate ---------------------------------------
+    let mut totals = [0usize; 5];
+    for row in &rows {
+        for (i, n) in row.merge_groups.iter().enumerate() {
+            totals[i] += n;
+        }
+    }
+    let mergeable = totals[MergeGroup::SetParam as usize]
+        + totals[MergeGroup::ClearParam as usize]
+        + totals[MergeGroup::ReadParam as usize];
+    // Sanity: the aggregate must equal the sum over the groups `is_mergeable`
+    // reports, and every symbol must land in exactly one group. Cheap, and it
+    // catches a classifier change that quietly starts double-counting.
+    let mergeable_by_flag: usize = [
+        MergeGroup::SetParam,
+        MergeGroup::ClearParam,
+        MergeGroup::ReadParam,
+    ]
+    .into_iter()
+    .filter(|g| g.is_mergeable())
+    .map(|g| totals[g as usize])
+    .sum();
+    let grouped: usize = totals.iter().sum();
+    if mergeable_by_flag != mergeable || grouped != total_entries {
+        return Err(format!(
+            "merge-group accounting is inconsistent: is_mergeable sum {mergeable_by_flag} != \
+             set+clear+read {mergeable}, grouped {grouped} != total {total_entries}"
+        ));
+    }
+    writeln!(out, "### 可合并组汇总").ok();
+    writeln!(out).ok();
+    writeln!(out, "| 组 | 含义 | 入口数 |").ok();
+    writeln!(out, "| --- | --- | ---: |").ok();
+    writeln!(
+        out,
+        "| `set_param` | `*_set_<prop>` → `*_set_param(e, PROP, v)` | {} |",
+        totals[MergeGroup::SetParam as usize]
+    )
+    .ok();
+    writeln!(
+        out,
+        "| `clear_param` | `*_clear_<prop>` → `*_set_param(e, PROP, none)` | {} |",
+        totals[MergeGroup::ClearParam as usize]
+    )
+    .ok();
+    writeln!(
+        out,
+        "| `read_param` | `*_get_<prop>` / `*_read_<prop>` → `*_get_param(e, PROP, out)` | {} |",
+        totals[MergeGroup::ReadParam as usize]
+    )
+    .ok();
+    writeln!(
+        out,
+        "| `topology` | `*_add/insert/remove/detach/attach_*`（第二批） | {} |",
+        totals[MergeGroup::TopologyEdit as usize]
+    )
+    .ok();
+    writeln!(
+        out,
+        "| `dedicated` | 带真实逻辑，必须保留专用入口 | {} |",
+        totals[MergeGroup::Dedicated as usize]
+    )
+    .ok();
+    writeln!(out).ok();
+    writeln!(
+        out,
+        "**属性通道可直接吸收 {mergeable} 个入口（占 {total_entries} 的 {}%）。**",
+        mergeable * 100 / total_entries.max(1)
+    )
+    .ok();
     writeln!(out).ok();
 
     // --- feature-gated ----------------------------------------------------
