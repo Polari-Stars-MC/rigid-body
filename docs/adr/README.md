@@ -24,5 +24,6 @@
 | [0016](0016-generic-abi-property-channel.md) | C ABI 通用属性通道（soft_body 首批切片） | 接受 |
 | [0017](0017-vec3-with-flag-channel.md) | 向量 + 可选开关通道（14 个 `Vec3+Bool` 入口） | 接受 |
 | [0018](0018-tyndall-effect-data-layer.md) | 丁达尔效应的数据层（体积散射，渲染交给 MC） | 接受 |
+| [0019](0019-particle-driven-volumetric-scattering.md) | SPH/颗粒粒子云驱动的体积散射（光柱随烟雾流动） | 接受 |
 
 仓库根的 [DESIGN.md](../../DESIGN.md) 和 [OPTIMIZATION.md](../../OPTIMIZATION.md) 是被源码注释引用的章节索引，不是 ADR 的前身。它们的 `§` 编号继续留在原地。

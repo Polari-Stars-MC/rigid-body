@@ -130,6 +130,8 @@ pub mod rapier {
     pub mod trajectory;
     pub mod transmission;
     pub mod tyndall;
+    pub mod tyndall_particles;
+    pub mod tyndall_scene;
     pub mod vehicle;
     pub mod volcano;
     pub mod voronoi;

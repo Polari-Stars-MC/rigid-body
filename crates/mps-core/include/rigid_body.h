@@ -327,6 +327,16 @@
 #define SOFT_SPRING_CUSTOM_ID 20546
 
 /**
+ * 粒子云来源。
+ */
+#define TYNDALL_SOURCE_FLUID 0
+
+/**
+ * 颗粒（DEM）粒子云。
+ */
+#define TYNDALL_SOURCE_GRANULAR 1
+
+/**
  * Minecraft 维度允许的最大高度（4064 格 = 254 个 section）。
  * 地形体素网格是 16 × 世界高度 × 16，格子上限按世界最高取，不再按老版本的 256 格卡。
  */
@@ -11791,6 +11801,82 @@ struct Bool trajectory_glide_integrate_step(struct TrajectoryGlideState state,
                                             double dt,
                                             struct TrajectoryGlideState *out_state,
                                             struct TrajectoryGlideReport *out_report);
+
+/**
+ * 已分配的粒子云来源个数。
+ */
+uint32_t tyndall_source_abi_version(void);
+
+/**
+ * 收集指定来源的粒子位置到内部缓冲区并返回粒子数。
+ *
+ * 返回值是**总粒子数**（不是拷贝数）—— 与 `granular_read_particles` /
+ * `soft_body_read_*` 的约定一致：调用方先用 `out == null` 探总数，再按需分配。
+ *
+ * # Returns
+ * 粒子总数；world 为 null / id 未知 → 0 并设置错误码。
+ *
+ * # Safety
+ * `world` 必须有效；`out` 可为 null（只探数量）或指向至少 `capacity` 个 `Vec3`。
+ */
+uint32_t tyndall_collect_particles(const struct WorldHandle *world,
+                                   uint32_t source,
+                                   uint32_t id,
+                                   struct Vec3 *out,
+                                   uint32_t capacity);
+
+/**
+ * 沿视线穿过粒子云的单次散射累积亮度（直接读世界里的粒子）。
+ *
+ * 与 [`mps_formula::tyndall_particles::inscatter_through_particles`] 同一个
+ * 物理模型，区别是粒子由 `(source, id)` 从世界里取，而不是调用方传入。
+ *
+ * # Returns
+ * `Bool::TRUE` 成功并把亮度写进 `out`；失败不动 `out`。
+ *
+ * # Safety
+ * `world` 必须有效；`out` 必须可写。
+ */
+struct Bool tyndall_inscatter_from_world(const struct WorldHandle *world,
+                                         uint32_t source,
+                                         uint32_t id,
+                                         struct Vec3 origin,
+                                         struct Vec3 direction,
+                                         double length,
+                                         double smoothing_radius,
+                                         double sigma_sca,
+                                         double sigma_ext,
+                                         double phase,
+                                         double light_intensity,
+                                         uint32_t steps,
+                                         double *out);
+
+/**
+ * 在查询点估计粒子云的**数密度**（个/m³），直接读世界。
+ *
+ * 渲染层可以用它做自适应采样密度：在数密度高的区域多取几个采样点。
+ *
+ * # Safety
+ * `world` 必须有效；`out` 必须可写。
+ */
+struct Bool tyndall_density_from_world(const struct WorldHandle *world,
+                                       uint32_t source,
+                                       uint32_t id,
+                                       struct Vec3 query,
+                                       double smoothing_radius,
+                                       double *out);
+
+/**
+ * 粒子云的包围盒（渲染层做视锥剔除）。
+ *
+ * # Safety
+ * `world` 必须有效；`out_min` / `out_max` 必须可写。
+ */
+struct Bool tyndall_bounds_from_world(const struct WorldHandle *world,
+                                      uint32_t source,
+                                      uint32_t id,
+                                      struct Vec3 *out_min,
+                                      struct Vec3 *out_max);
 
 /**
  * # Safety

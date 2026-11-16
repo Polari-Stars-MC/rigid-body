@@ -86,6 +86,7 @@ pub mod qphys;
 pub mod rel;
 pub mod thermo;
 pub mod trajectory;
+pub mod tyndall_scene;
 pub use mps_formula::transmission;
 pub mod voxel;
 pub use mps_formula::wave_optics;
