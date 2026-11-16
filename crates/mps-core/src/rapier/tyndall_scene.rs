@@ -426,3 +426,161 @@ pub extern "C" fn tyndall_bounds_from_world(
         }
     })
 }
+
+/// 粒子云的分通道散射亮度：直接读世界里的粒子，输出 RGB。
+///
+/// 这是"流动的烟雾里的彩色光柱"的完整入口 —— 粒子驱动 + 分通道。
+///
+/// 六个截面参数顺序固定为 `sca_r/g/b` 然后 `ext_r/g/b`，与
+/// `tyndall_inscatter_spectral` 一致，便于宿主复用同一份参数表。
+///
+/// # Safety
+/// `world` 必须有效；`out_r` / `out_g` / `out_b` 必须可写。
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub extern "C" fn tyndall_spectral_from_world(
+    world: *const WorldHandle,
+    source: u32,
+    id: u32,
+    origin: Vec3,
+    direction: Vec3,
+    length: f64,
+    smoothing_radius: f64,
+    sigma_sca_r: f64,
+    sigma_sca_g: f64,
+    sigma_sca_b: f64,
+    sigma_ext_r: f64,
+    sigma_ext_g: f64,
+    sigma_ext_b: f64,
+    phase: f64,
+    light_r: f64,
+    light_g: f64,
+    light_b: f64,
+    steps: u32,
+    out_r: *mut f64,
+    out_g: *mut f64,
+    out_b: *mut f64,
+) -> Bool {
+    ffi_guard(Bool::FALSE, || {
+        if out_r.is_null() || out_g.is_null() || out_b.is_null() {
+            set_error(ERR_NULL_POINTER, "tyndall_spectral_from_world: out is null");
+            return Bool::FALSE;
+        }
+        let Some(world) = (unsafe { world.as_ref() }) else {
+            set_error(
+                ERR_NULL_POINTER,
+                "tyndall_spectral_from_world: world is null",
+            );
+            return Bool::FALSE;
+        };
+        if !vec3_finite(origin) || !vec3_finite(direction) {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "tyndall_spectral_from_world: non-finite origin/direction",
+            );
+            return Bool::FALSE;
+        }
+
+        let positions = match collect_positions(world, source, id) {
+            Ok(p) => p,
+            Err(e) => return e,
+        };
+        let mass = particle_mass(world, source, id);
+
+        let optics = mps_formula::tyndall_spectral::SpectralOptics {
+            sigma_sca_r,
+            sigma_sca_g,
+            sigma_sca_b,
+            sigma_ext_r,
+            sigma_ext_g,
+            sigma_ext_b,
+            mass,
+        };
+        let light = mps_formula::tyndall_spectral::SpectralLuminance {
+            r: light_r,
+            g: light_g,
+            b: light_b,
+        };
+        match mps_formula::tyndall_spectral::inscatter_spectral_through_particles(
+            &positions,
+            optics,
+            [origin.x, origin.y, origin.z],
+            [direction.x, direction.y, direction.z],
+            length,
+            smoothing_radius,
+            phase,
+            light,
+            steps,
+        ) {
+            Some(v) => {
+                unsafe {
+                    *out_r = v.r;
+                    *out_g = v.g;
+                    *out_b = v.b;
+                }
+                clear_error();
+                Bool::TRUE
+            }
+            None => {
+                set_error(
+                    ERR_INVALID_ARGUMENT,
+                    "tyndall_spectral_from_world: invalid arguments (check direction is \
+                     normalised, per-channel sigma_ext >= sigma_sca, steps >= 1)",
+                );
+                Bool::FALSE
+            }
+        }
+    })
+}
+
+/// 从世界里收集指定来源的粒子位置。
+///
+/// 抽出来避免三个入口重复那段 match —— 也是 `verify_module_mirror` 之外
+/// 唯一能让这段逻辑只写一次的办法。
+fn collect_positions(world: &WorldHandle, source: u32, id: u32) -> Result<Vec<[f64; 3]>, Bool> {
+    let idx = id as usize;
+    match source {
+        TYNDALL_SOURCE_FLUID => {
+            if idx >= world.inner.fluids.len() {
+                set_error(ERR_NOT_FOUND, "tyndall: unknown fluid id");
+                return Err(Bool::FALSE);
+            }
+            Ok(world.inner.fluids[idx]
+                .particles
+                .iter()
+                .map(|p| [p.pos.x, p.pos.y, p.pos.z])
+                .collect())
+        }
+        TYNDALL_SOURCE_GRANULAR => {
+            if idx >= world.inner.granular_bodies.len() {
+                set_error(ERR_NOT_FOUND, "tyndall: unknown granular id");
+                return Err(Bool::FALSE);
+            }
+            Ok(world.inner.granular_bodies[idx]
+                .particles
+                .iter()
+                .map(|p| [p.pos.x, p.pos.y, p.pos.z])
+                .collect())
+        }
+        _ => {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "tyndall: unknown source (0=fluid, 1=granular)",
+            );
+            Err(Bool::FALSE)
+        }
+    }
+}
+
+/// 取粒子的代表质量（SPH 里通常全部相同）。
+fn particle_mass(world: &WorldHandle, source: u32, id: u32) -> f64 {
+    let idx = id as usize;
+    let m = match source {
+        TYNDALL_SOURCE_FLUID => world.inner.fluids[idx].particles.first().map(|p| p.mass),
+        _ => world.inner.granular_bodies[idx]
+            .particles
+            .first()
+            .map(|p| p.mass),
+    };
+    m.unwrap_or(1.0)
+}

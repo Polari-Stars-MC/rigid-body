@@ -11943,6 +11943,39 @@ struct Bool tyndall_bounds_from_world(const struct WorldHandle *world,
                                       struct Vec3 *out_max);
 
 /**
+ * 粒子云的分通道散射亮度：直接读世界里的粒子，输出 RGB。
+ *
+ * 这是"流动的烟雾里的彩色光柱"的完整入口 —— 粒子驱动 + 分通道。
+ *
+ * 六个截面参数顺序固定为 `sca_r/g/b` 然后 `ext_r/g/b`，与
+ * `tyndall_inscatter_spectral` 一致，便于宿主复用同一份参数表。
+ *
+ * # Safety
+ * `world` 必须有效；`out_r` / `out_g` / `out_b` 必须可写。
+ */
+struct Bool tyndall_spectral_from_world(const struct WorldHandle *world,
+                                        uint32_t source,
+                                        uint32_t id,
+                                        struct Vec3 origin,
+                                        struct Vec3 direction,
+                                        double length,
+                                        double smoothing_radius,
+                                        double sigma_sca_r,
+                                        double sigma_sca_g,
+                                        double sigma_sca_b,
+                                        double sigma_ext_r,
+                                        double sigma_ext_g,
+                                        double sigma_ext_b,
+                                        double phase,
+                                        double light_r,
+                                        double light_g,
+                                        double light_b,
+                                        uint32_t steps,
+                                        double *out_r,
+                                        double *out_g,
+                                        double *out_b);
+
+/**
  * # Safety
  *
  * `voxels` must point to at least `size_x * size_y * size_z` readable bytes

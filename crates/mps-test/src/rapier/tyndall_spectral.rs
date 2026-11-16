@@ -5,7 +5,8 @@
 
 use mps_formula::tyndall_spectral::{
     BLUE_NM, GREEN_NM, RED_NM, SpectralLuminance, SpectralOptics, inscatter_spectral,
-    spectral_albedo, spectral_transmittance, wavelength_to_rgb,
+    inscatter_spectral_through_particles, spectral_albedo, spectral_transmittance,
+    wavelength_to_rgb,
 };
 
 const EPS: f64 = 1e-12;
@@ -311,4 +312,287 @@ fn normalized_handles_zero_safely() {
         b: 0.5,
     };
     assert_eq!(v.normalized(), (1.0, 0.5, 0.25));
+}
+
+// ── 粒子驱动的光谱散射（ADR-0021）───────────────────────────────────────────
+
+/// 最关键的实现细节：**三通道的透射率必须独立累积**。
+///
+/// 如果只用一个透射率标量，蓝光不会比红光衰减得快，"偏红"就消失了。这个测试
+/// 用过量的光学厚度把差异放大，若实现退化成立刻失败。
+/// 三通道的透射率必须**独立累积**，而"偏红"只在**光学厚**时出现。
+///
+/// ## 两个容易误判的物理结论
+///
+/// **1. 光学薄（τ ≪ 1）时，蓝光一直更亮。**
+///
+/// ```text
+/// L(λ) ∝ σ_sca(λ) · (1 - exp(-τ(λ))) ≈ σ_sca(λ) · τ(λ) ∝ σ_sca(λ)
+/// ```
+///
+/// 蓝光的 `σ_sca` 更大，所以散射更多。这与直觉相反但正确。
+///
+/// **2. 光学厚（τ ≫ 1）时，红光胜出。**
+///
+/// `1 - exp(-τ)` 饱和到 1，各通道的差距只剩**吸收**造成的：蓝光被吸收后不再
+/// 散射出来。所以"厚烟雾偏红"必须同时有 `σ_ext > σ_sca`（吸收）和足够的光学
+/// 厚度。
+///
+/// ## 量级很重要
+///
+/// `sample_number_density` 返回的是 Poly6 核归一化后的**真实数密度**——对
+/// 间距 0.1 m、核半径 0.8 m 的粒子云，`n ≈ 12.7`。要让 `τ = σ·n·L ≈ 1`，
+/// `σ` 必须在 `1e-3` 量级，而不是 `1e-12`（后者是**单分子**截面，差 9 个数量级）。
+#[test]
+fn particle_spectral_keeps_per_channel_transmittance() {
+    let positions: Vec<[f64; 3]> = (0..60).map(|i| [i as f64 * 0.1, 0.0, 0.0]).collect();
+    // 散射指数 1（米氏区），吸收指数 4（蓝端强吸收），sigma 取 1e-2 使 tau ≫ 1。
+    let o = SpectralOptics::from_monochrome_split(1e-2, 4e-2, 1e-6, 550e-9, 1.0, 4.0).unwrap();
+    let white = SpectralLuminance {
+        r: 1.0,
+        g: 1.0,
+        b: 1.0,
+    };
+
+    let v = inscatter_spectral_through_particles(
+        &positions,
+        o,
+        [-0.5, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+        60.0,
+        0.8,
+        1.0,
+        white,
+        256,
+    )
+    .unwrap();
+
+    assert!(v.is_finite_non_negative());
+    assert!(v.luminance() > 0.0, "the beam must scatter something");
+    assert!(
+        v.r > v.b,
+        "optically thick + blue absorption must be warm: r={} b={}",
+        v.r,
+        v.b
+    );
+}
+
+/// 同一介质在**光学薄**时必须是蓝光更强 —— 与上面形成对照，钉住"厚度决定偏色
+/// 方向"这个反直觉的结论。
+#[test]
+fn optically_thin_medium_stays_blue() {
+    let positions: Vec<[f64; 3]> = (0..60).map(|i| [i as f64 * 0.1, 0.0, 0.0]).collect();
+    // 同样的指数关系，但 sigma 小 100 倍 => tau ≪ 1。
+    let o = SpectralOptics::from_monochrome_split(1e-4, 4e-4, 1e-6, 550e-9, 1.0, 4.0).unwrap();
+    let white = SpectralLuminance {
+        r: 1.0,
+        g: 1.0,
+        b: 1.0,
+    };
+    let v = inscatter_spectral_through_particles(
+        &positions,
+        o,
+        [-0.5, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+        60.0,
+        0.8,
+        1.0,
+        white,
+        256,
+    )
+    .unwrap();
+    assert!(
+        v.b > v.r,
+        "optically thin scattering is blue-dominant: r={} b={}",
+        v.r,
+        v.b
+    );
+}
+/// 对照：**纯散射**介质里蓝光一直更亮，与厚度无关 —— 这是上面那条结论的直接
+/// 验证，也防止有人"修正"实现去迎合错误直觉。
+#[test]
+fn pure_scattering_stays_blue_regardless_of_thickness() {
+    let o = SpectralOptics::from_monochrome(1e-12, 1e-12, 1e-6, 550e-9, 1.0).unwrap();
+    let white = SpectralLuminance {
+        r: 1.0,
+        g: 1.0,
+        b: 1.0,
+    };
+    for count in [3usize, 10, 40, 120] {
+        let positions: Vec<[f64; 3]> = (0..count).map(|i| [i as f64 * 0.15, 0.0, 0.0]).collect();
+        let v = inscatter_spectral_through_particles(
+            &positions,
+            o,
+            [-1.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            8.0,
+            0.8,
+            1.0,
+            white,
+            128,
+        )
+        .unwrap();
+        // 纯散射：蓝光更强，且比值恒为 σ_sca 比。
+        assert!(
+            v.b > v.r,
+            "pure scattering must stay blue at count={count}: r={} b={}",
+            v.r,
+            v.b
+        );
+    }
+}
+
+/// 无波长依赖时三通道必须相同（与标量实现自洽）。
+#[test]
+fn particle_spectral_flat_optics_match_scalar() {
+    let positions: Vec<[f64; 3]> = (0..20).map(|i| [i as f64 * 0.25, 0.0, 0.0]).collect();
+    let o = SpectralOptics::from_monochrome(1e-12, 1e-12, 1e-6, 550e-9, 0.0).unwrap();
+    let white = SpectralLuminance {
+        r: 1.0,
+        g: 1.0,
+        b: 1.0,
+    };
+
+    let v = inscatter_spectral_through_particles(
+        &positions,
+        o,
+        [-1.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+        6.0,
+        0.8,
+        1.0,
+        white,
+        96,
+    )
+    .unwrap();
+
+    // 三通道一致。
+    assert!((v.r - v.g).abs() / v.g.max(1e-30) < 1e-12);
+    assert!((v.g - v.b).abs() / v.b.max(1e-30) < 1e-12);
+
+    // 与标量版本对比：同样的粒子、同样的参数，亮度应一致。
+    use mps_formula::tyndall_particles::{ParticleOptics, inscatter_through_particles};
+    let scalar = inscatter_through_particles(
+        &positions,
+        ParticleOptics {
+            sigma_sca: 1e-12,
+            sigma_ext: 1e-12,
+            mass: 1e-6,
+        },
+        [-1.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+        6.0,
+        0.8,
+        1.0,
+        1.0,
+        96,
+    )
+    .unwrap();
+    assert!(
+        (v.r - scalar).abs() / scalar.max(1e-30) < 1e-9,
+        "flat spectral must equal the scalar result: {} vs {scalar}",
+        v.r
+    );
+}
+
+/// 视线错过粒子云时为全零。
+#[test]
+fn particle_spectral_is_zero_when_ray_misses() {
+    let positions = vec![[0.0, 0.0, 0.0], [0.2, 0.0, 0.0]];
+    let o = SpectralOptics::from_monochrome(1e-12, 1e-12, 1e-6, 550e-9, 1.0).unwrap();
+    let white = SpectralLuminance {
+        r: 1.0,
+        g: 1.0,
+        b: 1.0,
+    };
+    let v = inscatter_spectral_through_particles(
+        &positions,
+        o,
+        [-1.0, 50.0, 0.0],
+        [1.0, 0.0, 0.0],
+        4.0,
+        0.5,
+        1.0,
+        white,
+        32,
+    )
+    .unwrap();
+    assert_eq!(v, SpectralLuminance::ZERO);
+}
+
+#[test]
+fn particle_spectral_rejects_bad_arguments() {
+    let positions = vec![[0.0, 0.0, 0.0]];
+    let o = SpectralOptics::from_monochrome(1e-12, 1e-12, 1e-6, 550e-9, 1.0).unwrap();
+    let white = SpectralLuminance {
+        r: 1.0,
+        g: 1.0,
+        b: 1.0,
+    };
+
+    // 未归一化方向。
+    assert!(
+        inscatter_spectral_through_particles(
+            &positions,
+            o,
+            [0.0; 3],
+            [2.0, 0.0, 0.0],
+            1.0,
+            0.5,
+            1.0,
+            white,
+            8
+        )
+        .is_none()
+    );
+    // steps = 0
+    assert!(
+        inscatter_spectral_through_particles(
+            &positions,
+            o,
+            [0.0; 3],
+            [1.0, 0.0, 0.0],
+            1.0,
+            0.5,
+            1.0,
+            white,
+            0
+        )
+        .is_none()
+    );
+    // 负长度
+    assert!(
+        inscatter_spectral_through_particles(
+            &positions,
+            o,
+            [0.0; 3],
+            [1.0, 0.0, 0.0],
+            -1.0,
+            0.5,
+            1.0,
+            white,
+            8
+        )
+        .is_none()
+    );
+    // 负入射光
+    let neg = SpectralLuminance {
+        r: -1.0,
+        g: 0.0,
+        b: 0.0,
+    };
+    assert!(
+        inscatter_spectral_through_particles(
+            &positions,
+            o,
+            [0.0; 3],
+            [1.0, 0.0, 0.0],
+            1.0,
+            0.5,
+            1.0,
+            neg,
+            8
+        )
+        .is_none()
+    );
 }

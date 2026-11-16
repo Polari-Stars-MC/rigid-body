@@ -362,3 +362,110 @@ pub fn spectral_transmittance(
         b: tau(optics.sigma_ext_b),
     })
 }
+
+// ── 粒子驱动的光谱散射（ADR-0021）───────────────────────────────────────────
+//
+// 把 `tyndall_particles` 的粒子云采样与 `tyndall_spectral` 的分通道累积合起来：
+// 沿视线逐段从粒子分布采数密度，再对**三个通道各自**累积 Beer–Lambert。
+//
+// 这是"流动的烟雾里的彩色光柱"的完整实现 —— 之前的两个模块各占一半：
+//
+// * `tyndall_particles` 有粒子驱动，但输出标量
+// * `tyndall_spectral` 有分通道，但只支持均匀介质
+
+/// 沿视线穿过**粒子云**的分通道散射亮度。
+///
+/// 物理模型与 [`crate::tyndall_particles::inscatter_through_particles`] 相同，
+/// 只是对 R/G/B 三通道各算一次，每通道用自己的 `σ_sca` / `σ_ext`。
+///
+/// ## 关键实现细节：三通道的透射率必须**独立**累积
+///
+/// 容易写错的地方：用同一个透射率标量累加三个通道。那样蓝光不会比红光衰减得
+/// 快，"偏红"就消失了。每通道必须有独立的 `trans_r` / `trans_g` / `trans_b`。
+///
+/// ## 采样点复用
+///
+/// 三个通道在**同一条视线上**采样，所以数密度只算一次、三通道共用 ——
+/// 相比调三次单通道函数，核求值的开销降到三分之一。
+#[allow(clippy::too_many_arguments)]
+pub fn inscatter_spectral_through_particles(
+    positions: &[[f64; 3]],
+    optics: SpectralOptics,
+    origin: [f64; 3],
+    direction: [f64; 3],
+    length: f64,
+    smoothing_radius: f64,
+    phase: f64,
+    light: SpectralLuminance,
+    steps: u32,
+) -> Option<SpectralLuminance> {
+    if !optics.is_valid() || !light.is_finite_non_negative() {
+        return None;
+    }
+    if !origin.iter().all(|v| v.is_finite())
+        || !direction.iter().all(|v| v.is_finite())
+        || !length.is_finite()
+        || !phase.is_finite()
+    {
+        return None;
+    }
+    if length < 0.0 || phase < 0.0 || steps == 0 {
+        return None;
+    }
+    // 方向必须已归一化 —— 与标量版同一约束，理由见 tyndall_particles。
+    let norm =
+        (direction[0] * direction[0] + direction[1] * direction[1] + direction[2] * direction[2])
+            .sqrt();
+    if (norm - 1.0).abs() > 1e-6 {
+        return None;
+    }
+    if length == 0.0 || positions.is_empty() {
+        return Some(SpectralLuminance::ZERO);
+    }
+
+    let n_steps = steps as f64;
+    let ds = length / n_steps;
+
+    // 每通道的散射源强（与数密度无关的部分）。
+    let src_r = optics.sigma_sca_r * phase * light.r;
+    let src_g = optics.sigma_sca_g * phase * light.g;
+    let src_b = optics.sigma_sca_b * phase * light.b;
+
+    // 三通道独立的透射率。
+    let mut trans_r = 1.0f64;
+    let mut trans_g = 1.0f64;
+    let mut trans_b = 1.0f64;
+    let mut sum_r = 0.0f64;
+    let mut sum_g = 0.0f64;
+    let mut sum_b = 0.0f64;
+
+    for k in 0..steps {
+        let t = (k as f64 + 0.5) * ds;
+        let q = [
+            origin[0] + direction[0] * t,
+            origin[1] + direction[1] * t,
+            origin[2] + direction[2] * t,
+        ];
+        // 数密度只采样一次，三通道共用。
+        let n = crate::tyndall_particles::sample_number_density(positions, q, smoothing_radius)?;
+
+        sum_r += trans_r * n * src_r * ds;
+        sum_g += trans_g * n * src_g * ds;
+        sum_b += trans_b * n * src_b * ds;
+
+        trans_r *= (-optics.sigma_ext_r * n * ds).exp();
+        trans_g *= (-optics.sigma_ext_g * n * ds).exp();
+        trans_b *= (-optics.sigma_ext_b * n * ds).exp();
+
+        // 三通道都衰减到可忽略时提前退出。
+        if trans_r < 1e-12 && trans_g < 1e-12 && trans_b < 1e-12 {
+            break;
+        }
+    }
+
+    Some(SpectralLuminance {
+        r: sum_r,
+        g: sum_g,
+        b: sum_b,
+    })
+}

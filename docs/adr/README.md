@@ -26,5 +26,6 @@
 | [0018](0018-tyndall-effect-data-layer.md) | 丁达尔效应的数据层（体积散射，渲染交给 MC） | 接受 |
 | [0019](0019-particle-driven-volumetric-scattering.md) | SPH/颗粒粒子云驱动的体积散射（光柱随烟雾流动） | 接受 |
 | [0020](0020-spectral-tyndall.md) | 丁达尔效应的光谱版本（RGB 分通道，厚介质偏红） | 接受 |
+| [0021](0021-particle-driven-spectral.md) | 粒子驱动的光谱散射（流动烟雾里的彩色光柱） | 接受 |
 
 仓库根的 [DESIGN.md](../../DESIGN.md) 和 [OPTIMIZATION.md](../../OPTIMIZATION.md) 是被源码注释引用的章节索引，不是 ADR 的前身。它们的 `§` 编号继续留在原地。
