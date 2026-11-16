@@ -469,3 +469,82 @@ pub fn inscatter_spectral_through_particles(
         b: sum_b,
     })
 }
+/// 粒子驱动 + 分通道 + **多次散射** + **空间加速** 的完整版本。
+///
+/// 把前四条 ADR 的能力合成一个函数：
+///
+/// | 能力 | 来源 |
+/// | --- | --- |
+/// | 粒子云驱动 | [ADR-0019](../../adr/0019-particle-driven-volumetric-scattering.md) |
+/// | RGB 分通道 | [ADR-0020](../../adr/0020-spectral-tyndall.md) |
+/// | 多次散射 | [ADR-0022](../../adr/0022-multiple-scattering.md) |
+/// | 均匀网格加速 | [ADR-0023](../../adr/0023-uniform-grid-acceleration.md) |
+///
+/// ## 多次散射在分通道下的处理
+///
+/// 每通道有**自己的反照率** `ω_ch = σ_sca_ch / σ_ext_ch`，所以级数比 `r_ch`
+/// 也不同：
+///
+/// ```text
+/// L_ch = L1_ch · (1 - r_ch^N) / (1 - r_ch)      r_ch = ω_ch · g
+/// ```
+///
+/// 不能用一个共享的 `r` —— 那会让三通道的修正倍数相同，"厚介质偏红"的高阶部分
+/// 就丢失了。
+///
+/// ## 加速
+///
+/// 三通道共享同一条视线的数密度采样，所以网格只建一次、每个采样点只查一次。
+#[allow(clippy::too_many_arguments)]
+pub fn inscatter_spectral_full(
+    positions: &[[f64; 3]],
+    optics: SpectralOptics,
+    origin: [f64; 3],
+    direction: [f64; 3],
+    length: f64,
+    smoothing_radius: f64,
+    phase: f64,
+    light: SpectralLuminance,
+    steps: u32,
+    orders: u32,
+    geometric_factor: f64,
+) -> Option<SpectralLuminance> {
+    if orders == 0 || orders > crate::tyndall::MAX_SCATTER_ORDERS {
+        return None;
+    }
+    if !geometric_factor.is_finite() || geometric_factor <= 0.0 || geometric_factor > 1.0 {
+        return None;
+    }
+
+    // 单次散射（含加速）。
+    let first = inscatter_spectral_through_particles(
+        positions,
+        optics,
+        origin,
+        direction,
+        length,
+        smoothing_radius,
+        phase,
+        light,
+        steps,
+    )?;
+    if orders == 1 {
+        return Some(first);
+    }
+
+    // 每通道自己的反照率。
+    let albedo = crate::tyndall_spectral::spectral_albedo(optics)?;
+    let series = |l1: f64, alb: f64| {
+        let r = alb * geometric_factor;
+        if r >= 1.0 {
+            // 退化：纯散射 + g=1，所有光都留在系统里。
+            return l1 * orders as f64;
+        }
+        l1 * (1.0 - r.powi(orders as i32)) / (1.0 - r)
+    };
+    Some(SpectralLuminance {
+        r: series(first.r, albedo.r),
+        g: series(first.g, albedo.g),
+        b: series(first.b, albedo.b),
+    })
+}

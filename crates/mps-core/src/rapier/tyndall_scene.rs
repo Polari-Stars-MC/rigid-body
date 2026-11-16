@@ -666,3 +666,109 @@ pub extern "C" fn tyndall_inscatter_from_world_accelerated(
         }
     })
 }
+/// **完整版**：粒子驱动 + 分通道 + 多次散射 + 空间加速（ADR-0024）。
+///
+/// 把四条 ADR 的能力合成一个入口。`orders = 1` 时与
+/// `tyndall_spectral_from_world` 等价（只多了一次级数求和的短路）。
+///
+/// # Safety
+/// `world` 必须有效；三个 `out_*` 必须可写。
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub extern "C" fn tyndall_spectral_full_from_world(
+    world: *const WorldHandle,
+    source: u32,
+    id: u32,
+    origin: Vec3,
+    direction: Vec3,
+    length: f64,
+    smoothing_radius: f64,
+    sigma_sca_r: f64,
+    sigma_sca_g: f64,
+    sigma_sca_b: f64,
+    sigma_ext_r: f64,
+    sigma_ext_g: f64,
+    sigma_ext_b: f64,
+    phase: f64,
+    light_r: f64,
+    light_g: f64,
+    light_b: f64,
+    steps: u32,
+    orders: u32,
+    geometric_factor: f64,
+    out_r: *mut f64,
+    out_g: *mut f64,
+    out_b: *mut f64,
+) -> Bool {
+    ffi_guard(Bool::FALSE, || {
+        if out_r.is_null() || out_g.is_null() || out_b.is_null() {
+            set_error(
+                ERR_NULL_POINTER,
+                "tyndall_spectral_full_from_world: out is null",
+            );
+            return Bool::FALSE;
+        }
+        let Some(world) = (unsafe { world.as_ref() }) else {
+            set_error(
+                ERR_NULL_POINTER,
+                "tyndall_spectral_full_from_world: world is null",
+            );
+            return Bool::FALSE;
+        };
+        if !vec3_finite(origin) || !vec3_finite(direction) {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "tyndall_spectral_full_from_world: non-finite origin/direction",
+            );
+            return Bool::FALSE;
+        }
+        let positions = match collect_positions(world, source, id) {
+            Ok(p) => p,
+            Err(e) => return e,
+        };
+        let optics = mps_formula::tyndall_spectral::SpectralOptics {
+            sigma_sca_r,
+            sigma_sca_g,
+            sigma_sca_b,
+            sigma_ext_r,
+            sigma_ext_g,
+            sigma_ext_b,
+            mass: particle_mass(world, source, id),
+        };
+        let light = mps_formula::tyndall_spectral::SpectralLuminance {
+            r: light_r,
+            g: light_g,
+            b: light_b,
+        };
+        match mps_formula::tyndall_spectral::inscatter_spectral_full(
+            &positions,
+            optics,
+            [origin.x, origin.y, origin.z],
+            [direction.x, direction.y, direction.z],
+            length,
+            smoothing_radius,
+            phase,
+            light,
+            steps,
+            orders,
+            geometric_factor,
+        ) {
+            Some(v) => {
+                unsafe {
+                    *out_r = v.r;
+                    *out_g = v.g;
+                    *out_b = v.b;
+                }
+                clear_error();
+                Bool::TRUE
+            }
+            None => {
+                set_error(
+                    ERR_INVALID_ARGUMENT,
+                    "tyndall_spectral_full_from_world: invalid arguments",
+                );
+                Bool::FALSE
+            }
+        }
+    })
+}

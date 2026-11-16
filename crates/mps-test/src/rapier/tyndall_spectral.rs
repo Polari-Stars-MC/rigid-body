@@ -5,8 +5,8 @@
 
 use mps_formula::tyndall_spectral::{
     BLUE_NM, GREEN_NM, RED_NM, SpectralLuminance, SpectralOptics, inscatter_spectral,
-    inscatter_spectral_through_particles, spectral_albedo, spectral_transmittance,
-    wavelength_to_rgb,
+    inscatter_spectral_full, inscatter_spectral_through_particles, spectral_albedo,
+    spectral_transmittance, wavelength_to_rgb,
 };
 
 const EPS: f64 = 1e-12;
@@ -595,4 +595,146 @@ fn particle_spectral_rejects_bad_arguments() {
         )
         .is_none()
     );
+}
+// ── 完整版：粒子 + 光谱 + 多次散射 + 加速（ADR-0024）────────────────────────
+
+/// `orders = 1` 必须与单次散射版本**逐位相同**。
+#[test]
+fn full_with_one_order_matches_single_scatter() {
+    let positions: Vec<[f64; 3]> = (0..80).map(|i| [i as f64 * 0.05, 0.0, 0.0]).collect();
+    let o = SpectralOptics::from_monochrome_split(1e-2, 4e-2, 1e-6, 550e-9, 1.0, 4.0).unwrap();
+    let white = SpectralLuminance {
+        r: 1.0,
+        g: 1.0,
+        b: 1.0,
+    };
+    let args = ([-0.5, 0.0, 0.0], [1.0, 0.0, 0.0], 8.0, 0.8, 1.0);
+
+    let single = inscatter_spectral_through_particles(
+        &positions, o, args.0, args.1, args.2, args.3, args.4, white, 64,
+    )
+    .unwrap();
+    let full = inscatter_spectral_full(
+        &positions, o, args.0, args.1, args.2, args.3, args.4, white, 64, 1, 0.5,
+    )
+    .unwrap();
+
+    assert!((full.r - single.r).abs() <= single.r.max(1e-30) * 1e-15);
+    assert!((full.g - single.g).abs() <= single.g.max(1e-30) * 1e-15);
+    assert!((full.b - single.b).abs() <= single.b.max(1e-30) * 1e-15);
+}
+
+/// **每通道用自己的反照率** —— 这是分通道多次散射的关键。
+///
+/// 如果三通道共享一个 `r = ω·g`，修正倍数就会相同，"高阶散射也偏红"这一半
+/// 物理就丢了。这个测试构造三通道反照率差异明显的介质，检查修正倍数的差异。
+#[test]
+fn full_uses_per_channel_albedo_for_the_series() {
+    let positions: Vec<[f64; 3]> = (0..80).map(|i| [i as f64 * 0.05, 0.0, 0.0]).collect();
+    // 红通道：几乎纯散射（ω_r ≈ 1）；蓝通道：强吸收（ω_b 明显 < 1）。
+    let o = SpectralOptics {
+        sigma_sca_r: 1e-2,
+        sigma_sca_g: 5e-3,
+        sigma_sca_b: 1e-3,
+        sigma_ext_r: 1.01e-2, // ω_r ≈ 0.99
+        sigma_ext_g: 2e-2,    // ω_g = 0.25
+        sigma_ext_b: 5e-2,    // ω_b = 0.02
+        mass: 1e-6,
+    };
+    let white = SpectralLuminance {
+        r: 1.0,
+        g: 1.0,
+        b: 1.0,
+    };
+    let args = ([-0.5, 0.0, 0.0], [1.0, 0.0, 0.0], 8.0, 0.8, 1.0);
+
+    let single = inscatter_spectral_through_particles(
+        &positions, o, args.0, args.1, args.2, args.3, args.4, white, 64,
+    )
+    .unwrap();
+    let full = inscatter_spectral_full(
+        &positions, o, args.0, args.1, args.2, args.3, args.4, white, 64, 12, 0.5,
+    )
+    .unwrap();
+
+    let ratio_r = full.r / single.r;
+    let ratio_g = full.g / single.g;
+    let ratio_b = full.b / single.b;
+
+    // 红通道反照率最高 => 高阶贡献最多；蓝通道几乎全吸收 => 几乎无增益。
+    assert!(
+        ratio_r > ratio_g,
+        "red has the highest albedo, so its series gain must be largest: r={ratio_r} g={ratio_g}"
+    );
+    assert!(
+        ratio_g > ratio_b,
+        "blue is nearly absorbing, so its gain must be smallest: g={ratio_g} b={ratio_b}"
+    );
+    assert!(ratio_b >= 1.0, "gain can never be below 1");
+    // 红通道 ω≈0.99、g=0.5 => r≈0.495，12 阶极限约 1.98。
+    assert!(
+        ratio_r < 2.05,
+        "red gain must stay bounded for g=0.5, got {ratio_r}"
+    );
+}
+
+#[test]
+fn full_rejects_invalid_orders_and_factor() {
+    let positions = vec![[0.0; 3]];
+    let o = SpectralOptics::from_monochrome(1e-2, 2e-2, 1e-6, 550e-9, 1.0).unwrap();
+    let white = SpectralLuminance {
+        r: 1.0,
+        g: 1.0,
+        b: 1.0,
+    };
+    let args = ([0.0; 3], [1.0, 0.0, 0.0], 1.0, 0.8, 1.0);
+    // orders = 0
+    assert!(
+        inscatter_spectral_full(
+            &positions, o, args.0, args.1, args.2, args.3, args.4, white, 8, 0, 0.5
+        )
+        .is_none()
+    );
+    // orders 超上限
+    assert!(
+        inscatter_spectral_full(
+            &positions, o, args.0, args.1, args.2, args.3, args.4, white, 8, 99, 0.5
+        )
+        .is_none()
+    );
+    // geometric_factor 非法
+    assert!(
+        inscatter_spectral_full(
+            &positions, o, args.0, args.1, args.2, args.3, args.4, white, 8, 2, 0.0
+        )
+        .is_none()
+    );
+    assert!(
+        inscatter_spectral_full(
+            &positions, o, args.0, args.1, args.2, args.3, args.4, white, 8, 2, 1.5
+        )
+        .is_none()
+    );
+}
+
+/// 完整版必须随阶数单调递增。
+#[test]
+fn full_increases_with_order() {
+    let positions: Vec<[f64; 3]> = (0..80).map(|i| [i as f64 * 0.05, 0.0, 0.0]).collect();
+    let o = SpectralOptics::from_monochrome(1e-2, 2e-2, 1e-6, 550e-9, 1.0).unwrap();
+    let white = SpectralLuminance {
+        r: 1.0,
+        g: 1.0,
+        b: 1.0,
+    };
+    let args = ([-0.5, 0.0, 0.0], [1.0, 0.0, 0.0], 8.0, 0.8, 1.0);
+    let l1 = inscatter_spectral_full(
+        &positions, o, args.0, args.1, args.2, args.3, args.4, white, 64, 1, 0.5,
+    )
+    .unwrap();
+    let l4 = inscatter_spectral_full(
+        &positions, o, args.0, args.1, args.2, args.3, args.4, white, 64, 4, 0.5,
+    )
+    .unwrap();
+    assert!(l4.luminance() > l1.luminance());
 }

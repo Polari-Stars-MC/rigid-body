@@ -12020,6 +12020,39 @@ struct Bool tyndall_inscatter_from_world_accelerated(const struct WorldHandle *w
                                                      double *out);
 
 /**
+ * **完整版**：粒子驱动 + 分通道 + 多次散射 + 空间加速（ADR-0024）。
+ *
+ * 把四条 ADR 的能力合成一个入口。`orders = 1` 时与
+ * `tyndall_spectral_from_world` 等价（只多了一次级数求和的短路）。
+ *
+ * # Safety
+ * `world` 必须有效；三个 `out_*` 必须可写。
+ */
+struct Bool tyndall_spectral_full_from_world(const struct WorldHandle *world,
+                                             uint32_t source,
+                                             uint32_t id,
+                                             struct Vec3 origin,
+                                             struct Vec3 direction,
+                                             double length,
+                                             double smoothing_radius,
+                                             double sigma_sca_r,
+                                             double sigma_sca_g,
+                                             double sigma_sca_b,
+                                             double sigma_ext_r,
+                                             double sigma_ext_g,
+                                             double sigma_ext_b,
+                                             double phase,
+                                             double light_r,
+                                             double light_g,
+                                             double light_b,
+                                             uint32_t steps,
+                                             uint32_t orders,
+                                             double geometric_factor,
+                                             double *out_r,
+                                             double *out_g,
+                                             double *out_b);
+
+/**
  * # Safety
  *
  * `voxels` must point to at least `size_x * size_y * size_z` readable bytes
