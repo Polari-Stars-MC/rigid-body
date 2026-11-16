@@ -14,11 +14,11 @@
 /// Workspace version (from root Cargo.toml), for the footer / brand.
 pub const VERSION: &str = "0.1.4";
 /// Total number of `#[test]` items in `mps-test`.
-pub const TEST_COUNT: &str = "1398";
+pub const TEST_COUNT: &str = "1405";
 /// Total number of `jni!(`/`jni_e_c!(` method entries in `mps-jni`.
 pub const JNI_METHOD_COUNT: &str = "636";
 /// Total number of `pub extern "C" fn` declarations in `mps-core/rapier`.
-pub const CORE_FFI_COUNT: &str = "949";
+pub const CORE_FFI_COUNT: &str = "953";
 /// Number of `pub mod` formula submodules under mps-formula scientists+disciplines.
 pub const FORMULA_MODULE_COUNT: &str = "147";
 /// Number of `CelestialBodyId` variants (built-in celestial bodies).
@@ -38,7 +38,7 @@ pub const FFI_COLLIDER: &str = "82";
 /// `pub extern "C" fn query_*` declarations in mps-core/rapier.
 pub const FFI_QUERY: &str = "58";
 /// `pub extern "C" fn soft_body_*` declarations in mps-core/rapier.
-pub const FFI_SOFT_BODY: &str = "88";
+pub const FFI_SOFT_BODY: &str = "92";
 /// `pub extern "C" fn disaster_*` declarations in mps-core/rapier.
 pub const FFI_DISASTER: &str = "9";
 /// `pub extern "C" fn volcano_*` declarations in mps-core/rapier.

@@ -5348,3 +5348,198 @@ pub extern "C" fn soft_body_set_vertex_weights(
         Bool::TRUE
     })
 }
+
+// ── 通用属性通道（ADR-0016，见 docs/abi-convergence.md） ──────────────────────
+//
+// 这一组入口是 ABI 收敛的第一批切片。目标：把 `soft_body_set_<prop>` 这类
+// 纯标量 setter 收进一个 `soft_body_set_param`，让新增能力只加枚举值而不动
+// 签名。
+//
+// ## 为什么不是一次全换
+//
+// 949 个入口一次重构会让失败定位变得极难（现有 1374 项测试是逐步积累的）。
+// 所以先把最典型的一小块做完、验证、再问是否继续。
+//
+// ## 枚举值域分配（必须遵守）
+//
+//   `0x0000_0000..0x0000_03E7`  标量属性（本切片用这一段）
+//   `0x0000_03E8..0x0000_07CF`  向量属性（保留）
+//   `0x0000_07D0..0x0000_0BB7`  拓扑编辑（保留，见 design doc 第二批）
+//
+// **已分配的枚举值永不复用。** 版本不匹配时旧库会收到新枚举值，
+// `soft_body_set_param` 必须明确返回 `ERR_INVALID_ARGUMENT` 而不是当作 0 处理 ——
+// 静默当成 0 会让人以为设置成功了。
+
+/// `soft_body_set_param` / `soft_body_get_param` 的属性编号。
+///
+/// cbindgen 会把每个 `pub const u32` 导出成头文件里的 `#define SOFT_PARAM_*`，
+/// 所以 C 侧不需要手工同步。但**头文件是生成物**，数值漂移只会在 rebase 时
+/// 暴露，因此测试里仍逐个核对 Rust 常量与 `soft_body_param_abi_version()`
+/// 的一致性（见 `crates/mps-test/src/rapier/soft_body.rs`）。
+pub const SOFT_PARAM_COROTATED: u32 = 0;
+pub const SOFT_PARAM_NEO_HOOKEAN: u32 = 1;
+pub const SOFT_PARAM_PRESSURE: u32 = 2;
+pub const SOFT_PARAM_DAMPING: u32 = 3;
+pub const SOFT_PARAM_SUBSTEPS: u32 = 4;
+pub const SOFT_PARAM_ACTIVATION: u32 = 5;
+
+/// 本切片已分配的标量属性个数。C 侧用它做前向兼容探测：
+/// 旧库返回小数字，宿主据此判断哪些 `SOFT_PARAM_*` 不可用。
+///
+/// 这个数字**只增不减**，且**永不重复使用**已回收的值。
+#[unsafe(no_mangle)]
+pub extern "C" fn soft_body_param_abi_version() -> u32 {
+    // Even though this body is a literal, AGENTS.md requires every `extern "C"`
+    // entry to go through `ffi_guard` (catch_unwind). Keeping the rule uniform
+    // also keeps the guard test a simple "every entry is wrapped" check rather
+    // than growing a hand-maintained exemption list.
+    ffi_guard(0, || 6)
+}
+
+/// 通用标量属性写入通道。
+///
+/// 语义（三条，与 `docs/abi-convergence.md` 一致）：
+///
+/// 1. **失败是"不改"，不是"改成 0"** —— 任何一步校验失败，实体状态完全不变。
+/// 2. **未知 `param` 返回 `ERR_INVALID_ARGUMENT`**，不 panic、不静默当作 0。
+/// 3. 每个 `param` 的属性名与值域见 `docs/abi-convergence.md` 的表格。
+///
+/// # Returns
+/// `Bool::TRUE` 成功；world 为 null → `ERR_NULL_POINTER`；`id` 未知 →
+/// `ERR_NOT_FOUND`；`param` 未分配或值域非法 → `ERR_INVALID_ARGUMENT`。
+///
+/// # Safety
+/// `world` 必须有效。
+#[unsafe(no_mangle)]
+pub extern "C" fn soft_body_set_param(
+    world: *mut WorldHandle,
+    id: u32,
+    param: u32,
+    value: f64,
+) -> Bool {
+    ffi_guard(Bool::FALSE, || {
+        let Some(world) = (unsafe { world.as_mut() }) else {
+            set_error(ERR_NULL_POINTER, "soft_body_set_param: world is null");
+            return Bool::FALSE;
+        };
+        let sid = SoftBodyId(id);
+        let Some(sb) = world.inner.soft_bodies.get_mut(sid) else {
+            set_error(ERR_NOT_FOUND, "soft_body_set_param: unknown id");
+            return Bool::FALSE;
+        };
+        // 每个属性自己校验值域，与对应专用入口的校验逐条一致 —— 否则同一件事
+        // 通过两条路径会有两种结论。
+        let ok = match param {
+            SOFT_PARAM_COROTATED => sb.set_corotated(value),
+            SOFT_PARAM_NEO_HOOKEAN => sb.set_neo_hookean(value),
+            SOFT_PARAM_PRESSURE => {
+                sb.set_pressure(value);
+                true
+            }
+            SOFT_PARAM_DAMPING => sb.set_damping(value),
+            SOFT_PARAM_SUBSTEPS => {
+                // 子步是 u32 语义的标量：非整数、超过上限、或 0 都拒绝。
+                if !value.is_finite() || value < 1.0 || value > 64.0 || value.fract() != 0.0 {
+                    false
+                } else {
+                    sb.set_substeps(value as u32)
+                }
+            }
+            SOFT_PARAM_ACTIVATION => sb.set_activation(value),
+            _ => {
+                set_error(
+                    ERR_INVALID_ARGUMENT,
+                    "soft_body_set_param: unknown param id (see soft_body_param_abi_version)",
+                );
+                return Bool::FALSE;
+            }
+        };
+        if ok {
+            clear_error();
+            Bool::TRUE
+        } else {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "soft_body_set_param: value rejected by the property's validator",
+            );
+            Bool::FALSE
+        }
+    })
+}
+
+/// `u8` 返回变体，语义同 [`soft_body_set_param`]。
+///
+/// # Safety
+/// 同 [`soft_body_set_param`]。
+#[unsafe(no_mangle)]
+pub extern "C" fn soft_body_set_param_flag(
+    world: *mut WorldHandle,
+    id: u32,
+    param: u32,
+    value: f64,
+) -> u8 {
+    ffi_guard(0, || soft_body_set_param(world, id, param, value).0)
+}
+
+/// 通用标量属性读取通道。
+///
+/// # Returns
+/// `Bool::TRUE` 成功并把值写进 `out`；任何失败都**不动 `out`**（语义规则 1）。
+/// `out` 为 null → `ERR_NULL_POINTER`；`param` 未分配或该属性不可读 →
+/// `ERR_INVALID_ARGUMENT`。
+///
+/// 本切片里 `substeps` 可读，其余五个都是"已开启/未开启 + 参数值"型，读取返回
+/// 当前生效的参数值（未开启时返回 0）。
+///
+/// # Safety
+/// `world` 必须有效；`out` 必须指向至少一个可写 `f64`。
+#[unsafe(no_mangle)]
+pub extern "C" fn soft_body_get_param(
+    world: *mut WorldHandle,
+    id: u32,
+    param: u32,
+    out: *mut f64,
+) -> Bool {
+    ffi_guard(Bool::FALSE, || {
+        let Some(world) = (unsafe { world.as_ref() }) else {
+            set_error(ERR_NULL_POINTER, "soft_body_get_param: world is null");
+            return Bool::FALSE;
+        };
+        if out.is_null() {
+            set_error(ERR_NULL_POINTER, "soft_body_get_param: out is null");
+            return Bool::FALSE;
+        }
+        let sid = SoftBodyId(id);
+        let Some(sb) = world.inner.soft_bodies.get(sid) else {
+            set_error(ERR_NOT_FOUND, "soft_body_get_param: unknown id");
+            return Bool::FALSE;
+        };
+        let value = match param {
+            SOFT_PARAM_SUBSTEPS => sb.substeps as f64,
+            SOFT_PARAM_DAMPING => sb.damping,
+            SOFT_PARAM_PRESSURE => sb.pressure.unwrap_or(0.0),
+            SOFT_PARAM_COROTATED | SOFT_PARAM_NEO_HOOKEAN | SOFT_PARAM_ACTIVATION => {
+                // corotated / neo_hookean 记录的是 rest-shape 快照 + 刚度，语义上属于
+                // "是否开启"；activation 是逐弹簧/逐约束的，没有体级标量。与其编一个
+                // 数字，不如明确报告不可读。
+                set_error(
+                    ERR_INVALID_ARGUMENT,
+                    "soft_body_get_param: that param is write-only in this ABI version",
+                );
+                return Bool::FALSE;
+            }
+            _ => {
+                set_error(
+                    ERR_INVALID_ARGUMENT,
+                    "soft_body_get_param: unknown param id (see soft_body_param_abi_version)",
+                );
+                return Bool::FALSE;
+            }
+        };
+        unsafe {
+            *out = value;
+        }
+        clear_error();
+        Bool::TRUE
+    })
+}

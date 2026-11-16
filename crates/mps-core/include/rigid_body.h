@@ -159,6 +159,26 @@
 #define FORCE_SUMMARY_SIZE 64
 
 /**
+ * `soft_body_set_param` / `soft_body_get_param` 的属性编号。
+ *
+ * cbindgen 会把每个 `pub const u32` 导出成头文件里的 `#define SOFT_PARAM_*`，
+ * 所以 C 侧不需要手工同步。但**头文件是生成物**，数值漂移只会在 rebase 时
+ * 暴露，因此测试里仍逐个核对 Rust 常量与 `soft_body_param_abi_version()`
+ * 的一致性（见 `crates/mps-test/src/rapier/soft_body.rs`）。
+ */
+#define SOFT_PARAM_COROTATED 0
+
+#define SOFT_PARAM_NEO_HOOKEAN 1
+
+#define SOFT_PARAM_PRESSURE 2
+
+#define SOFT_PARAM_DAMPING 3
+
+#define SOFT_PARAM_SUBSTEPS 4
+
+#define SOFT_PARAM_ACTIVATION 5
+
+/**
  * `ForceKind::Custom` discriminator for soft-body internal spring/damping forces.
  * Routed through `force_containers` so they share the same `Persistent` lifecycle
  * and `compute_body_effective_forces` summation as gravity/thrust (Phase 2).
@@ -172,6 +192,11 @@
 #define MC_MAX_WORLD_HEIGHT 4064
 
 #define MAX_VOXEL_CELLS ((16 * MC_MAX_WORLD_HEIGHT) * 16)
+
+/**
+ * Copper's temperature coefficient of resistance, per kelvin.
+ */
+#define RareEarthMotor_COPPER_TEMP_COEFF 3.93e-3
 
 /**
  * Aggregation policy applied to per-line accelerations after the
@@ -9483,6 +9508,65 @@ struct Bool soft_body_set_vertex_weights(struct WorldHandle *world,
                                          uint32_t particle_index,
                                          const uint32_t *bone_indices,
                                          const double *weights);
+
+/**
+ * 本切片已分配的标量属性个数。C 侧用它做前向兼容探测：
+ * 旧库返回小数字，宿主据此判断哪些 `SOFT_PARAM_*` 不可用。
+ *
+ * 这个数字**只增不减**，且**永不重复使用**已回收的值。
+ */
+uint32_t soft_body_param_abi_version(void);
+
+/**
+ * 通用标量属性写入通道。
+ *
+ * 语义（三条，与 `docs/abi-convergence.md` 一致）：
+ *
+ * 1. **失败是"不改"，不是"改成 0"** —— 任何一步校验失败，实体状态完全不变。
+ * 2. **未知 `param` 返回 `ERR_INVALID_ARGUMENT`**，不 panic、不静默当作 0。
+ * 3. 每个 `param` 的属性名与值域见 `docs/abi-convergence.md` 的表格。
+ *
+ * # Returns
+ * `Bool::TRUE` 成功；world 为 null → `ERR_NULL_POINTER`；`id` 未知 →
+ * `ERR_NOT_FOUND`；`param` 未分配或值域非法 → `ERR_INVALID_ARGUMENT`。
+ *
+ * # Safety
+ * `world` 必须有效。
+ */
+struct Bool soft_body_set_param(struct WorldHandle *world,
+                                uint32_t id,
+                                uint32_t param,
+                                double value);
+
+/**
+ * `u8` 返回变体，语义同 [`soft_body_set_param`]。
+ *
+ * # Safety
+ * 同 [`soft_body_set_param`]。
+ */
+uint8_t soft_body_set_param_flag(struct WorldHandle *world,
+                                 uint32_t id,
+                                 uint32_t param,
+                                 double value);
+
+/**
+ * 通用标量属性读取通道。
+ *
+ * # Returns
+ * `Bool::TRUE` 成功并把值写进 `out`；任何失败都**不动 `out`**（语义规则 1）。
+ * `out` 为 null → `ERR_NULL_POINTER`；`param` 未分配或该属性不可读 →
+ * `ERR_INVALID_ARGUMENT`。
+ *
+ * 本切片里 `substeps` 可读，其余五个都是"已开启/未开启 + 参数值"型，读取返回
+ * 当前生效的参数值（未开启时返回 0）。
+ *
+ * # Safety
+ * `world` 必须有效；`out` 必须指向至少一个可写 `f64`。
+ */
+struct Bool soft_body_get_param(struct WorldHandle *world,
+                                uint32_t id,
+                                uint32_t param,
+                                double *out);
 
 /**
  * # Safety

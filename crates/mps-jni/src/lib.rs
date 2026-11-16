@@ -2280,7 +2280,9 @@ jni_space!(int cosmosWorldRadioSubmitNodes(long world, long values, int count) {
     let nodes = if n > 0 && !ptr.is_null() {
         let slice = unsafe { std::slice::from_raw_parts(ptr, n * 18) };
         slice
-            .chunks_exact(18)
+            .as_chunks::<18>()
+            .0
+            .iter()
             .map(|v| mps_cosmos::radio::RadioNode {
                 id: v[0] as u64,
                 pos: Vector::new(v[1], v[2], v[3]),
@@ -2320,7 +2322,9 @@ jni_space!(int cosmosWorldRadioSubmitSignals(long world, long values, int count)
     }
     let slice = unsafe { std::slice::from_raw_parts(ptr, n * 16) };
     let signals: Vec<mps_cosmos::radio::ActiveSignal> = slice
-        .chunks_exact(16)
+        .as_chunks::<16>()
+        .0
+        .iter()
         .map(|v| mps_cosmos::radio::ActiveSignal {
             id: v[0] as u64,
             birth_ms: v[1] as u64,

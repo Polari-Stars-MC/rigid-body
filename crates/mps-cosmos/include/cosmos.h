@@ -136,6 +136,11 @@
 #define MIN_SENSITIVITY 1.0e-15
 
 /**
+ * Copper's temperature coefficient of resistance, per kelvin.
+ */
+#define RareEarthMotor_COPPER_TEMP_COEFF 3.93e-3
+
+/**
  * C ABI 不透明 builder 句柄（对应 `cosmos.h` 里的 `CosmosRigidBodyBuilder *`）。
  *
  * cbindgen 以 `parse_deps = true`（include `mps-formula`）运行，只为**本 crate

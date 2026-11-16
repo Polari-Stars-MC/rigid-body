@@ -3,6 +3,9 @@ mod tests {
     use mps_core::rapier::collider::{
         collider_builder_build, collider_builder_create_sphere, world_insert_collider_with_parent,
     };
+    use mps_core::rapier::error::{
+        ERR_INVALID_ARGUMENT, ERR_NOT_FOUND, ERR_NULL_POINTER, last_error_code,
+    };
     use mps_core::rapier::ffi::VoxelColliderOptions;
     use mps_core::rapier::ffi::{
         BodyStatus, Bool, ColliderHandleRaw, RigidBodyHandleRaw, Sphere, Vec3, WorldHandle,
@@ -6105,6 +6108,273 @@ mod tests {
             pos.y,
             pos.z
         );
+        world_destroy(world);
+    }
+
+    // ── 通用属性通道（ADR-0016 / docs/abi-convergence.md） ────────────────────
+    //
+    // 这组测试钉住三件事：
+    //   1. 枚举编号与 `soft_body_param_abi_version()` 一致（头文件是生成物，
+    //      这里做独立的数值核对）；
+    //   2. **旧专用入口与通用通道等价** —— 这是迁移能被信任的前提；
+    //   3. 三条语义规则：失败不改状态、未知 param 明确拒绝、get 失败不写 out。
+
+    use mps_core::rapier::soft_body::{
+        SOFT_PARAM_ACTIVATION, SOFT_PARAM_COROTATED, SOFT_PARAM_DAMPING, SOFT_PARAM_NEO_HOOKEAN,
+        SOFT_PARAM_PRESSURE, SOFT_PARAM_SUBSTEPS, soft_body_get_param, soft_body_param_abi_version,
+        soft_body_set_param, soft_body_set_param_flag,
+    };
+
+    /// A tiny deformable body: 4 particles in a tetrahedron + its 4 faces.
+    fn param_body(world: *mut WorldHandle) -> u32 {
+        let id = soft_body_create(
+            world,
+            Vec3 {
+                x: 0.0,
+                y: -9.81,
+                z: 0.0,
+            },
+        );
+        assert!(id != u32::MAX, "soft_body_create failed");
+        for p in [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ] {
+            let n = soft_body_add_particle(world, id, p[0], p[1], p[2], 1.0, Bool::FALSE);
+            assert!(n != u32::MAX, "soft_body_add_particle failed");
+        }
+        id
+    }
+
+    #[test]
+    fn param_ids_match_the_abi_version() {
+        // Every constant must be strictly below the advertised count, and the
+        // six must be distinct. A duplicate here would make one property
+        // silently alias another.
+        let all = [
+            SOFT_PARAM_COROTATED,
+            SOFT_PARAM_NEO_HOOKEAN,
+            SOFT_PARAM_PRESSURE,
+            SOFT_PARAM_DAMPING,
+            SOFT_PARAM_SUBSTEPS,
+            SOFT_PARAM_ACTIVATION,
+        ];
+        let version = soft_body_param_abi_version();
+        assert_eq!(
+            version as usize,
+            all.len(),
+            "abi version must equal the number of allocated params"
+        );
+        for &p in &all {
+            assert!(
+                (p as usize) < all.len(),
+                "param {p} is not < version {version}"
+            );
+        }
+        let mut sorted = all;
+        sorted.sort_unstable();
+        for w in sorted.windows(2) {
+            assert_ne!(w[0], w[1], "duplicate param id {}", w[0]);
+        }
+    }
+
+    /// The whole point of the migration: the dedicated setter and the generic
+    /// channel must reach the same conclusion, for both accept and reject.
+    #[test]
+    fn dedicated_setters_agree_with_the_generic_channel() {
+        let world = make_world();
+        let a = param_body(world);
+        let b = param_body(world);
+
+        // (param, value) pairs covering accept and reject for each property.
+        let cases: [(u32, f64); 10] = [
+            (SOFT_PARAM_COROTATED, 0.5),   // accept: (0, 1]
+            (SOFT_PARAM_COROTATED, 2.0),   // reject: > 1
+            (SOFT_PARAM_NEO_HOOKEAN, 0.3), // accept
+            (SOFT_PARAM_NEO_HOOKEAN, 0.0), // reject: must be > 0
+            (SOFT_PARAM_PRESSURE, 12.5),   // accept: no domain restriction
+            (SOFT_PARAM_DAMPING, 0.25),    // accept
+            (SOFT_PARAM_DAMPING, -1.0),    // reject: negative
+            (SOFT_PARAM_SUBSTEPS, 4.0),    // accept
+            (SOFT_PARAM_SUBSTEPS, 0.0),    // reject: < 1
+            (SOFT_PARAM_ACTIVATION, 0.5),  // accept: [0, 1]
+        ];
+
+        for &(param, value) in &cases {
+            // Generic channel on `a`.
+            let generic = soft_body_set_param(world, a, param, value).0 != 0;
+
+            // Dedicated setter on `b`. Normalised to `bool` so the arms can be
+            // compared regardless of whether the entry returns `Bool` or a bare
+            // integer.
+            let dedicated = match param {
+                SOFT_PARAM_COROTATED => soft_body_set_corotated(world, b, value).0 != 0,
+                SOFT_PARAM_NEO_HOOKEAN => soft_body_set_neo_hookean(world, b, value).0 != 0,
+                SOFT_PARAM_PRESSURE => soft_body_set_pressure(world, b, value).0 != 0,
+                SOFT_PARAM_DAMPING => soft_body_set_damping(world, b, value).0 != 0,
+                SOFT_PARAM_SUBSTEPS => {
+                    // The dedicated entry takes a `u32`; only meaningful when the
+                    // value is a whole number in range, which is exactly what the
+                    // generic channel validates before calling it.
+                    if value.fract() == 0.0 && (1.0..=64.0).contains(&value) {
+                        soft_body_set_substeps(world, b, value as u32) != 0
+                    } else {
+                        false
+                    }
+                }
+                SOFT_PARAM_ACTIVATION => soft_body_set_activation(world, b, value).0 != 0,
+                _ => unreachable!(),
+            };
+
+            assert_eq!(
+                generic, dedicated,
+                "param {param} value {value}: generic {generic} vs dedicated {dedicated}"
+            );
+        }
+        world_destroy(world);
+    }
+
+    #[test]
+    fn set_param_rejects_unknown_ids_without_touching_state() {
+        let world = make_world();
+        let id = param_body(world);
+
+        // Establish a known state first.
+        assert_eq!(
+            soft_body_set_param(world, id, SOFT_PARAM_DAMPING, 0.5),
+            Bool::TRUE
+        );
+        let mut before = 0.0f64;
+        assert_eq!(
+            soft_body_get_param(world, id, SOFT_PARAM_DAMPING, &mut before),
+            Bool::TRUE
+        );
+        assert!((before - 0.5).abs() < 1e-12);
+
+        // An unallocated id must be rejected loudly, not treated as 0.
+        let bogus = soft_body_param_abi_version() + 100;
+        assert_eq!(
+            soft_body_set_param(world, id, bogus, 1.0),
+            Bool::FALSE,
+            "unknown param must fail"
+        );
+        assert_eq!(last_error_code(), ERR_INVALID_ARGUMENT);
+
+        // ... and leave the previous property untouched (semantic rule 1).
+        let mut after = 0.0f64;
+        assert_eq!(
+            soft_body_get_param(world, id, SOFT_PARAM_DAMPING, &mut after),
+            Bool::TRUE
+        );
+        assert_eq!(after, before, "a rejected set must not change anything");
+
+        world_destroy(world);
+    }
+
+    #[test]
+    fn get_param_never_writes_out_on_failure() {
+        let world = make_world();
+        let id = param_body(world);
+
+        // Sentinels must survive every failure path untouched.
+        let mut out = -12345.0f64;
+
+        // Unknown id.
+        assert_eq!(
+            soft_body_get_param(world, id, soft_body_param_abi_version() + 1, &mut out),
+            Bool::FALSE
+        );
+        assert_eq!(last_error_code(), ERR_INVALID_ARGUMENT);
+        assert_eq!(out, -12345.0, "failed get must not write out");
+
+        // Write-only params (no readable scalar behind them).
+        assert_eq!(
+            soft_body_get_param(world, id, SOFT_PARAM_COROTATED, &mut out),
+            Bool::FALSE
+        );
+        assert_eq!(out, -12345.0, "write-only get must not write out");
+
+        // Unknown entity.
+        assert_eq!(
+            soft_body_get_param(world, 9999, SOFT_PARAM_DAMPING, &mut out),
+            Bool::FALSE
+        );
+        assert_eq!(last_error_code(), ERR_NOT_FOUND);
+        assert_eq!(out, -12345.0);
+
+        // Null out pointer.
+        assert_eq!(
+            soft_body_get_param(world, id, SOFT_PARAM_DAMPING, std::ptr::null_mut()),
+            Bool::FALSE
+        );
+        assert_eq!(last_error_code(), ERR_NULL_POINTER);
+
+        world_destroy(world);
+    }
+
+    #[test]
+    fn set_param_validates_the_error_channels() {
+        let world = make_world();
+        let id = param_body(world);
+
+        assert_eq!(
+            soft_body_set_param(std::ptr::null_mut(), id, SOFT_PARAM_DAMPING, 0.1),
+            Bool::FALSE
+        );
+        assert_eq!(last_error_code(), ERR_NULL_POINTER);
+
+        assert_eq!(
+            soft_body_set_param(world, 9999, SOFT_PARAM_DAMPING, 0.1),
+            Bool::FALSE
+        );
+        assert_eq!(last_error_code(), ERR_NOT_FOUND);
+
+        // Non-finite must be rejected by the property validator, not silently
+        // clamped (each dedicated setter rejects NaN already).
+        assert_eq!(
+            soft_body_set_param(world, id, SOFT_PARAM_DAMPING, f64::NAN),
+            Bool::FALSE
+        );
+        assert_eq!(last_error_code(), ERR_INVALID_ARGUMENT);
+
+        world_destroy(world);
+    }
+
+    #[test]
+    fn substeps_rejects_fractional_values() {
+        let world = make_world();
+        let id = param_body(world);
+
+        // The dedicated entry takes u32, so a fractional value has no meaning.
+        // The generic channel must say so rather than truncate silently.
+        assert_eq!(
+            soft_body_set_param(world, id, SOFT_PARAM_SUBSTEPS, 2.5),
+            Bool::FALSE,
+            "fractional substeps must be rejected"
+        );
+        assert_eq!(last_error_code(), ERR_INVALID_ARGUMENT);
+        assert_eq!(
+            soft_body_set_param(world, id, SOFT_PARAM_SUBSTEPS, 3.0),
+            Bool::TRUE
+        );
+        let mut out = 0.0f64;
+        assert_eq!(
+            soft_body_get_param(world, id, SOFT_PARAM_SUBSTEPS, &mut out),
+            Bool::TRUE
+        );
+        assert!((out - 3.0).abs() < 1e-12);
+        world_destroy(world);
+    }
+
+    #[test]
+    fn set_param_flag_matches_the_bool_variant() {
+        let world = make_world();
+        let id = param_body(world);
+        let a = soft_body_set_param(world, id, SOFT_PARAM_DAMPING, 0.2).0;
+        let b = soft_body_set_param_flag(world, id, SOFT_PARAM_DAMPING, 0.2);
+        assert_eq!(a, b);
         world_destroy(world);
     }
 }
