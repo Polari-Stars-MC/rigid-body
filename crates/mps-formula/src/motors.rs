@@ -1096,3 +1096,329 @@ impl ShapeMemoryActuator {
         Some(load_force * travel)
     }
 }
+
+// ---------------------------------------------------------------------------
+// Rare-earth permanent-magnet synchronous machine
+// ---------------------------------------------------------------------------
+
+/// The permanent-magnet material family. What matters to a physics engine is
+/// **how the remanence falls with temperature**, because that is what turns a
+/// thermal problem into a torque problem.
+///
+/// The two families differ in more than "how good they are":
+///
+/// | family | `Br` at 20 °C | `α_Br` per K | `T_max` | `T_curie` |
+/// | --- | --- | --- | --- | --- |
+/// | NdFeB (Nd₂Fe₁₄B) | 1.2–1.4 T | ≈ −0.11 %/K | ≈ 80–150 °C | ≈ 310–340 °C |
+/// | SmCo (SmCo₅ / Sm₂Co₁₇) | 0.9–1.1 T | ≈ −0.03 %/K | ≈ 250–350 °C | ≈ 700–800 °C |
+///
+/// NdFeB is stronger but has the worse temperature coefficient *and* the lower
+/// ceiling; SmCo is weaker but holds its flux far longer. That trade is the
+/// whole reason both exist, so the model keeps them as separate variants rather
+/// than one "rare earth" bucket with averaged numbers.
+///
+/// The values above are the ranges quoted across the literature; the numbers in
+/// the tests are worked examples, not a datasheet for any specific grade.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MagnetGrade {
+    /// NdFeB — highest energy product, worst thermal stability.
+    NdFeB,
+    /// SmCo — lower energy product, far better thermal stability.
+    SmCo,
+}
+
+impl MagnetGrade {
+    /// Reversible temperature coefficient of remanence `α_Br`, per kelvin.
+    ///
+    /// Negative: magnets get weaker when hot, and recover when they cool. This
+    /// is the *reversible* coefficient — it is not the same thing as the
+    /// irreversible loss modelled by [`RareEarthMotor::irreversible_loss`].
+    pub fn temp_coefficient_per_k(self) -> f64 {
+        match self {
+            // ≈ −0.11 %/K
+            MagnetGrade::NdFeB => -1.1e-3,
+            // ≈ −0.03 %/K
+            MagnetGrade::SmCo => -3.0e-4,
+        }
+    }
+
+    /// Maximum continuous operating temperature [K], where the grade is still
+    /// rated. Above this the magnet degrades irreversibly.
+    pub fn max_operating_temperature(self) -> f64 {
+        match self {
+            // ≈ 120 °C
+            MagnetGrade::NdFeB => 393.15,
+            // ≈ 300 °C
+            MagnetGrade::SmCo => 573.15,
+        }
+    }
+
+    /// Curie temperature [K], where ferromagnetism is lost entirely.
+    pub fn curie_temperature(self) -> f64 {
+        match self {
+            // ≈ 320 °C
+            MagnetGrade::NdFeB => 593.15,
+            // ≈ 750 °C
+            MagnetGrade::SmCo => 1023.15,
+        }
+    }
+}
+
+/// A rare-earth permanent-magnet synchronous machine (PMSM), modelled with the
+/// two effects that actually distinguish it from a generic brushless motor:
+///
+/// 1. **Reversible thermal derating.** Remanence falls linearly with
+///    temperature, so so does `k_e` and therefore torque per amp:
+///    `k_e(T) = k_e₀ · (1 + α_Br·(T − T₀))`.
+/// 2. **Irreversible demagnetisation.** Push too much current at too high a
+///    temperature and the magnet is permanently weakened. This is not a limit
+///    you can back off from — it is damage.
+///
+/// A generic [`BrushlessMotor`] has neither, which is why a simulation built on
+/// it lets a PMSM deliver full torque at 200 °C forever and never demagnetise.
+///
+/// ## Why demagnetisation is modelled as a knee, not a smooth curve
+///
+/// The intrinsic coercivity `H_cj` falls with temperature faster than the
+/// remanence does. Demagnetisation happens when the demagnetising field from the
+/// winding current exceeds `H_cj(T)`. In this lumped model that becomes a single
+/// condition on the current at the current temperature, which is how a drive
+/// engineer reasons about it too: "at this temperature you may not exceed this
+/// current".
+#[derive(Clone, Copy, Debug)]
+pub struct RareEarthMotor {
+    /// Permanent-magnet grade.
+    pub grade: MagnetGrade,
+    /// Back-EMF / torque constant at `reference_temperature` [V·s/rad].
+    pub ke_ref: f64,
+    /// Temperature the constants are quoted at [K].
+    pub reference_temperature: f64,
+    /// Per-phase resistance at `reference_temperature` [Ω].
+    ///
+    /// Copper resistance rises with temperature too (`≈ +0.39 %/K`), which is a
+    /// second-order but real effect on continuous torque: a hot winding has both
+    /// less magnet flux *and* more loss.
+    pub phase_resistance_ref: f64,
+    /// DC-bus voltage available to the inverter [V].
+    pub bus_voltage: f64,
+    /// Peak cogging torque [N·m], `>= 0`.
+    pub cogging_torque: f64,
+    /// Cogging periods per mechanical revolution, `>= 1`.
+    pub cogging_periods: u32,
+    /// Speed above which field weakening starts [rad/s]; `0` disables it.
+    pub base_speed: f64,
+}
+
+impl RareEarthMotor {
+    /// Copper's temperature coefficient of resistance, per kelvin.
+    pub const COPPER_TEMP_COEFF: f64 = 3.93e-3;
+
+    pub fn is_valid(&self) -> bool {
+        finite_many(&[
+            self.ke_ref,
+            self.reference_temperature,
+            self.phase_resistance_ref,
+            self.bus_voltage,
+            self.cogging_torque,
+            self.base_speed,
+        ]) && self.ke_ref > 0.0
+            && self.reference_temperature > 0.0
+            && self.phase_resistance_ref > 0.0
+            && self.cogging_torque >= 0.0
+            && self.cogging_periods >= 1
+            && self.base_speed >= 0.0
+    }
+
+    /// Reversible flux factor at `temperature`, relative to the reference `k_e`.
+    ///
+    /// `1 + α_Br·(T − T₀)`, floored at `0` — a magnet cannot have negative
+    /// remanence, and past the Curie point the model has nothing meaningful to
+    /// say. Above the Curie temperature this returns `None` rather than a
+    /// number, because the machine is no longer a permanent-magnet machine.
+    pub fn flux_factor(&self, temperature: f64) -> Option<f64> {
+        if !self.is_valid() || !finite_many(&[temperature]) {
+            return None;
+        }
+        if temperature >= self.grade.curie_temperature() {
+            return None;
+        }
+        let factor =
+            1.0 + self.grade.temp_coefficient_per_k() * (temperature - self.reference_temperature);
+        Some(factor.max(0.0))
+    }
+
+    /// Back-EMF / torque constant at `temperature` [V·s/rad].
+    pub fn ke_at(&self, temperature: f64) -> Option<f64> {
+        Some(self.ke_ref * self.flux_factor(temperature)?)
+    }
+
+    /// Per-phase resistance at `temperature` [Ω].
+    pub fn resistance_at(&self, temperature: f64) -> Option<f64> {
+        if !self.is_valid() || !finite_many(&[temperature]) {
+            return None;
+        }
+        let factor = 1.0 + Self::COPPER_TEMP_COEFF * (temperature - self.reference_temperature);
+        // Copper resistance cannot go to zero or negative in this range.
+        Some((self.phase_resistance_ref * factor).max(0.0))
+    }
+
+    /// Whether `temperature` is inside the grade's rated range.
+    ///
+    /// `false` does not mean "destroyed" — it means "outside the rating", which
+    /// is where irreversible change starts accumulating.
+    pub fn within_rating(&self, temperature: f64) -> Option<bool> {
+        if !self.is_valid() || !finite_many(&[temperature]) {
+            return None;
+        }
+        Some(temperature <= self.grade.max_operating_temperature())
+    }
+
+    /// Temperature headroom before the rated ceiling [K]. Negative = past it.
+    pub fn rating_margin(&self, temperature: f64) -> Option<f64> {
+        if !self.is_valid() || !finite_many(&[temperature]) {
+            return None;
+        }
+        Some(self.grade.max_operating_temperature() - temperature)
+    }
+
+    /// Intrinsic coercivity factor at `temperature`, relative to the reference.
+    ///
+    /// `H_cj` falls faster with temperature than `Br` does — roughly twice the
+    /// coefficient for NdFeB, which is why hot magnets demagnetise at currents
+    /// that are harmless when cold. Modelled at `2·|α_Br|` for that reason, and
+    /// floored at `0`.
+    pub fn coercivity_factor(&self, temperature: f64) -> Option<f64> {
+        // Presence check: past the Curie point there is no coercivity left.
+        self.flux_factor(temperature)?;
+        // 2·|α| rather than |α|: the coercivity curve is steeper.
+        let factor = 1.0
+            + 2.0
+                * self.grade.temp_coefficient_per_k()
+                * (temperature - self.reference_temperature);
+        Some(factor.max(0.0))
+    }
+
+    /// The end-of-life torque constant [V·s/rad] after an irreversible loss
+    /// fraction is applied.
+    ///
+    /// `loss_fraction` is in `[0, 1)`; `0` means undamaged. The caller owns the
+    /// loss state — this function does not decide when it happens, only what the
+    /// machine does afterwards. That separation is deliberate: damage
+    /// accumulation depends on the current-versus-temperature history, which is
+    /// an integration the caller is already doing.
+    pub fn ke_after_loss(&self, loss_fraction: f64) -> Option<f64> {
+        if !finite_many(&[loss_fraction]) || !(0.0..1.0).contains(&loss_fraction) {
+            return None;
+        }
+        Some(self.ke_ref * (1.0 - loss_fraction))
+    }
+
+    /// The demagnetisation current limit at `temperature` [A] — the armature
+    /// current beyond which the magnet starts to lose flux irreversibly.
+    ///
+    /// This is the number a drive must clamp to, and it shrinks as the machine
+    /// heats. Expressed against the machine's own rated current at the reference
+    /// temperature so that a caller does not need the geometry: the limit is
+    /// `I_rated_ref · H_cj(T)/H_cj(T₀)`.
+    pub fn demag_current_limit(&self, temperature: f64, rated_current_ref: f64) -> Option<f64> {
+        if !finite_many(&[rated_current_ref]) || rated_current_ref <= 0.0 {
+            return None;
+        }
+        let coercivity = self.coercivity_factor(temperature)?;
+        Some(rated_current_ref * coercivity)
+    }
+
+    /// The flux the magnet permanently loses if `current` is driven through it at
+    /// `temperature`, as a fraction in `[0, 1)`.
+    ///
+    /// Zero below the demagnetisation threshold. Above it, the loss grows roughly
+    /// with how far past the knee the operating point sits, saturating near
+    /// complete demagnetisation. Two details that matter:
+    ///
+    /// - It is **temperature-dependent**: the same current that is harmless at
+    ///   20 °C damages the magnet at 150 °C.
+    /// - It is **irreversible**: cooling the machine down does not recover it,
+    ///   which is why the caller has to carry the result forward rather than
+    ///   recompute from temperature.
+    pub fn irreversible_loss(
+        &self,
+        current: f64,
+        temperature: f64,
+        rated_current_ref: f64,
+    ) -> Option<f64> {
+        if !finite_many(&[current]) {
+            return None;
+        }
+        let limit = self.demag_current_limit(temperature, rated_current_ref)?;
+        if limit <= 0.0 {
+            // The magnet cannot hold flux at this temperature at all.
+            return Some(0.999);
+        }
+        let ratio = current.abs() / limit;
+        if ratio <= 1.0 {
+            return Some(0.0);
+        }
+        // Saturating curve: 0 at the knee, approaching 1 for a large overload.
+        let excess = ratio - 1.0;
+        Some(1.0 - 1.0 / (1.0 + excess))
+    }
+
+    /// Average torque at `omega` and `temperature` [N·m], ripple excluded.
+    ///
+    /// Both thermal effects are applied: the flux factor lowers `k_e`, and the
+    /// copper-resistance rise lowers the current the bus can push.
+    pub fn torque_at_speed(&self, omega: f64, temperature: f64) -> Option<f64> {
+        if !finite_many(&[omega]) {
+            return None;
+        }
+        let ke = self.ke_at(temperature)?;
+        let resistance = self.resistance_at(temperature)?;
+        if resistance <= 0.0 || ke <= 0.0 {
+            return Some(0.0);
+        }
+        let available = self.bus_voltage - ke * omega.abs();
+        let v_eff = if self.base_speed > 0.0 && omega.abs() > self.base_speed {
+            available.max(0.1 * self.bus_voltage)
+        } else {
+            available.max(0.0)
+        };
+        Some(ke * v_eff / resistance)
+    }
+
+    /// Instantaneous torque including cogging at mechanical angle `theta` [N·m].
+    pub fn torque_at(&self, omega: f64, theta: f64, temperature: f64) -> Option<f64> {
+        if !finite_many(&[theta]) {
+            return None;
+        }
+        let average = self.torque_at_speed(omega, temperature)?;
+        let ripple = self.cogging_torque * (self.cogging_periods as f64 * theta + PI * 0.5).sin();
+        Some(average + ripple)
+    }
+
+    /// Copper loss at `omega` and `temperature` [W].
+    ///
+    /// Higher than the cold value for two reasons at once: the flux is weaker, so
+    /// more current is needed for the same torque, *and* each ohm costs more.
+    pub fn copper_loss(&self, omega: f64, temperature: f64) -> Option<f64> {
+        let ke = self.ke_at(temperature)?;
+        if ke <= 0.0 {
+            return None;
+        }
+        let torque = self.torque_at_speed(omega, temperature)?;
+        let current = torque / ke;
+        copper_loss(current, self.resistance_at(temperature)?)
+    }
+
+    /// Torque retained at `temperature`, relative to the cold machine [-].
+    ///
+    /// A single number for "how much have I lost to heat", which is what a
+    /// designer sizing a cooling system actually wants.
+    pub fn thermal_torque_retention(&self, temperature: f64) -> Option<f64> {
+        let hot = self.torque_at_speed(0.0, temperature)?;
+        let cold = self.torque_at_speed(0.0, self.reference_temperature)?;
+        if cold <= 0.0 {
+            return None;
+        }
+        Some(hot / cold)
+    }
+}

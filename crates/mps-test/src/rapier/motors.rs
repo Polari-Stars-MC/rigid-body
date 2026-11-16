@@ -696,4 +696,298 @@ mod tests {
         assert!(piezo().force_at_displacement(f64::NAN).is_none());
         assert!(sma().actuation_fraction(f64::NAN).is_none());
     }
+
+    // ------------------------------------------- rare-earth permanent magnet
+
+    /// A plausible NdFeB traction-grade PMSM. Worked example, not a datasheet.
+    fn pmsm_ndfeb() -> RareEarthMotor {
+        RareEarthMotor {
+            grade: MagnetGrade::NdFeB,
+            ke_ref: 0.055,
+            reference_temperature: 293.15, // 20 C
+            phase_resistance_ref: 0.05,
+            bus_voltage: 48.0,
+            cogging_torque: 0.008,
+            cogging_periods: 12,
+            base_speed: 0.0,
+        }
+    }
+
+    fn pmsm_smco() -> RareEarthMotor {
+        RareEarthMotor {
+            grade: MagnetGrade::SmCo,
+            ..pmsm_ndfeb()
+        }
+    }
+
+    #[test]
+    fn magnet_grades_differ_in_the_way_the_literature_says() {
+        // NdFeB is more thermally sensitive but rated hotter than only modestly;
+        // SmCo holds its flux far better and survives far more heat.
+        let nd = MagnetGrade::NdFeB;
+        let sm = MagnetGrade::SmCo;
+        assert!(
+            nd.temp_coefficient_per_k().abs() > sm.temp_coefficient_per_k().abs(),
+            "NdFeB must lose remanence faster than SmCo"
+        );
+        assert!(
+            sm.max_operating_temperature() > nd.max_operating_temperature(),
+            "SmCo must be rated hotter"
+        );
+        assert!(
+            sm.curie_temperature() > nd.curie_temperature(),
+            "SmCo must have the higher Curie point"
+        );
+        // Both coefficients are negative: magnets weaken when hot.
+        assert!(nd.temp_coefficient_per_k() < 0.0);
+        assert!(sm.temp_coefficient_per_k() < 0.0);
+    }
+
+    #[test]
+    fn flux_falls_linearly_with_temperature() {
+        let m = pmsm_ndfeb();
+        let ref_temp = m.reference_temperature;
+        // At the reference temperature the factor is exactly 1.
+        assert!((m.flux_factor(ref_temp).unwrap() - 1.0).abs() < 1e-12);
+        // 100 K hotter: 1 + (-1.1e-3)(100) = 0.89
+        let hot = m.flux_factor(ref_temp + 100.0).unwrap();
+        assert!((hot - 0.89).abs() < 1e-12, "expected 0.89, got {hot}");
+        // And k_e follows.
+        let ke_hot = m.ke_at(ref_temp + 100.0).unwrap();
+        assert!((ke_hot - 0.055 * 0.89).abs() < 1e-12);
+    }
+
+    #[test]
+    fn smco_retains_more_torque_when_hot() {
+        let cold = 293.15;
+        let hot = 393.15; // 100 K above
+        let nd = pmsm_ndfeb().thermal_torque_retention(hot).unwrap();
+        let sm = pmsm_smco().thermal_torque_retention(hot).unwrap();
+        assert!(
+            sm > nd,
+            "SmCo must retain more torque when hot: SmCo {sm} vs NdFeB {nd}"
+        );
+        assert!(nd < 1.0 && sm < 1.0, "both must lose something: {nd} {sm}");
+        // Both retain the full value at their own reference temperature.
+        assert!((pmsm_ndfeb().thermal_torque_retention(cold).unwrap() - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn hot_winding_costs_more_copper_loss_for_the_same_torque() {
+        let m = pmsm_ndfeb();
+        let cold = m.reference_temperature;
+        let hot = cold + 100.0;
+
+        // Resistance rises with temperature — the first half of the effect.
+        assert!(m.resistance_at(hot).unwrap() > m.resistance_at(cold).unwrap());
+
+        // The second half: weaker flux means more current for a *given* torque.
+        // `copper_loss(omega, T)` reports the loss at the torque the machine
+        // happens to make at `omega`, which also falls with heat, so comparing
+        // it directly would conflate two different operating points. Compare the
+        // current needed for the same torque instead — that is the real claim.
+        let wanted_torque = 1.0;
+        let ke_cold = m.ke_at(cold).unwrap();
+        let ke_hot = m.ke_at(hot).unwrap();
+        assert!(ke_hot < ke_cold, "hot magnet has a weaker k_e");
+
+        let current_cold = wanted_torque / ke_cold;
+        let current_hot = wanted_torque / ke_hot;
+        assert!(
+            current_hot > current_cold,
+            "the hot machine needs more current for the same torque: {current_cold} -> {current_hot}"
+        );
+
+        let loss_cold = current_cold * current_cold * m.resistance_at(cold).unwrap();
+        let loss_hot = current_hot * current_hot * m.resistance_at(hot).unwrap();
+        assert!(
+            loss_hot > loss_cold,
+            "same torque must cost more loss when hot: {loss_cold} -> {loss_hot}"
+        );
+    }
+
+    #[test]
+    fn past_the_curie_point_there_is_no_permanent_magnet() {
+        let m = pmsm_ndfeb();
+        let above = m.grade.curie_temperature() + 1.0;
+        assert!(m.flux_factor(above).is_none());
+        assert!(m.ke_at(above).is_none());
+        assert!(m.torque_at_speed(0.0, above).is_none());
+    }
+
+    #[test]
+    fn rating_margin_turns_negative_above_the_rated_ceiling() {
+        let m = pmsm_ndfeb();
+        let ceiling = m.grade.max_operating_temperature();
+        assert!(m.within_rating(ceiling - 1.0).unwrap());
+        assert!(!m.within_rating(ceiling + 1.0).unwrap());
+        assert!(m.rating_margin(ceiling - 1.0).unwrap() > 0.0);
+        assert!(m.rating_margin(ceiling + 1.0).unwrap() < 0.0);
+    }
+
+    #[test]
+    fn demagnetisation_limit_shrinks_as_the_magnet_heats() {
+        let m = pmsm_ndfeb();
+        let rated = 100.0; // A at reference temperature
+        let cold = m
+            .demag_current_limit(m.reference_temperature, rated)
+            .unwrap();
+        let hot = m
+            .demag_current_limit(m.reference_temperature + 100.0, rated)
+            .unwrap();
+        assert!(
+            (cold - rated).abs() < 1e-9,
+            "at the reference temperature the limit is the rated current: {cold}"
+        );
+        assert!(
+            hot < cold,
+            "a hot magnet demagnetises at a lower current: {cold} -> {hot}"
+        );
+        // Coercivity falls about twice as fast as remanence.
+        let flux = m.flux_factor(m.reference_temperature + 100.0).unwrap();
+        assert!(
+            (hot / cold) < flux,
+            "coercivity must fall faster than remanence: {} vs {flux}",
+            hot / cold
+        );
+    }
+
+    #[test]
+    fn no_irreversible_loss_below_the_knee() {
+        let m = pmsm_ndfeb();
+        let rated = 100.0;
+        // Exactly at the limit: still fine.
+        assert_eq!(
+            m.irreversible_loss(rated, m.reference_temperature, rated)
+                .unwrap(),
+            0.0
+        );
+        // Well below it: fine.
+        assert_eq!(
+            m.irreversible_loss(10.0, m.reference_temperature, rated)
+                .unwrap(),
+            0.0
+        );
+    }
+
+    #[test]
+    fn irreversible_loss_requires_current_and_heat_together() {
+        let m = pmsm_ndfeb();
+        let rated = 100.0;
+        let cold = m.reference_temperature;
+        let hot = cold + 120.0;
+
+        let limit_cold = m.demag_current_limit(cold, rated).unwrap();
+        let limit_hot = m.demag_current_limit(hot, rated).unwrap();
+        // The whole point: the hot knee sits below the cold one.
+        assert!(
+            limit_hot < limit_cold,
+            "hot limit {limit_hot} must be below cold limit {limit_cold}"
+        );
+
+        // Pick a current strictly *between* the two knees — safe cold, damaging
+        // hot. Anything above `limit_hot` but at or below `limit_cold` works.
+        let current = 0.5 * (limit_hot + limit_cold);
+        assert!(current > limit_hot && current <= limit_cold);
+
+        let loss_cold = m.irreversible_loss(current, cold, rated).unwrap();
+        let loss_hot = m.irreversible_loss(current, hot, rated).unwrap();
+        assert_eq!(loss_cold, 0.0, "the same current is harmless when cold");
+        assert!(
+            loss_hot > 0.0,
+            "but damaging when hot: limit_hot={limit_hot}, i={current}, loss={loss_hot}"
+        );
+        assert!(loss_hot < 1.0, "loss must stay below complete: {loss_hot}");
+    }
+
+    #[test]
+    fn irreversible_loss_grows_with_overload_and_saturates() {
+        let m = pmsm_ndfeb();
+        let rated = 100.0;
+        let hot = m.reference_temperature + 120.0;
+        let limit = m.demag_current_limit(hot, rated).unwrap();
+
+        let slight = m.irreversible_loss(limit * 1.1, hot, rated).unwrap();
+        let heavy = m.irreversible_loss(limit * 3.0, hot, rated).unwrap();
+        let extreme = m.irreversible_loss(limit * 1000.0, hot, rated).unwrap();
+
+        assert!(slight > 0.0 && slight < 0.1, "slight overload: {slight}");
+        assert!(heavy > slight, "loss must grow: {slight} -> {heavy}");
+        assert!(extreme > heavy, "and keep growing: {heavy} -> {extreme}");
+        assert!(extreme < 1.0, "but never reach 1: {extreme}");
+    }
+
+    #[test]
+    fn a_damaged_magnet_keeps_the_loss_after_cooling() {
+        let m = pmsm_ndfeb();
+        // This is the point of separating `irreversible_loss` from `ke_at`:
+        // cooling restores the *reversible* part only. The caller carries the
+        // loss fraction forward, and the damaged k_e is lower at *every*
+        // temperature, including the original reference one.
+        let loss = 0.25;
+        let damaged = m.ke_after_loss(loss).unwrap();
+        assert!((damaged - m.ke_ref * 0.75).abs() < 1e-12);
+        // And it is lower than the undamaged machine at the reference temp.
+        let healthy = m.ke_at(m.reference_temperature).unwrap();
+        assert!(
+            damaged < healthy,
+            "damage must persist: {damaged} vs {healthy}"
+        );
+    }
+
+    #[test]
+    fn ke_after_loss_rejects_out_of_range_fractions() {
+        let m = pmsm_ndfeb();
+        assert!(m.ke_after_loss(-0.1).is_none());
+        assert!(m.ke_after_loss(1.0).is_none());
+        assert!(m.ke_after_loss(f64::NAN).is_none());
+        assert!(m.ke_after_loss(0.0).is_some());
+    }
+
+    #[test]
+    fn rare_earth_torque_falls_with_speed_and_with_heat() {
+        let m = pmsm_ndfeb();
+        let cold = m.reference_temperature;
+        let t0 = m.torque_at_speed(0.0, cold).unwrap();
+        let t_mid = m.torque_at_speed(600.0, cold).unwrap();
+        assert!(t0 > t_mid, "torque must fall with speed: {t0} {t_mid}");
+        // Hotter machine, same speed: less torque.
+        let hot = m.torque_at_speed(0.0, cold + 100.0).unwrap();
+        assert!(hot < t0, "torque must fall with heat: {t0} -> {hot}");
+    }
+
+    #[test]
+    fn rare_earth_cogging_ripple_is_bounded() {
+        let m = pmsm_ndfeb();
+        let temp = m.reference_temperature;
+        let average = m.torque_at_speed(600.0, temp).unwrap();
+        for i in 0..64 {
+            let theta = i as f64 * std::f64::consts::TAU / 64.0;
+            let instant = m.torque_at(600.0, theta, temp).unwrap();
+            assert!(
+                (instant - average).abs() <= m.cogging_torque + 1e-12,
+                "cogging exceeded its amplitude: {instant} vs {average}"
+            );
+        }
+    }
+
+    #[test]
+    fn rare_earth_rejects_non_physical_parameters() {
+        let mut m = pmsm_ndfeb();
+        m.ke_ref = 0.0;
+        assert!(m.flux_factor(293.15).is_none());
+        let mut m = pmsm_ndfeb();
+        m.phase_resistance_ref = -1.0;
+        assert!(m.torque_at_speed(0.0, 293.15).is_none());
+        let mut m = pmsm_ndfeb();
+        m.cogging_periods = 0;
+        assert!(!m.is_valid());
+        // Non-finite inputs everywhere.
+        let ok = pmsm_ndfeb();
+        assert!(ok.flux_factor(f64::NAN).is_none());
+        assert!(ok.ke_at(f64::INFINITY).is_none());
+        assert!(ok.resistance_at(f64::NAN).is_none());
+        assert!(ok.torque_at_speed(f64::NAN, 293.15).is_none());
+        assert!(ok.demag_current_limit(293.15, -1.0).is_none());
+    }
 }
