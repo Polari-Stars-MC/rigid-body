@@ -1033,7 +1033,18 @@ jni!(boolean worldMultibodyJointBrake(long world, long handle, int axis, double 
 jni!(double worldMultibodyJointGetCoordinate(long world, long handle, int axis) {
     jo::world_multibody_joint_get_coordinate(wm(world), handle as u64, axis as u32)
 });
-jni!(boolean worldRemoveMultibodyJoint(long world, long handle, int wake_up) {
+// 力矩/力上限：对应 impulse joint 那边 `worldJointSetMotor` 的 maxForce。
+// 真实电机的可用转矩是转速的函数，宿主每步按 mps-formula::motors 算包络再写进来。
+jni!(boolean worldMultibodyJointSetMaxForce(long world, long handle, int axis, double max_force) {
+    jo::world_multibody_joint_set_max_force(wm(world), handle as u64, axis as u32, max_force).0 as jbyte
+});
+jni!(double worldMultibodyJointGetMaxForce(long world, long handle, int axis) {
+    jo::world_multibody_joint_get_max_force(wm(world), handle as u64, axis as u32)
+});
+// 权威的广义速度：求解器每步用它在内部覆盖刚体速度，算转矩包络必须读这个。
+jni!(double worldMultibodyJointGetVelocity(long world, long handle, int axis) {
+    jo::world_multibody_joint_get_velocity(wm(world), handle as u64, axis as u32)
+});jni!(boolean worldRemoveMultibodyJoint(long world, long handle, int wake_up) {
     jo::world_remove_multibody_joint(m::<WH>(world), handle as u64, jb(wake_up)).0 as jbyte
 });
 

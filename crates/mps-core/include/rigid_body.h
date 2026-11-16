@@ -6552,6 +6552,70 @@ struct Bool world_multibody_joint_set_motor(struct WorldHandle *world,
                                             double stiffness);
 
 /**
+ * 设置 multibody joint 某个轴的**力矩上限** `[N·m]` 或 **力上限** `[N]`。
+ *
+ * 弹簧产生的广义力 `−k·(q − rest) − c·v` 在进入求解器前被 clamp 到
+ * `±max_force`。这对应 impulse joint 那边 `world_joint_set_motor` 的
+ * `max_force` 参数，是 multibody 路径此前缺失的能力。
+ *
+ * # 为什么需要它
+ *
+ * 真实电机的可用转矩是**转速的函数**，不是一个常数。没有这个上限，调用方
+ * 只能"挑一个刚度然后祈祷"，无法表达"这台电机在这个转速下最多出这么多力"。
+ * 有了它，调用方按 [`mps_formula::motors`] 的模型每步算出包络再写进来，
+ * 九种电机模型就同时适用于两条关节路径。
+ *
+ * `max_force = f64::MAX` 表示不设限（默认）。`max_force = 0` 让该轴完全不
+ * 出力，但保留弹簧参数——比拆掉再重建便宜。
+ *
+ * # Safety
+ *
+ * `world` 必须是 `world_create` 返回且尚未销毁的指针。
+ */
+struct Bool world_multibody_joint_set_max_force(struct WorldHandle *world,
+                                                uint64_t handle,
+                                                uint32_t axis,
+                                                double max_force);
+
+/**
+ * `u8` 返回变体，语义同 [`world_multibody_joint_set_max_force`]。
+ *
+ * # Safety
+ *
+ * 同 [`world_multibody_joint_set_max_force`]。
+ */
+uint8_t world_multibody_joint_set_max_force_flag(struct WorldHandle *world,
+                                                 uint64_t handle,
+                                                 uint32_t axis,
+                                                 double max_force);
+
+/**
+ * 读 multibody joint 某个轴的力矩/力上限；失败返回 `NaN`。
+ *
+ * # Safety
+ *
+ * `world` 必须是 `world_create` 返回且尚未销毁的指针。
+ */
+double world_multibody_joint_get_max_force(struct WorldHandle *world,
+                                           uint64_t handle,
+                                           uint32_t axis);
+
+/**
+ * 读 multibody joint 某个轴的**广义速度** `[rad/s]` 或 `[m/s]`；失败返回 `NaN`。
+ *
+ * 这是 multibody 驱动体的**权威**速度：求解器每步用广义速度覆盖刚体的
+ * `vels`，所以读刚体 `angvel` 拿到的值可能已被覆盖。要按
+ * [`mps_formula::motors`] 的 `torque_at_speed(ω)` 算包络，必须从这里读 ω。
+ *
+ * # Safety
+ *
+ * `world` 必须是 `world_create` 返回且尚未销毁的指针。
+ */
+double world_multibody_joint_get_velocity(struct WorldHandle *world,
+                                          uint64_t handle,
+                                          uint32_t axis);
+
+/**
  * 设置 multibody joint 弹簧的阻尼系数（`F = −k(q − rest) − c·v`）。
  *
  * 与 `stiffness` 相互独立。弹簧本身已经带一个隐式 `−k·dt·v` 项（backward-Euler

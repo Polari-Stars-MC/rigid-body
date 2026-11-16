@@ -499,20 +499,20 @@ mod tests {
         world_multibody_joint_get_coordinate(world, hinge, axis)
     }
 
+    /// The joint's own generalized velocity on `axis` [rad/s] — the
+    /// authoritative speed, since the solver overwrites the body's `angvel`.
+    fn read_velocity(world: *mut WorldHandle, hinge: u64, axis: u32) -> f64 {
+        world_multibody_joint_get_velocity(world, hinge, axis)
+    }
+
     /// Drive the hinge with a servo that keeps advancing its target angle, and
     /// return the joint coordinate reached.
     fn spin_up(world: *mut WorldHandle, hinge: u64, axis: u32) -> f64 {
         let mut angle = 0.0;
-        for i in 0..60 {
+        for _ in 0..60 {
             angle += 0.1;
             world_multibody_joint_set_motor(world, hinge, axis, angle, 10_000.0);
             mps_core::rapier::world::world_step(world, 1.0 / 60.0);
-            if i % 15 == 0 {
-                std::eprintln!(
-                    "spin_up i={i} target={angle:.2} coord={:.4}",
-                    read_angle(world, hinge, axis)
-                );
-            }
         }
         read_angle(world, hinge, axis)
     }
@@ -741,6 +741,194 @@ mod tests {
         let c = world_multibody_joint_set_spring_damping(world, hinge, axis, 10.0).0;
         let d = world_multibody_joint_set_spring_damping_flag(world, hinge, axis, 10.0);
         assert_eq!(c, d);
+        world_destroy(world);
+    }
+
+    // =======================================================================
+    // multibody joint force cap — the `max_force` of `world_joint_set_motor`,
+    // finally available on the multibody path.
+    // =======================================================================
+
+    #[test]
+    fn multibody_max_force_roundtrips_and_defaults_to_unlimited() {
+        let world = make_world();
+        let (_f, _b, hinge) = revolute_pair(world);
+        let axis = JointAxisDesc::AngX as u32;
+
+        // Uncapped by default.
+        let before = world_multibody_joint_get_max_force(world, hinge, axis);
+        assert!(
+            before >= f64::MAX * 0.5,
+            "a fresh joint should be uncapped: {before}"
+        );
+
+        assert_eq!(
+            world_multibody_joint_set_max_force(world, hinge, axis, 12.5),
+            Bool::TRUE
+        );
+        assert!((world_multibody_joint_get_max_force(world, hinge, axis) - 12.5).abs() < 1e-12);
+        // The `_flag` variant agrees.
+        assert_eq!(
+            world_multibody_joint_set_max_force_flag(world, hinge, axis, 7.0),
+            world_multibody_joint_set_max_force(world, hinge, axis, 7.0).0
+        );
+        world_destroy(world);
+    }
+
+    #[test]
+    fn multibody_max_force_rejects_invalid() {
+        let world = make_world();
+        let (_f, _b, hinge) = revolute_pair(world);
+        let axis = JointAxisDesc::AngX as u32;
+
+        assert_eq!(
+            world_multibody_joint_set_max_force(world, hinge, axis, -1.0),
+            Bool::FALSE
+        );
+        assert_eq!(last_error_code(), ERR_INVALID_ARGUMENT);
+        assert_eq!(
+            world_multibody_joint_set_max_force(world, hinge, axis, f64::NAN),
+            Bool::FALSE
+        );
+        assert_eq!(last_error_code(), ERR_INVALID_ARGUMENT);
+        assert_eq!(
+            world_multibody_joint_set_max_force(std::ptr::null_mut(), hinge, axis, 1.0),
+            Bool::FALSE
+        );
+        assert_eq!(last_error_code(), ERR_NULL_POINTER);
+        assert_eq!(
+            world_multibody_joint_set_max_force(world, u64::MAX, axis, 1.0),
+            Bool::FALSE
+        );
+        assert_eq!(last_error_code(), ERR_NOT_FOUND);
+        // Reading from a bad handle yields NaN, not a misleading 0.
+        assert!(world_multibody_joint_get_max_force(world, u64::MAX, axis).is_nan());
+        world_destroy(world);
+    }
+
+    /// A cap of zero must produce **no** motion: the stiffest possible servo
+    /// with no allowed torque cannot move anything.
+    #[test]
+    fn multibody_zero_cap_produces_no_motion() {
+        let world = make_world();
+        let (_f, _body, hinge) = revolute_pair(world);
+        let axis = JointAxisDesc::AngX as u32;
+
+        // Very stiff servo, unlimited first: it must move.
+        world_multibody_joint_set_motor(world, hinge, axis, 1.0, 10_000.0);
+        for _ in 0..30 {
+            mps_core::rapier::world::world_step(world, 1.0 / 60.0);
+        }
+        let moved = read_angle(world, hinge, axis).abs();
+        assert!(moved > 0.5, "without a cap the servo must move: {moved}");
+
+        // Now cap it to zero and ask for a much larger angle: nothing happens.
+        assert_eq!(
+            world_multibody_joint_set_max_force(world, hinge, axis, 0.0),
+            Bool::TRUE
+        );
+        let held = read_angle(world, hinge, axis);
+        world_multibody_joint_set_motor(world, hinge, axis, 9.0, 10_000.0);
+        for _ in 0..60 {
+            mps_core::rapier::world::world_step(world, 1.0 / 60.0);
+        }
+        let after = read_angle(world, hinge, axis);
+        assert!(
+            (after - held).abs() < 1e-9,
+            "a zero cap must freeze the axis: {held} -> {after}"
+        );
+        world_destroy(world);
+    }
+
+    /// A finite cap must make the joint reach its target **slower** than an
+    /// uncapped one — that is what "torque limited" means dynamically.
+    #[test]
+    fn multibody_tight_cap_slows_the_servo() {
+        let axis = JointAxisDesc::AngX as u32;
+
+        // Uncapped reference.
+        let world = make_world();
+        let (_f, _b, hinge) = revolute_pair(world);
+        world_multibody_joint_set_motor(world, hinge, axis, 1.0, 10_000.0);
+        for _ in 0..10 {
+            mps_core::rapier::world::world_step(world, 1.0 / 60.0);
+        }
+        let uncapped = read_angle(world, hinge, axis).abs();
+        world_destroy(world);
+
+        // Same setup, but the axis may only make a small torque.
+        let world = make_world();
+        let (_f, _b, hinge) = revolute_pair(world);
+        assert_eq!(
+            world_multibody_joint_set_max_force(world, hinge, axis, 0.02),
+            Bool::TRUE
+        );
+        world_multibody_joint_set_motor(world, hinge, axis, 1.0, 10_000.0);
+        for _ in 0..10 {
+            mps_core::rapier::world::world_step(world, 1.0 / 60.0);
+        }
+        let capped = read_angle(world, hinge, axis).abs();
+        world_destroy(world);
+
+        assert!(uncapped > 0.0, "uncapped must move: {uncapped}");
+        assert!(
+            capped < uncapped * 0.5,
+            "a tight cap must slow the joint: capped {capped} vs uncapped {uncapped}"
+        );
+    }
+
+    /// The velocity readout must be the joint's own generalized velocity, so it
+    /// can feed a `torque_at_speed(ω)` envelope directly.
+    #[test]
+    fn multibody_velocity_readout_tracks_the_drive() {
+        let world = make_world();
+        let (_f, _b, hinge) = revolute_pair(world);
+        let axis = JointAxisDesc::AngX as u32;
+
+        // Drive, then read the generalized velocity while it is still moving.
+        //
+        // The sign is not asserted: the joint's coordinate convention and the
+        // hinge axis decide it, and which way is "positive" is not the point of
+        // this test. What matters is that the magnitude tracks the motion.
+        let mut angle = 0.0;
+        let mut max_speed = 0.0f64;
+        for _ in 0..30 {
+            angle += 0.1;
+            world_multibody_joint_set_motor(world, hinge, axis, angle, 10_000.0);
+            mps_core::rapier::world::world_step(world, 1.0 / 60.0);
+            let v = read_velocity(world, hinge, axis);
+            assert!(v.is_finite(), "velocity readout must be finite: {v}");
+            max_speed = max_speed.max(v.abs());
+        }
+        assert!(
+            max_speed > 0.5,
+            "an advancing servo must show a non-zero generalized velocity, got max |v| = {max_speed}"
+        );
+
+        // And the differentiable coordinate agrees with it.
+        let a0 = read_angle(world, hinge, axis);
+        mps_core::rapier::world::world_step(world, 1.0 / 60.0);
+        let a1 = read_angle(world, hinge, axis);
+        let finite_diff = (a1 - a0) * 60.0;
+        let reported = read_velocity(world, hinge, axis);
+        assert!(
+            (finite_diff - reported).abs() < 0.5,
+            "velocity should match the coordinate's derivative: {reported} vs {finite_diff}"
+        );
+        world_destroy(world);
+    }
+
+    /// A bad handle must yield NaN for the `f64`-returning readers.
+    #[test]
+    fn multibody_float_readers_return_nan_on_bad_handles() {
+        let world = make_world();
+        let (_f, _b, hinge) = revolute_pair(world);
+        let axis = JointAxisDesc::AngX as u32;
+        assert!(world_multibody_joint_get_velocity(world, u64::MAX, axis).is_nan());
+        assert_eq!(last_error_code(), ERR_NOT_FOUND);
+        assert!(world_multibody_joint_get_max_force(world, u64::MAX, axis).is_nan());
+        assert!(world_multibody_joint_get_velocity(std::ptr::null_mut(), hinge, axis).is_nan());
+        assert_eq!(last_error_code(), ERR_NULL_POINTER);
         world_destroy(world);
     }
 }

@@ -1129,6 +1129,142 @@ pub extern "C" fn world_multibody_joint_set_motor(
     })
 }
 
+/// 设置 multibody joint 某个轴的**力矩上限** `[N·m]` 或 **力上限** `[N]`。
+///
+/// 弹簧产生的广义力 `−k·(q − rest) − c·v` 在进入求解器前被 clamp 到
+/// `±max_force`。这对应 impulse joint 那边 `world_joint_set_motor` 的
+/// `max_force` 参数，是 multibody 路径此前缺失的能力。
+///
+/// # 为什么需要它
+///
+/// 真实电机的可用转矩是**转速的函数**，不是一个常数。没有这个上限，调用方
+/// 只能"挑一个刚度然后祈祷"，无法表达"这台电机在这个转速下最多出这么多力"。
+/// 有了它，调用方按 [`mps_formula::motors`] 的模型每步算出包络再写进来，
+/// 九种电机模型就同时适用于两条关节路径。
+///
+/// `max_force = f64::MAX` 表示不设限（默认）。`max_force = 0` 让该轴完全不
+/// 出力，但保留弹簧参数——比拆掉再重建便宜。
+///
+/// # Safety
+///
+/// `world` 必须是 `world_create` 返回且尚未销毁的指针。
+#[unsafe(no_mangle)]
+pub extern "C" fn world_multibody_joint_set_max_force(
+    world: *mut WorldHandle,
+    handle: u64,
+    axis: u32,
+    max_force: f64,
+) -> Bool {
+    ffi_guard(Bool::FALSE, || {
+        let Some(world) = (unsafe { world.as_mut() }) else {
+            set_error(ERR_NULL_POINTER, "world is null");
+            return Bool::FALSE;
+        };
+        if !max_force.is_finite() || max_force < 0.0 {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "max force must be finite and non-negative",
+            );
+            return Bool::FALSE;
+        }
+        let jh = unpack_multibody_joint_handle(handle);
+        let Some((mb, link_id)) = world.inner.multibody_joints.get_mut(jh) else {
+            set_error(ERR_NOT_FOUND, "multibody joint not found");
+            return Bool::FALSE;
+        };
+        let dof = joint_axis_to_rapier(joint_axis_from_raw(axis)) as usize;
+        if !mb.set_joint_max_force(link_id, dof, max_force) {
+            set_error(ERR_INVALID_ARGUMENT, "cannot cap that joint axis");
+            return Bool::FALSE;
+        }
+        clear_error();
+        Bool::TRUE
+    })
+}
+
+/// `u8` 返回变体，语义同 [`world_multibody_joint_set_max_force`]。
+///
+/// # Safety
+///
+/// 同 [`world_multibody_joint_set_max_force`]。
+#[unsafe(no_mangle)]
+pub extern "C" fn world_multibody_joint_set_max_force_flag(
+    world: *mut WorldHandle,
+    handle: u64,
+    axis: u32,
+    max_force: f64,
+) -> u8 {
+    ffi_guard(0, || {
+        world_multibody_joint_set_max_force(world, handle, axis, max_force).0
+    })
+}
+
+/// 读 multibody joint 某个轴的力矩/力上限；失败返回 `NaN`。
+///
+/// # Safety
+///
+/// `world` 必须是 `world_create` 返回且尚未销毁的指针。
+#[unsafe(no_mangle)]
+pub extern "C" fn world_multibody_joint_get_max_force(
+    world: *mut WorldHandle,
+    handle: u64,
+    axis: u32,
+) -> f64 {
+    ffi_guard(f64::NAN, || {
+        let Some(world) = (unsafe { world.as_ref() }) else {
+            set_error(ERR_NULL_POINTER, "world is null");
+            return f64::NAN;
+        };
+        let jh = unpack_multibody_joint_handle(handle);
+        let Some((mb, link_id)) = world.inner.multibody_joints.get(jh) else {
+            set_error(ERR_NOT_FOUND, "multibody joint not found");
+            return f64::NAN;
+        };
+        let dof = joint_axis_to_rapier(joint_axis_from_raw(axis)) as usize;
+        let Some(cap) = mb.joint_max_force(link_id, dof) else {
+            set_error(ERR_NOT_FOUND, "multibody link or axis not found");
+            return f64::NAN;
+        };
+        clear_error();
+        cap
+    })
+}
+
+/// 读 multibody joint 某个轴的**广义速度** `[rad/s]` 或 `[m/s]`；失败返回 `NaN`。
+///
+/// 这是 multibody 驱动体的**权威**速度：求解器每步用广义速度覆盖刚体的
+/// `vels`，所以读刚体 `angvel` 拿到的值可能已被覆盖。要按
+/// [`mps_formula::motors`] 的 `torque_at_speed(ω)` 算包络，必须从这里读 ω。
+///
+/// # Safety
+///
+/// `world` 必须是 `world_create` 返回且尚未销毁的指针。
+#[unsafe(no_mangle)]
+pub extern "C" fn world_multibody_joint_get_velocity(
+    world: *mut WorldHandle,
+    handle: u64,
+    axis: u32,
+) -> f64 {
+    ffi_guard(f64::NAN, || {
+        let Some(world) = (unsafe { world.as_ref() }) else {
+            set_error(ERR_NULL_POINTER, "world is null");
+            return f64::NAN;
+        };
+        let jh = unpack_multibody_joint_handle(handle);
+        let Some((mb, link_id)) = world.inner.multibody_joints.get(jh) else {
+            set_error(ERR_NOT_FOUND, "multibody joint not found");
+            return f64::NAN;
+        };
+        let dof = joint_axis_to_rapier(joint_axis_from_raw(axis)) as usize;
+        let Some(v) = mb.joint_axis_velocity(link_id, dof) else {
+            set_error(ERR_NOT_FOUND, "multibody link or axis not found");
+            return f64::NAN;
+        };
+        clear_error();
+        v
+    })
+}
+
 /// 设置 multibody joint 弹簧的阻尼系数（`F = −k(q − rest) − c·v`）。
 ///
 /// 与 `stiffness` 相互独立。弹簧本身已经带一个隐式 `−k·dt·v` 项（backward-Euler

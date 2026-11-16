@@ -161,3 +161,22 @@ V = I·R + k_e·ω      （电枢回路）
 - 压电/SMA 的功在阻塞力一半处取最大
 - 热模型收敛到 `p_loss·r_th` 的稳态，断电后会降温
 - 所有非有限输入返回 `None` 而不是 NaN
+## 怎么接进求解器
+
+公式层只算，不施力。要让某台电机真的驱动一个关节，宿主每步做三件事：
+
+```text
+ω = world_multibody_joint_get_velocity(world, hinge, axis)   // 权威转速
+τ = motor.torque_at_speed(ω)                                 // 算包络
+world_multibody_joint_set_max_force(world, hinge, axis, |τ|) // 限幅
+```
+
+第三步用 ADR-0013 加的力矩上限。它和 impulse joint 那边的
+`world_joint_set_motor` 的 `max_force` 参数是同一个概念，所以同一套
+电机模型两条关节路径都能用。
+
+**读转速必须用 `get_velocity`，不能读刚体 `angvel`。** 求解器每步用广义
+速度覆盖 `bodies.vels`，读刚体拿到的是被覆盖过的二手值。
+
+串联机构（机械臂、`articulation_body`）必须走 multibody，所以这条路径上的
+力矩上限和转速读数缺一不可。
