@@ -439,6 +439,19 @@ pub fn inscatter_spectral_through_particles(
     let mut sum_g = 0.0f64;
     let mut sum_b = 0.0f64;
 
+    // 建一次均匀网格，把每步的密度查询从 O(N) 降到 O(k)。三通道共享采样，
+    // 所以网格的收益与标量版相同（见 ADR-0023）。
+    // 粒子少时建网格不划算，走朴素路径。
+    const GRID_THRESHOLD: usize = 64;
+    let grid = if positions.len() >= GRID_THRESHOLD {
+        Some(crate::tyndall_particles::UniformGrid::build(
+            positions,
+            smoothing_radius,
+        )?)
+    } else {
+        None
+    };
+
     for k in 0..steps {
         let t = (k as f64 + 0.5) * ds;
         let q = [
@@ -447,7 +460,12 @@ pub fn inscatter_spectral_through_particles(
             origin[2] + direction[2] * t,
         ];
         // 数密度只采样一次，三通道共用。
-        let n = crate::tyndall_particles::sample_number_density(positions, q, smoothing_radius)?;
+        let n = match &grid {
+            Some(g) => g.number_density(q, smoothing_radius)?,
+            None => {
+                crate::tyndall_particles::sample_number_density(positions, q, smoothing_radius)?
+            }
+        };
 
         sum_r += trans_r * n * src_r * ds;
         sum_g += trans_g * n * src_g * ds;

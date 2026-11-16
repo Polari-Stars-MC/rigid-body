@@ -48,9 +48,9 @@ pub extern "C" fn tyndall_collect_particles(
     capacity: u32,
 ) -> u32 {
     ffi_guard(0, || {
-        let Some(world) = (unsafe { world.as_ref() }) else {
-            set_error(ERR_NULL_POINTER, "tyndall_collect_particles: world is null");
-            return 0;
+        let world = match unsafe { require_world(world, "tyndall_collect_particles") } {
+            Ok(w) => w,
+            Err(e) => return e.0 as u32,
         };
         let idx = id as usize;
         let cap = capacity as usize;
@@ -130,12 +130,9 @@ pub extern "C" fn tyndall_inscatter_from_world(
     out: *mut f64,
 ) -> Bool {
     ffi_guard(Bool::FALSE, || {
-        let Some(world) = (unsafe { world.as_ref() }) else {
-            set_error(
-                ERR_NULL_POINTER,
-                "tyndall_inscatter_from_world: world is null",
-            );
-            return Bool::FALSE;
+        let world = match unsafe { require_world(world, "tyndall_inscatter_from_world") } {
+            Ok(w) => w,
+            Err(e) => return e,
         };
         if out.is_null() {
             set_error(
@@ -144,12 +141,8 @@ pub extern "C" fn tyndall_inscatter_from_world(
             );
             return Bool::FALSE;
         }
-        if !vec3_finite(origin) || !vec3_finite(direction) {
-            set_error(
-                ERR_INVALID_ARGUMENT,
-                "tyndall_inscatter_from_world: non-finite origin/direction",
-            );
-            return Bool::FALSE;
+        if let Err(e) = require_finite_ray(origin, direction, "tyndall_inscatter_from_world") {
+            return e;
         }
 
         // 取粒子位置到本地缓冲。渲染每帧调用一次，粒子数一般 10³~10⁵，
@@ -261,12 +254,9 @@ pub extern "C" fn tyndall_density_from_world(
     out: *mut f64,
 ) -> Bool {
     ffi_guard(Bool::FALSE, || {
-        let Some(world) = (unsafe { world.as_ref() }) else {
-            set_error(
-                ERR_NULL_POINTER,
-                "tyndall_density_from_world: world is null",
-            );
-            return Bool::FALSE;
+        let world = match unsafe { require_world(world, "tyndall_density_from_world") } {
+            Ok(w) => w,
+            Err(e) => return e,
         };
         if out.is_null() {
             set_error(ERR_NULL_POINTER, "tyndall_density_from_world: out is null");
@@ -466,12 +456,9 @@ pub extern "C" fn tyndall_spectral_from_world(
             set_error(ERR_NULL_POINTER, "tyndall_spectral_from_world: out is null");
             return Bool::FALSE;
         }
-        let Some(world) = (unsafe { world.as_ref() }) else {
-            set_error(
-                ERR_NULL_POINTER,
-                "tyndall_spectral_from_world: world is null",
-            );
-            return Bool::FALSE;
+        let world = match unsafe { require_world(world, "tyndall_spectral_from_world") } {
+            Ok(w) => w,
+            Err(e) => return e,
         };
         if !vec3_finite(origin) || !vec3_finite(direction) {
             set_error(
@@ -533,6 +520,34 @@ pub extern "C" fn tyndall_spectral_from_world(
     })
 }
 
+/// 校验 `world` 非空，返回引用或已设置错误码。
+///
+/// 五个场景入口原本各自写一遍这段。抽出来只改一处，也保证错误消息格式统一。
+///
+/// # Safety
+/// `world` 必须是调用方传入的裸指针，且在此函数返回后仍然有效。
+unsafe fn require_world<'a>(world: *const WorldHandle, who: &str) -> Result<&'a WorldHandle, Bool> {
+    match unsafe { world.as_ref() } {
+        Some(w) => Ok(w),
+        None => {
+            // 错误消息里带入口名，宿主能直接定位是哪个调用传了 null。
+            set_error(ERR_NULL_POINTER, &format!("{who}: world is null"));
+            Err(Bool::FALSE)
+        }
+    }
+}
+
+/// 校验 `origin` / `direction` 的每个分量有限。
+fn require_finite_ray(origin: Vec3, direction: Vec3, who: &str) -> Result<(), Bool> {
+    if !vec3_finite(origin) || !vec3_finite(direction) {
+        set_error(
+            ERR_INVALID_ARGUMENT,
+            &format!("{who}: non-finite origin/direction"),
+        );
+        return Err(Bool::FALSE);
+    }
+    Ok(())
+}
 /// 从世界里收集指定来源的粒子位置。
 ///
 /// 抽出来避免三个入口重复那段 match —— 也是 `verify_module_mirror` 之外
@@ -615,13 +630,11 @@ pub extern "C" fn tyndall_inscatter_from_world_accelerated(
             );
             return Bool::FALSE;
         }
-        let Some(world) = (unsafe { world.as_ref() }) else {
-            set_error(
-                ERR_NULL_POINTER,
-                "tyndall_inscatter_from_world_accelerated: world is null",
-            );
-            return Bool::FALSE;
-        };
+        let world =
+            match unsafe { require_world(world, "tyndall_inscatter_from_world_accelerated") } {
+                Ok(w) => w,
+                Err(e) => return e,
+            };
         if !vec3_finite(origin) || !vec3_finite(direction) {
             set_error(
                 ERR_INVALID_ARGUMENT,
@@ -708,12 +721,9 @@ pub extern "C" fn tyndall_spectral_full_from_world(
             );
             return Bool::FALSE;
         }
-        let Some(world) = (unsafe { world.as_ref() }) else {
-            set_error(
-                ERR_NULL_POINTER,
-                "tyndall_spectral_full_from_world: world is null",
-            );
-            return Bool::FALSE;
+        let world = match unsafe { require_world(world, "tyndall_spectral_full_from_world") } {
+            Ok(w) => w,
+            Err(e) => return e,
         };
         if !vec3_finite(origin) || !vec3_finite(direction) {
             set_error(
