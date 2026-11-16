@@ -174,6 +174,25 @@
 #define RIGID_BODY_PARAM_ENABLED 2
 
 /**
+ * `rigid_body_set_vec3_flag_param` 的属性编号。
+ *
+ * **累积型（0~3）与设定型（4~6）必须分开编号**，见上面的语义分歧说明。
+ */
+#define RIGID_BODY_VEC3_ADD_FORCE 0
+
+#define RIGID_BODY_VEC3_ADD_TORQUE 1
+
+#define RIGID_BODY_VEC3_APPLY_IMPULSE 2
+
+#define RIGID_BODY_VEC3_APPLY_TORQUE_IMPULSE 3
+
+#define RIGID_BODY_VEC3_SET_LINVEL 4
+
+#define RIGID_BODY_VEC3_SET_ANGVEL 5
+
+#define RIGID_BODY_VEC3_SET_TRANSLATION 6
+
+/**
  * Magic number identifying a valid arena: "MPS_AREN"
  */
 #define ARENA_MAGIC 5571044407640212814
@@ -8073,6 +8092,29 @@ uint8_t rigid_body_set_param_flag(struct WorldHandle *world,
                                   RigidBodyHandleRaw handle,
                                   uint32_t param,
                                   double value);
+
+/**
+ * 已分配的"向量 + 开关"属性个数。
+ */
+uint32_t rigid_body_vec3_flag_param_abi_version(void);
+
+/**
+ * 向量 + 可选唤醒通道。
+ *
+ * # Returns
+ * `Bool::TRUE` 成功；world 为 null → `ERR_NULL_POINTER`；句柄无效 →
+ * `ERR_NOT_FOUND`；`param` 未分配或分量非有限 → `ERR_INVALID_ARGUMENT`。
+ *
+ * # Safety
+ * `world` 必须有效。
+ */
+struct Bool rigid_body_set_vec3_flag_param(struct WorldHandle *world,
+                                           RigidBodyHandleRaw handle,
+                                           uint32_t param,
+                                           double x,
+                                           double y,
+                                           double z,
+                                           uint8_t flag);
 
 /**
  * Create an empty R-tree index.

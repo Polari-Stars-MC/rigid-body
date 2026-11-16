@@ -7,6 +7,7 @@ mod tests {
     use mps_core::rapier::rigid_body::*;
     use mps_core::rapier::world::world_create;
     use mps_core::rapier::world::world_destroy;
+    use mps_core::rapier::world::world_step;
 
     fn make_world() -> *mut WorldHandle {
         world_create(Vec3 {
@@ -1735,6 +1736,271 @@ mod tests {
             let f = rigid_body_set_param_flag(world, handle, param, value);
             assert_eq!(b, f, "param {param} value {value}: Bool {b} vs flag {f}");
         }
+        world_destroy(world);
+    }
+
+    // ── 向量 + 可选开关通道（ADR-0017） ──────────────────────────────────────
+
+    use mps_core::rapier::rigid_body::{
+        RIGID_BODY_VEC3_ADD_FORCE, RIGID_BODY_VEC3_ADD_TORQUE, RIGID_BODY_VEC3_APPLY_IMPULSE,
+        RIGID_BODY_VEC3_APPLY_TORQUE_IMPULSE, RIGID_BODY_VEC3_SET_ANGVEL,
+        RIGID_BODY_VEC3_SET_LINVEL, RIGID_BODY_VEC3_SET_TRANSLATION,
+        rigid_body_set_vec3_flag_param, rigid_body_vec3_flag_param_abi_version,
+    };
+
+    #[test]
+    fn vec3_flag_param_ids_match_the_abi_version() {
+        let all = [
+            RIGID_BODY_VEC3_ADD_FORCE,
+            RIGID_BODY_VEC3_ADD_TORQUE,
+            RIGID_BODY_VEC3_APPLY_IMPULSE,
+            RIGID_BODY_VEC3_APPLY_TORQUE_IMPULSE,
+            RIGID_BODY_VEC3_SET_LINVEL,
+            RIGID_BODY_VEC3_SET_ANGVEL,
+            RIGID_BODY_VEC3_SET_TRANSLATION,
+        ];
+        assert_eq!(rigid_body_vec3_flag_param_abi_version() as usize, all.len());
+        let mut sorted = all;
+        sorted.sort_unstable();
+        for w in sorted.windows(2) {
+            assert_ne!(w[0], w[1], "duplicate vec3-flag param id {}", w[0]);
+        }
+        // The accumulate/set split must stay contiguous: 0..=3 accumulate,
+        // 4..=6 set. A future addition that blurs the boundary would make
+        // "add" and "overwrite" indistinguishable to callers.
+        assert!(RIGID_BODY_VEC3_SET_LINVEL > RIGID_BODY_VEC3_APPLY_TORQUE_IMPULSE);
+    }
+
+    /// Each channel param must equal its dedicated entry.
+    #[test]
+    fn vec3_flag_params_agree_with_the_dedicated_entries() {
+        let world = make_world();
+        let cases: [(
+            u32,
+            [f64; 3],
+            fn(*mut WorldHandle, RigidBodyHandleRaw, Vec3, Bool) -> Bool,
+        ); 7] = [
+            (RIGID_BODY_VEC3_ADD_FORCE, [1.0, 2.0, 3.0], |w, h, v, b| {
+                rigid_body_add_force(w, h, v, b)
+            }),
+            (
+                RIGID_BODY_VEC3_ADD_TORQUE,
+                [0.5, -1.0, 2.0],
+                |w, h, v, b| rigid_body_add_torque(w, h, v, b),
+            ),
+            (
+                RIGID_BODY_VEC3_APPLY_IMPULSE,
+                [3.0, 0.0, -2.0],
+                |w, h, v, b| rigid_body_apply_impulse(w, h, v, b),
+            ),
+            (
+                RIGID_BODY_VEC3_APPLY_TORQUE_IMPULSE,
+                [0.0, 1.0, 0.0],
+                |w, h, v, b| rigid_body_apply_torque_impulse(w, h, v, b),
+            ),
+            (RIGID_BODY_VEC3_SET_LINVEL, [4.0, 5.0, 6.0], |w, h, v, b| {
+                rigid_body_set_linvel(w, h, v, b)
+            }),
+            (RIGID_BODY_VEC3_SET_ANGVEL, [0.0, 0.5, 0.0], |w, h, v, b| {
+                rigid_body_set_angvel(w, h, v, b)
+            }),
+            (
+                RIGID_BODY_VEC3_SET_TRANSLATION,
+                [7.0, 8.0, 9.0],
+                |w, h, v, b| rigid_body_set_translation(w, h, v, b),
+            ),
+        ];
+
+        for (param, xyz, dedicated) in cases {
+            let a = make_dynamic_body(world);
+            let b = make_dynamic_body(world);
+            let v = Vec3 {
+                x: xyz[0],
+                y: xyz[1],
+                z: xyz[2],
+            };
+            let generic =
+                rigid_body_set_vec3_flag_param(world, a, param, xyz[0], xyz[1], xyz[2], 1).0;
+            let specific = dedicated(world, b, v, Bool::TRUE).0;
+            assert_eq!(
+                generic, specific,
+                "param {param} value {xyz:?}: generic {generic} vs dedicated {specific}"
+            );
+        }
+        world_destroy(world);
+    }
+
+    /// The accumulate/set distinction must survive the channel.
+    ///
+    /// `add_force` twice == one call with twice the force; `set_linvel` twice ==
+    /// one call (the second overwrites). If the channel collapsed these, a body
+    /// would double its velocity instead of holding it.
+    #[test]
+    fn accumulate_and_set_remain_distinct() {
+        let world = make_world();
+
+        // Accumulate: two adds of F == one add of 2F.
+        let a = make_dynamic_body(world);
+        let b = make_dynamic_body(world);
+        let _ =
+            rigid_body_set_vec3_flag_param(world, a, RIGID_BODY_VEC3_ADD_FORCE, 1.0, 0.0, 0.0, 1);
+        let _ =
+            rigid_body_set_vec3_flag_param(world, a, RIGID_BODY_VEC3_ADD_FORCE, 1.0, 0.0, 0.0, 1);
+        let _ =
+            rigid_body_set_vec3_flag_param(world, b, RIGID_BODY_VEC3_ADD_FORCE, 2.0, 0.0, 0.0, 1);
+        // Both bodies must see the same net force, which shows up as the same
+        // velocity after one identical step.
+        world_step(world, 1.0 / 60.0);
+        let va = rigid_body_get_linvel(world, a);
+        let vb = rigid_body_get_linvel(world, b);
+        assert!(
+            (va.x - vb.x).abs() < 1e-12,
+            "two adds of 1.0 must equal one add of 2.0, got {} vs {}",
+            va.x,
+            vb.x
+        );
+
+        // Set: two sets of different values == the last one wins.
+        let c = make_dynamic_body(world);
+        let d = make_dynamic_body(world);
+        let _ =
+            rigid_body_set_vec3_flag_param(world, c, RIGID_BODY_VEC3_SET_LINVEL, 5.0, 0.0, 0.0, 1);
+        let _ =
+            rigid_body_set_vec3_flag_param(world, c, RIGID_BODY_VEC3_SET_LINVEL, 1.0, 0.0, 0.0, 1);
+        let _ =
+            rigid_body_set_vec3_flag_param(world, d, RIGID_BODY_VEC3_SET_LINVEL, 1.0, 0.0, 0.0, 1);
+        let vc = rigid_body_get_linvel(world, c);
+        let vd = rigid_body_get_linvel(world, d);
+        assert!(
+            (vc.x - vd.x).abs() < 1e-12,
+            "the second set_linvel must overwrite, got {} vs {}",
+            vc.x,
+            vd.x
+        );
+        assert!(
+            (vc.x - 1.0).abs() < 1e-12,
+            "set_linvel(1.0) then set_linvel must leave 1.0, got {}",
+            vc.x
+        );
+
+        world_destroy(world);
+    }
+
+    /// `flag` is passed straight through to `wake_up`, not ignored.
+    #[test]
+    fn flag_is_forwarded_as_wake_up() {
+        let world = make_world();
+        let handle = make_dynamic_body(world);
+
+        // Note: rapier's `add_force` only consults `wake_up` when the force is
+        // non-zero (`if force != ZERO && dynamic { ... if wake_up { … } }`).
+        // So the flag has to be exercised with a real force — a zero-magnitude
+        // call can never wake a body no matter what the flag says. Asserting
+        // the wake on a zero force would be testing the wrong thing.
+        assert_eq!(rigid_body_sleep(world, handle), Bool::TRUE);
+        assert_eq!(
+            rigid_body_set_vec3_flag_param(
+                world,
+                handle,
+                RIGID_BODY_VEC3_ADD_FORCE,
+                1.0,
+                0.0,
+                0.0,
+                0
+            ),
+            Bool::TRUE
+        );
+        assert_eq!(
+            rigid_body_is_sleeping(world, handle),
+            Bool::TRUE,
+            "a non-zero force with flag=0 must not wake the body"
+        );
+        assert_eq!(
+            rigid_body_set_vec3_flag_param(
+                world,
+                handle,
+                RIGID_BODY_VEC3_ADD_FORCE,
+                1.0,
+                0.0,
+                0.0,
+                1
+            ),
+            Bool::TRUE
+        );
+        assert_eq!(
+            rigid_body_is_sleeping(world, handle),
+            Bool::FALSE,
+            "flag=1 must wake the body"
+        );
+
+        world_destroy(world);
+    }
+
+    #[test]
+    fn vec3_flag_param_rejects_bad_input() {
+        let world = make_world();
+        let handle = make_dynamic_body(world);
+
+        // Unknown param.
+        assert_eq!(
+            rigid_body_set_vec3_flag_param(
+                world,
+                handle,
+                rigid_body_vec3_flag_param_abi_version(),
+                1.0,
+                0.0,
+                0.0,
+                1
+            ),
+            Bool::FALSE
+        );
+        assert_eq!(last_error_code(), ERR_INVALID_ARGUMENT);
+
+        // Non-finite component.
+        assert_eq!(
+            rigid_body_set_vec3_flag_param(
+                world,
+                handle,
+                RIGID_BODY_VEC3_ADD_FORCE,
+                f64::NAN,
+                0.0,
+                0.0,
+                1
+            ),
+            Bool::FALSE
+        );
+        assert_eq!(last_error_code(), ERR_INVALID_ARGUMENT);
+
+        // Null world.
+        assert_eq!(
+            rigid_body_set_vec3_flag_param(
+                std::ptr::null_mut(),
+                handle,
+                RIGID_BODY_VEC3_ADD_FORCE,
+                1.0,
+                0.0,
+                0.0,
+                1
+            ),
+            Bool::FALSE
+        );
+        assert_eq!(last_error_code(), ERR_NULL_POINTER);
+
+        // Unknown handle.
+        assert_eq!(
+            rigid_body_set_vec3_flag_param(
+                world,
+                0xDEAD_BEEF,
+                RIGID_BODY_VEC3_ADD_FORCE,
+                1.0,
+                0.0,
+                0.0,
+                1
+            ),
+            Bool::FALSE
+        );
+        assert_eq!(last_error_code(), ERR_NOT_FOUND);
+
         world_destroy(world);
     }
 }

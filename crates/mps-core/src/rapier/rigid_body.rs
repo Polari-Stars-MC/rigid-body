@@ -1648,3 +1648,119 @@ pub extern "C" fn rigid_body_set_param_flag(
 ) -> u8 {
     ffi_guard(0, || rigid_body_set_param(world, handle, param, value).0)
 }
+
+// ── 向量 + 可选开关通道（ADR-0017） ───────────────────────────────────────────
+//
+// 一批入口的形状是 `(world, handle, Vec3, Bool)`：一个向量载荷加一个 wake_up
+// 开关。`collider_set_vec3_param` 装不下最后的 `Bool`，所以需要独立通道。
+//
+// ## 为什么不直接给 vec3 通道加参数
+//
+// `collider_set_vec3_param(world, handle, param, x, y, z)` 的语义是"把这个向量
+// 属性设成 (x,y,z)"。如果再加一个 `wake_up`，通道语义就变成"设一个值 + 可能
+// 顺带唤醒"，而 collider 那边根本没有唤醒概念。给不相关的模块加无用参数会污染
+// 语义，所以独立成 `rigid_body_set_vec3_flag_param`。
+//
+// ## 一个必须记清的语义分歧
+//
+// 这 14 个入口分成两类，**语义完全不同**：
+//
+// | 类型 | 代表 | 语义 |
+// | --- | --- | --- |
+// | 累积 | `add_force` / `add_torque` / `apply_impulse` | **加上**一份，可多次调用叠加 |
+// | 设定 | `set_linvel` / `set_angvel` / `set_translation` | **设成**这个值，覆盖 |
+//
+// 两类共用同一个签名形状，所以能进同一个通道，但 `param` 必须区分开 ——
+// 把 `ADD_FORCE` 和 `SET_LINVEL` 混成一个编号会让"累积"和"覆盖"变成同一件事，
+// 那是灾难性的语义错误。
+//
+// ## wake_up 的处理
+//
+// `Bool` 在 C 侧是 0/1，通道用 `u8` 接收（与仓库既有的 `_flag` 约定一致）。
+// 非零即真，与专用入口的 `wake_up.0 != 0` 判定一致。
+
+/// `rigid_body_set_vec3_flag_param` 的属性编号。
+///
+/// **累积型（0~3）与设定型（4~6）必须分开编号**，见上面的语义分歧说明。
+pub const RIGID_BODY_VEC3_ADD_FORCE: u32 = 0;
+pub const RIGID_BODY_VEC3_ADD_TORQUE: u32 = 1;
+pub const RIGID_BODY_VEC3_APPLY_IMPULSE: u32 = 2;
+pub const RIGID_BODY_VEC3_APPLY_TORQUE_IMPULSE: u32 = 3;
+pub const RIGID_BODY_VEC3_SET_LINVEL: u32 = 4;
+pub const RIGID_BODY_VEC3_SET_ANGVEL: u32 = 5;
+pub const RIGID_BODY_VEC3_SET_TRANSLATION: u32 = 6;
+
+/// 已分配的"向量 + 开关"属性个数。
+#[unsafe(no_mangle)]
+pub extern "C" fn rigid_body_vec3_flag_param_abi_version() -> u32 {
+    ffi_guard(0, || 7)
+}
+
+/// 向量 + 可选唤醒通道。
+///
+/// # Returns
+/// `Bool::TRUE` 成功；world 为 null → `ERR_NULL_POINTER`；句柄无效 →
+/// `ERR_NOT_FOUND`；`param` 未分配或分量非有限 → `ERR_INVALID_ARGUMENT`。
+///
+/// # Safety
+/// `world` 必须有效。
+#[unsafe(no_mangle)]
+pub extern "C" fn rigid_body_set_vec3_flag_param(
+    world: *mut WorldHandle,
+    handle: RigidBodyHandleRaw,
+    param: u32,
+    x: f64,
+    y: f64,
+    z: f64,
+    flag: u8,
+) -> Bool {
+    ffi_guard(Bool::FALSE, || {
+        let Some(world) = (unsafe { world.as_mut() }) else {
+            set_error(
+                ERR_NULL_POINTER,
+                "rigid_body_set_vec3_flag_param: world is null",
+            );
+            return Bool::FALSE;
+        };
+        let value = Vec3 { x, y, z };
+        if !vec3_finite(value) {
+            set_error(
+                ERR_INVALID_ARGUMENT,
+                "rigid_body_set_vec3_flag_param: vector components must be finite",
+            );
+            return Bool::FALSE;
+        }
+        let bh = unpack_rigid_body_handle(handle);
+        let Some(body) = world.inner.bodies.get_mut(bh) else {
+            set_error(
+                ERR_NOT_FOUND,
+                "rigid_body_set_vec3_flag_param: body was not found",
+            );
+            return Bool::FALSE;
+        };
+        // 与专用入口的 `wake_up.0 != 0` 一致：非零即真。
+        let wake = flag != 0;
+        let v = vec3_to_rapier(value);
+        match param {
+            // ── 累积型：多次调用叠加 ──
+            RIGID_BODY_VEC3_ADD_FORCE => body.add_force(v, wake),
+            RIGID_BODY_VEC3_ADD_TORQUE => body.add_torque(v, wake),
+            RIGID_BODY_VEC3_APPLY_IMPULSE => body.apply_impulse(v, wake),
+            RIGID_BODY_VEC3_APPLY_TORQUE_IMPULSE => body.apply_torque_impulse(v, wake),
+            // ── 设定型：覆盖当前值 ──
+            RIGID_BODY_VEC3_SET_LINVEL => body.set_linvel(v, wake),
+            RIGID_BODY_VEC3_SET_ANGVEL => body.set_angvel(v, wake),
+            RIGID_BODY_VEC3_SET_TRANSLATION => body.set_translation(v, wake),
+            _ => {
+                set_error(
+                    ERR_INVALID_ARGUMENT,
+                    "rigid_body_set_vec3_flag_param: unknown param id \
+                     (see rigid_body_vec3_flag_param_abi_version)",
+                );
+                return Bool::FALSE;
+            }
+        }
+        clear_error();
+        Bool::TRUE
+    })
+}

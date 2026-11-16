@@ -11,10 +11,10 @@
 | 项 | 数量 |
 | --- | --- |
 | `mps-core` 里有 `extern "C"` 入口的源模块 | 63 |
-| `mps-core` C ABI 入口总数 | 969 |
-| 其中出现在生成头文件 `rigid_body.h` 里 | 969 |
+| `mps-core` C ABI 入口总数 | 971 |
+| 其中出现在生成头文件 `rigid_body.h` 里 | 971 |
 | 其中被 `mps-jni` 的 `jni!` 体引用 | 613 |
-| 其中被 `mps-test` 引用 | 734 |
+| 其中被 `mps-test` 引用 | 736 |
 | 既无 JNI 绑定也无测试引用 | 129 |
 
 ## 模块表
@@ -65,7 +65,7 @@
 | `qphys` | `quantum_*` | 27 | — | dedicated 27 | [qphys.md](mps-core/qphys.md) | [qphys.rs](../crates/mps-test/src/rapier/qphys.rs) | 0 | 6 |
 | `query` | `query_*` | 24 | — | read_param 8 / dedicated 16 | [query.md](mps-core/query.md) | [query.rs](../crates/mps-test/src/rapier/query.rs) | 24 | 18 |
 | `rel` | `relativity_*` | 29 | — | dedicated 29 | [rel.md](mps-core/rel.md) | [rel.rs](../crates/mps-test/src/rapier/rel.rs) | 0 | 7 |
-| `rigid_body` | — | 70 | 4 | set_param 27 / read_param 11 / topology 12 / dedicated 20 | [rigid_body.md](mps-core/rigid_body.md) | [rigid_body.rs](../crates/mps-test/src/rapier/rigid_body.rs) | 51 | 66 |
+| `rigid_body` | — | 72 | 4 | set_param 28 / read_param 11 / topology 12 / dedicated 21 | [rigid_body.md](mps-core/rigid_body.md) | [rigid_body.rs](../crates/mps-test/src/rapier/rigid_body.rs) | 51 | 68 |
 | `rope` | — | 1 | — | dedicated 1 | [rope.md](mps-core/rope.md) | [rope.rs](../crates/mps-test/src/rapier/rope.rs) | 1 | 1 |
 | `rope_knot` | `rope_knot_*` | 5 | — | set_param 1 / topology 1 / dedicated 3 | [rope_knot.md](mps-core/rope_knot.md) | [rope_knot.rs](../crates/mps-test/src/rapier/rope_knot.rs) | 5 | 5 |
 | `rtree` | `rtree_*` | 10 | — | clear_param 1 / read_param 1 / topology 2 / dedicated 6 | [rtree.md](mps-core/rtree.md) | [rtree.rs](../crates/mps-test/src/rapier/rtree.rs) | 10 | 9 |
@@ -93,13 +93,13 @@
 
 | 组 | 含义 | 入口数 |
 | --- | --- | ---: |
-| `set_param` | `*_set_<prop>` → `*_set_param(e, PROP, v)` | 202 |
+| `set_param` | `*_set_<prop>` → `*_set_param(e, PROP, v)` | 203 |
 | `clear_param` | `*_clear_<prop>` → `*_set_param(e, PROP, none)` | 32 |
 | `read_param` | `*_get_<prop>` / `*_read_<prop>` → `*_get_param(e, PROP, out)` | 118 |
 | `topology` | `*_add/insert/remove/detach/attach_*`（第二批） | 57 |
-| `dedicated` | 带真实逻辑，必须保留专用入口 | 560 |
+| `dedicated` | 带真实逻辑，必须保留专用入口 | 561 |
 
-**属性通道可直接吸收 352 个入口（占 969 的 36%）。**
+**属性通道可直接吸收 353 个入口（占 971 的 36%）。**
 
 ## 头文件声明了、默认构建里没有
 
