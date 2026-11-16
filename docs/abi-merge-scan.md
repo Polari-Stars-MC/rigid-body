@@ -80,6 +80,46 @@ G 10 + K 4）。
 变体（或在载荷后加 `enabled`）能吸收它们，但那会让向量通道的语义变成"值 + 可选
 开关"，值得单独设计。
 
+## 实施记录
+
+### 第五批（`8b015a6`）：`rigid_body` —— 只有 3 个属性
+
+| 模块 | 扫描估计可合并 | 实际实施 |
+| --- | ---: | ---: |
+| `collider` | 29 | **0**（第三批已全部覆盖） |
+| `rigid_body` | 34 | **3** |
+
+两处都要说明。
+
+**`collider` 是 0**：扫描把 `set_friction` / `set_restitution` /
+`set_rolling_resistance` / `set_contact_force_event_threshold` /
+`set_sensor` / `set_active_events` / `set_active_hooks` /
+`set_collision_groups` / `set_solver_groups` 及其 `_flag` 变体都算成了"未覆盖"，
+但第三、四批其实已经把它们收进通道了。扫描的 `covered` 过滤只匹配精确后缀
+（`_set_param` 等），没意识到一个通道可以吸收多个专用入口。**这是扫描方法的
+一个缺陷，记在这里。**
+
+**`rigid_body` 只有 3 个**：34 个未覆盖 setter 里，绝大多数是 `Vec3 + Bool`
+形态（`add_force` / `apply_impulse` / `set_linvel` / `set_angvel`）或向量型
+位姿设置，不是标量属性。
+
+### 一个「能合并但不该合并」的例子
+
+`rigid_body_set_simulation_domain(world, handle, domain)` 签名完全符合判据
+（实体 + `u32`），但**故意不收**。它的实现要做三件有副作用的事：
+
+1. 拿 `world.inner.query_lock.write()`
+2. 遍历所有 `simulation_domains` 把体从旧域摘除
+3. 目标域在 `inactive_domains` 里时，立刻 `set_enabled(false)` 冻结
+
+**签名符合不等于应该合并。** 通道的价值是消除重复的样板，不是把所有 setter 都
+塞进来——副作用复杂的入口留专用反而更安全。这是判据之外的一层判断。
+
+### `Vec3 + Bool` 为什么单独一档
+
+扫描显示 14 个，是混合签名里最大的一组。它们需要「向量 + 可选开关」的通道，
+而那会让向量通道的语义从"设一个值"变成"设一个值 + 可能顺带唤醒"。这是另一个
+设计，不该顺手塞进 vec3 通道。
 ## 判据的修正
 
 ADR-0016 原来的判据是：
