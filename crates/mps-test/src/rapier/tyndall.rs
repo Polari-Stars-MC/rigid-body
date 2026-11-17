@@ -8,6 +8,7 @@
 //! * 沿视线积分"近光源更亮"
 //! * 可见度在光学厚度 ≈ 1 附近最大
 
+use mps_formula::bessel::Complex;
 use mps_formula::tyndall::{
     MAX_SCATTER_ORDERS, beer_lambert_transmittance, henyey_greenstein_phase, inscatter_along_ray,
     inscatter_along_ray_multiple, mie_efficiencies_complex, mie_extinction_efficiency_exact,
@@ -800,5 +801,52 @@ fn soot_beam_is_dimmer_than_water_beam() {
     assert!(
         l_w > l_s,
         "water beam {l_w} should be brighter than soot {l_s}"
+    );
+}
+/// **`Q_abs` 的解析对照**：小 `x` 时必须等于 `4x·|Im[(m²−1)/(m²+2)]|`。
+///
+/// 这是瑞利极限的吸收公式（电磁学基本结果），独立于米氏级数。
+/// 它同时钉住两件事：
+///
+/// * `Q_abs` 的**绝对标度**（此前只有结构性判据 `>= 0`、`= Q_ext − Q_sca`）
+/// * `Q_abs ∝ x`（线性），与 `Q_sca ∝ x⁴` 形成对比
+#[test]
+fn rayleigh_qabs_matches_the_analytic_formula() {
+    let n = 1.33f64;
+    for kappa in [0.001, 0.01] {
+        let m = Complex::new(n, kappa);
+        let m2 = m * m;
+        let ratio = (m2 - Complex::ONE) / (m2 + Complex::new(2.0, 0.0));
+        let imag = ratio.im.abs();
+
+        for x in [1e-3, 1e-4] {
+            let (_, _, q_abs) = mie_efficiencies_complex(x, n, kappa).unwrap();
+            let expect = 4.0 * x * imag;
+            assert!(
+                (q_abs - expect).abs() / expect < 1e-4,
+                "Q_abs at x={x}, kappa={kappa}: {q_abs} expected {expect}"
+            );
+        }
+    }
+}
+
+/// `Q_abs` 随 `x` **线性**增长，而 `Q_sca` 随 `x⁴` 增长 —— 两条标度必须分离。
+#[test]
+fn absorption_scales_linearly_while_scattering_is_quartic() {
+    let x1 = 1e-3;
+    let x2 = 1e-4;
+    let (_, sca1, abs1) = mie_efficiencies_complex(x1, 1.33, 0.01).unwrap();
+    let (_, sca2, abs2) = mie_efficiencies_complex(x2, 1.33, 0.01).unwrap();
+
+    // x 缩小 10 倍：吸收缩小 10 倍，散射缩小 10⁴ 倍。
+    let abs_ratio = abs1 / abs2;
+    let sca_ratio = sca1 / sca2;
+    assert!(
+        (abs_ratio - 10.0).abs() < 0.01,
+        "Q_abs must scale linearly, ratio {abs_ratio}"
+    );
+    assert!(
+        (sca_ratio - 1e4).abs() / 1e4 < 0.01,
+        "Q_sca must scale as x^4, ratio {sca_ratio}"
     );
 }
