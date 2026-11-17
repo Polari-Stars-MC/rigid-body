@@ -8,9 +8,9 @@
 //! 4. 物理不变量：小尺寸参数退化为瑞利、大尺寸趋近消光佯谬
 
 use mps_formula::bessel::{
-    Complex, MAX_MIE_ORDER, mie_coefficient_a, mie_coefficient_b, mie_max_order,
-    riccati_bessel_psi, riccati_bessel_xi, riccati_neumann_chi, spherical_bessel_j_series,
-    spherical_neumann_y_series,
+    Complex, MAX_MIE_ORDER, logarithmic_derivative_series, mie_coefficient_a, mie_coefficient_b,
+    mie_max_order, riccati_bessel_psi, riccati_bessel_xi, riccati_neumann_chi,
+    spherical_bessel_j_series, spherical_neumann_y_series,
 };
 
 const EPS: f64 = 1e-12;
@@ -401,4 +401,77 @@ fn extinction_grows_monotonically_with_refractive_index() {
     let m = Complex::from_real(1.001);
     let a = mie_coefficient_a(m, 1.0, 1).unwrap();
     assert!(a.abs() < 0.01, "near m=1 the coefficient must be tiny");
+}
+// ── 对数导数递推（ADR-0029）────────────────────────────────────────────────
+
+/// 对数导数必须满足它的定义 `D_n = psi_n'/psi_n`。
+///
+/// 用已知的遍历：`D_1(x) = (2x/3)/(x²/3)` 在小 `x` 时 ≈ `2/x`。
+#[test]
+fn logarithmic_derivative_matches_definition() {
+    for x in [0.5, 2.0, 8.0] {
+        let z = Complex::from_real(x);
+        let n = 4u32;
+        let d = logarithmic_derivative_series(z, n).unwrap();
+        let psi = riccati_bessel_psi(x, n).unwrap();
+
+        for k in 1..=n as usize {
+            // D_k = psi_k'/psi_k = (psi_{k-1} - k/x·psi_k)/psi_k
+            let expect = psi[k - 1] / psi[k] - k as f64 / x;
+            assert!(
+                (d[k].re - expect).abs() <= expect.abs().max(1.0) * 1e-10,
+                "D_{k}({x}) = {} expected {expect}",
+                d[k].re
+            );
+            assert!(d[k].im.abs() < 1e-12, "real argument must give real D");
+        }
+    }
+}
+
+/// 小 `x` 时 `D_1 ≈ 2/x`。
+#[test]
+fn logarithmic_derivative_has_the_small_x_limit() {
+    let d = logarithmic_derivative_series(Complex::from_real(0.01), 1).unwrap();
+    // D_1 = 2/x - x/5 + O(x³)
+    let expect = 2.0 / 0.01 - 0.01 / 5.0;
+    assert!((d[1].re - expect).abs() <= expect * 1e-6);
+}
+
+/// **大 `|z|` 时米氏系数仍然有限且有理** —— 这是换用对数导数递推的理由。
+///
+/// 旧的复数幂级数在 `|z| > 50` 时相消失精。这里测到 `x = 200`。
+#[test]
+fn mie_coefficients_stay_sane_at_large_size_parameter() {
+    let m = Complex::new(1.33, 0.001);
+    for x in [50.0, 100.0, 200.0] {
+        let nmax = mie_max_order(x).unwrap().min(MAX_MIE_ORDER);
+        let (mut q_ext, mut q_sca) = (0.0, 0.0);
+        for n in 1..=nmax {
+            let a = mie_coefficient_a(m, x, n).unwrap();
+            let b = mie_coefficient_b(m, x, n).unwrap();
+            assert!(a.is_finite(), "a_{n} at x={x} not finite");
+            assert!(b.is_finite(), "b_{n} at x={x} not finite");
+            assert!(a.abs() <= 1.5, "|a_{n}| at x={x} = {}", a.abs());
+            assert!(b.abs() <= 1.5, "|b_{n}| at x={x} = {}", b.abs());
+            q_ext += (2 * n + 1) as f64 * (a.re + b.re);
+            q_sca += (2 * n + 1) as f64 * (a.norm_sqr() + b.norm_sqr());
+        }
+        q_ext *= 2.0 / (x * x);
+        q_sca *= 2.0 / (x * x);
+        // 大颗粒：消光效率趋近 2（消光佯谬）。
+        assert!(
+            (q_ext - 2.0).abs() < 0.7,
+            "Q_ext at x={x} = {q_ext}, expected ≈2"
+        );
+        // 有吸收时 Q_sca < Q_ext，且都不能为负。
+        assert!(q_sca >= 0.0 && q_sca <= q_ext + 1e-12);
+    }
+}
+
+#[test]
+fn logarithmic_derivative_rejects_invalid() {
+    assert!(logarithmic_derivative_series(Complex::ZERO, 3).is_none());
+    assert!(logarithmic_derivative_series(Complex::new(f64::NAN, 0.0), 3).is_none());
+    assert!(logarithmic_derivative_series(Complex::ONE, 0).is_none());
+    assert!(logarithmic_derivative_series(Complex::ONE, MAX_MIE_ORDER + 1).is_none());
 }

@@ -678,7 +678,12 @@ fn exact_mie_feeds_the_scattering_pipeline() {
 fn zero_imaginary_part_means_no_absorption() {
     for x in [1.0, 5.0, 10.0] {
         let (q_ext, q_sca, q_abs) = mie_efficiencies_complex(x, 1.33, 0.0).unwrap();
-        assert_eq!(q_abs, 0.0, "x={x}: transparent particles absorb nothing");
+        // 容差而非精确相等：`Q_abs = max(Q_ext - Q_sca, 0)`，两个几乎相等的
+        // 数相减会留下 1e-17 量级的浮点残差。ADR-0027 已说明这是浮点误差。
+        assert!(
+            q_abs <= 1e-12,
+            "x={x}: transparent particles absorb nothing, got {q_abs}"
+        );
         assert!(
             (q_ext - q_sca).abs() <= q_ext * 1e-10,
             "x={x}: optical theorem must hold, {q_ext} vs {q_sca}"

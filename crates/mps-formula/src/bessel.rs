@@ -245,25 +245,73 @@ pub fn mie_max_order(size_parameter: f64) -> Option<u32> {
     Some((raw.ceil() as u32).clamp(1, MAX_MIE_ORDER))
 }
 
+/// 米氏参数 `z` 的**对数导数**序列 `D_n(z) = psi_n'(z)/psi_n(z)`（`n = 0..nmax`）。
+///
+/// ## 为什么这个函数是米氏计算的核心
+///
+/// 直接求 `psi_n(z)` 需要复参数球贝塞尔函数。幂级数在 `|z|` 大时精度急剧
+/// 下降（相消），所以那条路走不远。
+///
+/// 但米氏系数其实只需要 `D_n`，它满足**一阶递推**：
+///
+/// ```text
+/// D_{n-1}(z) = n/z - 1/(D_n(z) + n/z)
+/// ```
+///
+/// 这个递推**向下**（`n` 从大到小）求解时对任何 `|z|` 都数值稳定。起始条件
+/// 利用 `D_N ≈ 0` 当 `N ≫ |z|`。
+///
+/// 参考 Bohren & Huffman §4.5，式 (4.89)。
+///
+/// ## 起始阶的选取
+///
+/// `start = max(nmax, ⌈|z|⌉) + 25`。多出的 25 阶保证向下递推已经收敛；
+/// `⌈|z|⌉` 保证起始阶确实远大于 `|z|`（否则 `D_N ≈ 0` 不成立）。
+///
+/// # Returns
+/// `Some(vec)`（长度 `nmax + 1`）；`z` 为零/非有限时 `None`。
+pub fn logarithmic_derivative_series(z: Complex, nmax: u32) -> Option<Vec<Complex>> {
+    if !z.is_finite() || z.norm_sqr() <= 0.0 || nmax == 0 || nmax > MAX_MIE_ORDER {
+        return None;
+    }
+    let n_use = nmax as usize;
+    let start = (z.abs().ceil() as usize).max(n_use) + 25;
+
+    let mut d = vec![Complex::ZERO; start + 1];
+    // D_start ≈ 0（start ≫ |z|）。
+    for k in (1..=start).rev() {
+        let kz = Complex::from_real(k as f64) / z;
+        let denom = d[k] + kz;
+        if denom.norm_sqr() <= 0.0 {
+            return None;
+        }
+        d[k - 1] = kz - Complex::ONE / denom;
+    }
+    d.truncate(n_use + 1);
+    Some(d)
+}
+
 /// 米氏散射系数 `a_n`（复数）。
 ///
-/// Bohren–Huffman 式 (4.88)：
+/// Bohren–Huffman 式 (4.88) 的对数导数形式：
 ///
 /// ```text
-///        m²·j_n(mx)·[x·j_n(x)]' - j_n(x)·[mx·j_n(mx)]'
-/// a_n = ───────────────────────────────────────────────
-///        m²·j_n(mx)·[x·h_n(x)]' - h_n(x)·[mx·j_n(mx)]'
+///        (D_n(mx)/m + n/x)·psi_n(x) - psi_{n-1}(x)
+/// a_n = ─────────────────────────────────────────────
+///        (D_n(mx)/m + n/x)·xi_n(x)  - xi_{n-1}(x)
 /// ```
 ///
-/// 直接用会溢出。改用 Riccati–Bessel 与对数导数 `D_n` 的等价形式：
+/// `psi_n(x)` / `xi_n(x)` 是**实参数**的 Riccati–Bessel（用 Miller 递推，
+/// 见 [`riccati_bessel_psi`] / [`riccati_bessel_xi`]），`D_n(mx)` 是复参数的
+/// 对数导数（见 [`logarithmic_derivative_series`]）。
 ///
-/// ```text
-///        m²·psi_n(mx)·psi_n'(x) - psi_n(x)·psi_n'(mx)
-/// a_n = ───────────────────────────────────────────────
-///        m²·psi_n(mx)·xi_n'(x) - xi_n(x)·psi_n'(mx)
-/// ```
+/// ## 系数是 `1/m`，不是 `m²`
 ///
-/// 其中 `psi_n'` 用递推 `psi_n'(x) = psi_{n-1}(x) - n/x·psi_n(x)`。
+/// 原始形式用 `m²·j_n(mx)`，但 `j_n(mx) = psi_n(mx)/(mx)`，所以
+/// `m²·j_n(mx) = m·psi_n(mx)/x` —— 与分母共有的 `1/x` 约掉后只剩 `m`，
+/// 而对数导数形式里是 `D_n/m`。
+///
+/// **写成 `m²` 会让瑞利极限偏大 1.52 倍**（`m = 1.33` 时）。见 ADR-0028。
 ///
 /// # Parameters
 /// * `m` 相对复折射率（颗粒/介质）
@@ -274,36 +322,17 @@ pub fn mie_coefficient_a(m: Complex, x: f64, n: u32) -> Option<Complex> {
         return None;
     }
     let mx = m * Complex::from_real(x);
-    let mx_abs = mx.abs();
-    if mx_abs <= 0.0 || !mx_abs.is_finite() {
+    if !mx.is_finite() || mx.norm_sqr() <= 0.0 {
         return None;
     }
+    let k = n as usize;
     let psi_x = riccati_bessel_psi(x, n)?;
     let xi_x = riccati_bessel_xi(x, n)?;
-    let psi_mx = riccati_bessel_psi_complex(mx, n)?;
+    let d = logarithmic_derivative_series(mx, n)?;
 
-    let k = n as usize;
-    let dpsi_x = psi_derivative(&psi_x, x, k)?;
-    let dxi_x = xi_derivative(&xi_x, x, k)?;
-    let dpsi_mx = psi_derivative_complex(&psi_mx, mx, k)?;
-
-    // 系数是 **m**，不是 m²。
-    //
-    // Bohren–Huffman 的原始形式用 `m²·j_n(mx)`，但换算到 Riccati–Bessel 时
-    // 要除掉一个 `mx`：
-    //
-    // ```text
-    // j_n(mx) = psi_n(mx)/(mx)   =>   m²·j_n(mx) = m·psi_n(mx)/x
-    // ```
-    //
-    // 分子分母共有的 `1/x` 约掉后，留下的系数就是 `m`。
-    //
-    // **写成 m² 会让瑞利极限偏大**：小 `x` 展开下 `m²` 版本给出
-    // `a_1 = -i(2/3)x³·(m³-1)/(m³+2)`，正确形式是
-    // `-i(2/3)x³·(m²-1)/(m²+2)`。`m = 1.33` 时两者差 1.5233 倍 ——
-    // 正是长期未查清的那个偏差（ADR-0025/0028）。
-    let num = m * psi_mx[k] * Complex::from_real(dpsi_x) - Complex::from_real(psi_x[k]) * dpsi_mx;
-    let den = m * psi_mx[k] * dxi_x - xi_x[k] * dpsi_mx;
+    let term = d[k] / m + Complex::from_real(n as f64 / x);
+    let num = term * Complex::from_real(psi_x[k]) - Complex::from_real(psi_x[k - 1]);
+    let den = term * xi_x[k] - xi_x[k - 1];
     if den.norm_sqr() <= 0.0 {
         return None;
     }
@@ -313,138 +342,33 @@ pub fn mie_coefficient_a(m: Complex, x: f64, n: u32) -> Option<Complex> {
 /// 米氏散射系数 `b_n`（复数）。
 ///
 /// ```text
-///        m²·psi_n(mx)·psi_n'(x) - psi_n(x)·psi_n'(mx)
-/// b_n = ───────────────────────────────────────────────
-///        m²·psi_n(mx)·xi_n'(x) - xi_n(x)·psi_n'(mx)
+///        (m·D_n(mx) + n/x)·psi_n(x) - psi_{n-1}(x)
+/// b_n = ─────────────────────────────────────────────
+///        (m·D_n(mx) + n/x)·xi_n(x)  - xi_{n-1}(x)
 /// ```
 ///
-/// 与 `a_n` 只差一个 `m²` 的位置 —— 实际上 `b_n` 的分子里 `m²` 只乘第一项。
-/// 具体形式见 Bohren–Huffman 式 (4.89)。
+/// 与 [`mie_coefficient_a`] 的唯一区别：`D_n/m` 换成 `m·D_n`。
+///
+/// **不是完全去掉 `m`** —— 去掉会让 `b_1` 从 `O(x⁵)` 错误地泄漏到 `O(x³)`，
+/// 表现为 `|b_1|/|a_1| ≈ 0.32` 而非应有的 `~x²`（见 ADR-0028）。
 pub fn mie_coefficient_b(m: Complex, x: f64, n: u32) -> Option<Complex> {
     if !m.is_finite() || !x.is_finite() || x <= 0.0 || n == 0 || n > MAX_MIE_ORDER {
         return None;
     }
     let mx = m * Complex::from_real(x);
-    let mx_abs = mx.abs();
-    if mx_abs <= 0.0 || !mx_abs.is_finite() {
+    if !mx.is_finite() || mx.norm_sqr() <= 0.0 {
         return None;
     }
+    let k = n as usize;
     let psi_x = riccati_bessel_psi(x, n)?;
     let xi_x = riccati_bessel_xi(x, n)?;
-    let psi_mx = riccati_bessel_psi_complex(mx, n)?;
+    let d = logarithmic_derivative_series(mx, n)?;
 
-    let k = n as usize;
-    let dpsi_x = psi_derivative(&psi_x, x, k)?;
-    let dxi_x = xi_derivative(&xi_x, x, k)?;
-    let dpsi_mx = psi_derivative_complex(&psi_mx, mx, k)?;
-
-    // b_n 与 a_n 的唯一区别：`m` 换成 `1/m`。
-    //
-    // Bohren–Huffman (4.89) 的原始形式里，b_n 的分子第一项是 `j_n(mx)·[x·j_n(x)]'`
-    //（没有 m²），换算到 Riccati–Bessel 后变成 `psi_n(mx)/(mx) · psi_n'(x)`。
-    // 分子分母同乘 `mx` 后留下的系数是 `1/m`。
-    //
-    // 写成 `1`（完全不带 m）会让 `b_1` 错误地泄漏到 `O(x³)` 量级（正确是 `O(x⁵)`），
-    // 实测 `|b_1|/|a_1| = 0.32` 而非应有的 `~x² ≈ 1e-4` —— 正是这个 bug。
-    let inv_m = Complex::ONE / m;
-    let num_b =
-        inv_m * psi_mx[k] * Complex::from_real(dpsi_x) - Complex::from_real(psi_x[k]) * dpsi_mx;
-    let den_b = inv_m * psi_mx[k] * dxi_x - xi_x[k] * dpsi_mx;
-    if den_b.norm_sqr() <= 0.0 {
+    let term = m * d[k] + Complex::from_real(n as f64 / x);
+    let num = term * Complex::from_real(psi_x[k]) - Complex::from_real(psi_x[k - 1]);
+    let den = term * xi_x[k] - xi_x[k - 1];
+    if den.norm_sqr() <= 0.0 {
         return None;
     }
-    Some(num_b / den_b)
-}
-
-/// `psi_n'(x) = psi_{n-1}(x) - n/x·psi_n(x)`（实数序列）。
-fn psi_derivative(psi: &[f64], x: f64, n: usize) -> Option<f64> {
-    if n == 0 || n >= psi.len() {
-        return None;
-    }
-    Some(psi[n - 1] - n as f64 / x * psi[n])
-}
-
-/// `xi_n'(x) = xi_{n-1}(x) - n/x·xi_n(x)`（复数序列）。
-fn xi_derivative(xi: &[Complex], x: f64, n: usize) -> Option<Complex> {
-    if n == 0 || n >= xi.len() {
-        return None;
-    }
-    Some(xi[n - 1] - xi[n] * Complex::from_real(n as f64 / x))
-}
-
-/// `psi_n'(mx)`（复数序列，`mx` 是复数）。
-fn psi_derivative_complex(psi: &[Complex], mx: Complex, n: usize) -> Option<Complex> {
-    if n == 0 || n >= psi.len() {
-        return None;
-    }
-    Some(psi[n - 1] - psi[n] * Complex::from_real(n as f64) / mx)
-}
-
-/// 复数参数的 `psi_n(z) = z·j_n(z)`。
-///
-/// 复参数不能直接用实数 Miller 递推。这里用**幂级数**展开（`|z|` 不大时收敛快）：
-///
-/// ```text
-/// j_n(z) = z^n / (2n+1)!! · Σ_{k=0}^∞ (-z²/2)^k · (2n+1)!! / (2k)!!(2n+2k+1)!!
-/// ```
-///
-/// 对米氏散射，`|mx|` 通常在 `0.1~100` 量级，级数需要几十项。这里截断到
-/// 收敛（相邻项相对变化 < 1e-15）或 200 项。
-///
-/// **这是本模块最脆弱的部分**：大 `|z|` 时幂级数会抵消失精。米氏散射的常见
-/// 参数范围内（`x < 50`）够用；更大尺寸参数需要更好的算法（比如连分式）。
-fn spherical_bessel_j_complex(z: Complex, n: u32) -> Option<Complex> {
-    if !z.is_finite() || n > MAX_MIE_ORDER {
-        return None;
-    }
-    let nn = n as f64;
-    // 球贝塞尔 j_n(z) 的幂级数首项是 z^n / (2n+1)!!，其中
-    //   (2n+1)!! = 1·3·5···(2n+1)   —— 共 n+1 个因子。
-    //
-    // 注意这里容易写错：循环 `while k < n` 得到的是 (2n-1)!!（n 个因子），
-    // 少乘一个 (2n+1)。差这一个因子会让 a_1 在瑞利极限下偏大 3 倍
-    // （x=0.01 时实测 6.67e-7 而非 1.36e-7 —— 正是这个 bug）。
-    let mut double_fact = 1.0f64;
-    let mut k = 0.0f64;
-    while k <= nn {
-        double_fact *= 2.0 * k + 1.0;
-        k += 1.0;
-    }
-    // 首项：z^n / (2n+1)!!
-    let mut z_pow = Complex::ONE;
-    for _ in 0..n {
-        z_pow = z_pow * z;
-    }
-    let first = z_pow / Complex::from_real(double_fact);
-
-    let z2 = z * z;
-    let mut term = first;
-    let mut sum = first;
-    // 递推比：term_{k+1}/term_k = -z² / (2(k+1)(2n+2k+3))
-    for i in 0..200 {
-        let kf = i as f64;
-        let denom = 2.0 * (kf + 1.0) * (2.0 * nn + 2.0 * kf + 3.0);
-        term = term * (-z2) / Complex::from_real(denom);
-        let before = sum.norm_sqr();
-        sum = sum + term;
-        if !sum.is_finite() {
-            return None;
-        }
-        // 收敛判据：增量相对总量足够小。
-        if term.norm_sqr() <= before * 1e-30 {
-            break;
-        }
-    }
-    Some(sum)
-}
-
-/// 复数参数的 `psi_n(z) = z·j_n(z)`。
-fn riccati_bessel_psi_complex(z: Complex, n: u32) -> Option<Vec<Complex>> {
-    // 需要 psi_0..psi_n，逐个算（级数各自独立，不能递推）。
-    let mut out = Vec::with_capacity(n as usize + 1);
-    for k in 0..=n {
-        let j = spherical_bessel_j_complex(z, k)?;
-        out.push(z * j);
-    }
-    Some(out)
+    Some(num / den)
 }
