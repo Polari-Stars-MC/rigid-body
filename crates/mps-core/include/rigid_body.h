@@ -11440,6 +11440,29 @@ struct Bool tyndall_single_scattering_albedo_complex(double size_param,
                                                      double refractive_index_imag,
                                                      double *out);
 
+/**
+ * 由精确米氏散射算出三通道光谱光学参数（ADR-0030）。
+ *
+ * 输入是**材料参数**（直径、复折射率、密度），输出六通道截面。
+ * 与 `tyndall_spectral_optics_from_monochrome` 的区别：那里需要手调波长指数，
+ * 这里逐通道解米氏方程，自动包含米氏区的振荡结构。
+ *
+ * 六个 `out_*` 指针**全部成功才写**。
+ *
+ * # Safety
+ * 六个输出指针必须可写。
+ */
+struct Bool tyndall_spectral_optics_from_mie(double diameter,
+                                             double refractive_index_real,
+                                             double refractive_index_imag,
+                                             double density,
+                                             double *out_sca_r,
+                                             double *out_sca_g,
+                                             double *out_sca_b,
+                                             double *out_ext_r,
+                                             double *out_ext_g,
+                                             double *out_ext_b);
+
 struct Bool material_mechanics_hookes_law_uniaxial(double stress,
                                                    double youngs_modulus,
                                                    double *out);

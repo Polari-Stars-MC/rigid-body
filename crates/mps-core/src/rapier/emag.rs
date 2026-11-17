@@ -718,3 +718,71 @@ pub extern "C" fn tyndall_single_scattering_albedo_complex(
         )
     })
 }
+/// 由精确米氏散射算出三通道光谱光学参数（ADR-0030）。
+///
+/// 输入是**材料参数**（直径、复折射率、密度），输出六通道截面。
+/// 与 `tyndall_spectral_optics_from_monochrome` 的区别：那里需要手调波长指数，
+/// 这里逐通道解米氏方程，自动包含米氏区的振荡结构。
+///
+/// 六个 `out_*` 指针**全部成功才写**。
+///
+/// # Safety
+/// 六个输出指针必须可写。
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub extern "C" fn tyndall_spectral_optics_from_mie(
+    diameter: f64,
+    refractive_index_real: f64,
+    refractive_index_imag: f64,
+    density: f64,
+    out_sca_r: *mut f64,
+    out_sca_g: *mut f64,
+    out_sca_b: *mut f64,
+    out_ext_r: *mut f64,
+    out_ext_g: *mut f64,
+    out_ext_b: *mut f64,
+) -> Bool {
+    if out_sca_r.is_null()
+        || out_sca_g.is_null()
+        || out_sca_b.is_null()
+        || out_ext_r.is_null()
+        || out_ext_g.is_null()
+        || out_ext_b.is_null()
+    {
+        set_error(
+            ERR_NULL_POINTER,
+            "tyndall_spectral_optics_from_mie: out is null",
+        );
+        return Bool::FALSE;
+    }
+    ffi_guard(
+        Bool::FALSE,
+        || match mps_formula::tyndall_spectral::SpectralOptics::from_mie(
+            diameter,
+            refractive_index_real,
+            refractive_index_imag,
+            density,
+        ) {
+            Some(o) => {
+                unsafe {
+                    *out_sca_r = o.sigma_sca_r;
+                    *out_sca_g = o.sigma_sca_g;
+                    *out_sca_b = o.sigma_sca_b;
+                    *out_ext_r = o.sigma_ext_r;
+                    *out_ext_g = o.sigma_ext_g;
+                    *out_ext_b = o.sigma_ext_b;
+                }
+                clear_error();
+                Bool::TRUE
+            }
+            None => {
+                set_error(
+                    ERR_INVALID_ARGUMENT,
+                    "tyndall_spectral_optics_from_mie: invalid arguments (diameter > 0, \
+                     n > 0, kappa >= 0, density > 0)",
+                );
+                Bool::FALSE
+            }
+        },
+    )
+}

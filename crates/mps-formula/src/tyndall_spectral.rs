@@ -172,6 +172,108 @@ pub const GREEN_NM: f64 = 550.0;
 /// 蓝通道中心波长（nm）。
 pub const BLUE_NM: f64 = 450.0;
 
+impl SpectralOptics {
+    /// 由**精确米氏散射**+ 材料参数直接算出三通道截面（ADR-0030）。
+    ///
+    /// 这是 [`SpectralOptics::from_monochrome`] 的物理版本。区别：
+    ///
+    /// | | `from_monochrome` | `from_mie`（本函数） |
+    /// | --- | --- | --- |
+    /// | 波长依赖 | 幂律拟合 `σ ∝ λ^(-n)` | **逐通道精确米氏解** |
+    /// | 需要输入 | 手调的 `exponent` | 颗粒直径 + 复折射率 + 密度 |
+    /// | 物理来源 | 无（拟合） | Clausius–Mossotti / 米氏级数 |
+    ///
+    /// ## 计算链
+    ///
+    /// ```text
+    /// 直径 d、折射率 (n, κ)、密度 ρ
+    ///   ↓ x = π·d/λ            每个通道各自的尺寸参数
+    ///   ↓ 精确米氏              Q_sca(λ), Q_ext(λ)
+    ///   ↓ × 几何截面 πd²/4     σ_sca(λ), σ_ext(λ)
+    ///   ↓ 质量 = ρ·πd³/6
+    /// SpectralOptics
+    /// ```
+    ///
+    /// ## 为什么这比幂律拟合好
+    ///
+    /// 幂律 `σ ∝ λ^(-n)` 只在**瑞利区**（`x ≪ 1`）严格成立，那里 `n = 4`。
+    /// 米氏区（`x ~ 1`）的波长依赖不是幂律 —— 有振荡（干涉结构），
+    /// 用单一 `n` 拟合只能近似。
+    ///
+    /// 本函数逐通道解米氏方程，**自动包含振荡结构**。
+    ///
+    /// # Parameters
+    /// * `diameter` 颗粒直径（m）
+    /// * `refractive_index_real` 实部 `n`（水滴 1.33、矿物 1.5~1.6、烟灰 1.5~2.0）
+    /// * `refractive_index_imag` 虚部 `κ`（0 = 透明，烟灰 0.1~0.8）
+    /// * `density` 颗粒密度（kg/m³，水 1000、石英 2650、烟灰 ~1800）
+    ///
+    /// # Returns
+    /// `Some(SpectralOptics)`；参数非法或任一通道的米氏级数失败时 `None`。
+    pub fn from_mie(
+        diameter: f64,
+        refractive_index_real: f64,
+        refractive_index_imag: f64,
+        density: f64,
+    ) -> Option<Self> {
+        if !diameter.is_finite()
+            || !refractive_index_real.is_finite()
+            || !refractive_index_imag.is_finite()
+            || !density.is_finite()
+        {
+            return None;
+        }
+        if diameter <= 0.0
+            || refractive_index_real <= 0.0
+            || refractive_index_imag < 0.0
+            || density <= 0.0
+        {
+            return None;
+        }
+        let radius = diameter * 0.5;
+        // 几何截面 πr²。
+        let geom = core::f64::consts::PI * radius * radius;
+
+        let channel = |lambda_nm: f64| {
+            let lambda = lambda_nm * 1e-9;
+            let x = core::f64::consts::PI * diameter / lambda;
+            let (q_ext, q_sca, _) = crate::tyndall::mie_efficiencies_complex(
+                x,
+                refractive_index_real,
+                refractive_index_imag,
+            )?;
+            // 钳住 `sigma_ext >= sigma_sca`：透明颗粒时两者在数学上相等，
+            // 但浮点减法可能让 `q_sca` 略大于 `q_ext`（1e-17 量级）。
+            // 不钳的话 `is_valid()` 会随机拒绝合法输入。
+            let sca = (q_sca * geom).max(0.0);
+            let ext = (q_ext * geom).max(sca);
+            Some((sca, ext))
+        };
+        let (sr, er) = channel(RED_NM)?;
+        let (sg, eg) = channel(GREEN_NM)?;
+        let (sb, eb) = channel(BLUE_NM)?;
+
+        // 质量 = ρ·(4/3)πr³ = ρ·πd³/6
+        let mass = density * core::f64::consts::PI * diameter.powi(3) / 6.0;
+        if mass <= 0.0 || !mass.is_finite() {
+            return None;
+        }
+        let optics = Self {
+            sigma_sca_r: sr,
+            sigma_sca_g: sg,
+            sigma_sca_b: sb,
+            sigma_ext_r: er,
+            sigma_ext_g: eg,
+            sigma_ext_b: eb,
+            mass,
+        };
+        if optics.is_valid() {
+            Some(optics)
+        } else {
+            None
+        }
+    }
+}
 /// RGB 三通道亮度。
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SpectralLuminance {

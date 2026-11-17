@@ -738,3 +738,162 @@ fn full_increases_with_order() {
     .unwrap();
     assert!(l4.luminance() > l1.luminance());
 }
+// ── 由精确米氏算光谱（ADR-0030）────────────────────────────────────────────
+
+/// 小颗粒（瑞利区）应**强烈偏蓝**：`σ_sca(蓝) ≫ σ_sca(红)`。
+///
+/// 10 nm 水滴，`x = πd/λ ≈ 0.057`（蓝端）到 `0.048`（红端），深在瑞利区。
+/// 理论上 `σ ∝ λ⁻⁴`，所以蓝/红比应接近 `(650/450)⁴ ≈ 4.35`。
+#[test]
+fn tiny_particles_scatter_blue_far_more_than_red() {
+    let o = SpectralOptics::from_mie(10e-9, 1.33, 0.0, 1000.0).unwrap();
+    assert!(o.is_valid());
+    let ratio = o.sigma_sca_b / o.sigma_sca_r;
+    let expect = (RED_NM / BLUE_NM).powi(4);
+    assert!(
+        (ratio - expect).abs() / expect < 0.15,
+        "rayleigh ratio {ratio} should be near {expect}"
+    );
+    assert!(o.sigma_sca_b > o.sigma_sca_g && o.sigma_sca_g > o.sigma_sca_r);
+}
+
+/// 大颗粒（米氏/几何区）的通道差异应**远小于**瑞利区。
+///
+/// 5 µm 水滴，`x ≈ 28`（蓝端）到 `24`（红端），已进入几何光学区。
+/// 此时 `Q → 2`，三通道趋于一致（颜色近中性）。
+#[test]
+fn large_particles_are_nearly_colour_neutral() {
+    let o = SpectralOptics::from_mie(5e-6, 1.33, 0.0, 1000.0).unwrap();
+    let ratio = o.sigma_sca_b / o.sigma_sca_r;
+    // 与瑞利区的 4.35 相比，这里应接近 1。
+    assert!(
+        (ratio - 1.0).abs() < 0.35,
+        "large particles should be near-neutral, got {ratio}"
+    );
+}
+
+/// 透明颗粒的 `σ_ext == σ_sca`（无吸收）。
+#[test]
+fn transparent_particles_have_no_absorption() {
+    let o = SpectralOptics::from_mie(1e-6, 1.33, 0.0, 1000.0).unwrap();
+    for (s, e) in [
+        (o.sigma_sca_r, o.sigma_ext_r),
+        (o.sigma_sca_g, o.sigma_ext_g),
+        (o.sigma_sca_b, o.sigma_ext_b),
+    ] {
+        assert!((e - s).abs() <= s * 1e-10, "sigma_ext {e} != sigma_sca {s}");
+    }
+}
+
+/// 吸光颗粒的 `σ_ext > σ_sca`，且蓝端吸收更强（烟灰的特征）。
+#[test]
+fn absorbing_particles_lose_blue_light() {
+    let clean = SpectralOptics::from_mie(1e-6, 1.5, 0.0, 1800.0).unwrap();
+    let soot = SpectralOptics::from_mie(1e-6, 1.5, 0.3, 1800.0).unwrap();
+
+    // 烟灰的消光更大（吸收贡献）。
+    assert!(soot.sigma_ext_b > clean.sigma_ext_b);
+
+    // 烟灰的反照率低于透明颗粒。
+    let albedo = |o: &SpectralOptics| spectral_albedo(*o).unwrap();
+    let a_clean = albedo(&clean);
+    let a_soot = albedo(&soot);
+    assert!(
+        a_soot.g < a_clean.g,
+        "soot albedo {} should be below clean {}",
+        a_soot.g,
+        a_clean.g
+    );
+}
+
+/// 质量与几何一致：`ρ·πd³/6`。
+#[test]
+fn mass_follows_the_sphere_formula() {
+    let d = 1e-6;
+    let rho = 2650.0;
+    let o = SpectralOptics::from_mie(d, 1.5, 0.0, rho).unwrap();
+    let expect = rho * std::f64::consts::PI * d.powi(3) / 6.0;
+    assert!((o.mass - expect).abs() / expect < 1e-12);
+}
+
+/// 截面必须非负，且 `σ_ext >= σ_sca`（结构约束）。
+#[test]
+fn from_mie_respects_the_structural_constraints() {
+    for (d, kappa) in [(10e-9, 0.0), (1e-6, 0.0), (1e-6, 0.5), (10e-6, 0.1)] {
+        let o = SpectralOptics::from_mie(d, 1.5, kappa, 2000.0).unwrap();
+        assert!(o.sigma_sca_r >= 0.0 && o.sigma_sca_g >= 0.0 && o.sigma_sca_b >= 0.0);
+        assert!(o.sigma_ext_r >= o.sigma_sca_r);
+        assert!(o.sigma_ext_g >= o.sigma_sca_g);
+        assert!(o.sigma_ext_b >= o.sigma_sca_b);
+    }
+}
+
+/// 与幂律拟合的关系：瑞利区拟合出的指数应接近 4。
+///
+/// 用 `from_mie` 得到三点，再反解 `σ ∝ λ^(-n)` 的指数。
+#[test]
+fn rayleigh_regime_recovers_the_power_law_exponent() {
+    let o = SpectralOptics::from_mie(10e-9, 1.33, 0.0, 1000.0).unwrap();
+    // n = ln(σ_r/σ_b) / ln(λ_b/λ_r)
+    let n = (o.sigma_sca_r / o.sigma_sca_b).ln() / ((BLUE_NM * 1e-9) / (RED_NM * 1e-9)).ln();
+    assert!(
+        (n - 4.0).abs() < 0.5,
+        "rayleigh exponent should be ≈4, got {n}"
+    );
+}
+
+#[test]
+fn from_mie_rejects_invalid() {
+    assert!(SpectralOptics::from_mie(0.0, 1.33, 0.0, 1000.0).is_none());
+    assert!(SpectralOptics::from_mie(-1e-6, 1.33, 0.0, 1000.0).is_none());
+    assert!(SpectralOptics::from_mie(1e-6, 0.0, 0.0, 1000.0).is_none());
+    assert!(SpectralOptics::from_mie(1e-6, 1.33, -0.1, 1000.0).is_none());
+    assert!(SpectralOptics::from_mie(1e-6, 1.33, 0.0, 0.0).is_none());
+    assert!(SpectralOptics::from_mie(f64::NAN, 1.33, 0.0, 1000.0).is_none());
+}
+
+/// 端到端：水滴烟雾的光柱应接近中性，烟灰烟雾的光柱应偏暗且偏红。
+#[test]
+fn water_and_soot_beams_differ_as_expected() {
+    let water = SpectralOptics::from_mie(1e-6, 1.33, 0.0, 1000.0).unwrap();
+    let soot = SpectralOptics::from_mie(60e-9, 1.75, 0.5, 1800.0).unwrap();
+    let white = SpectralLuminance {
+        r: 1.0,
+        g: 1.0,
+        b: 1.0,
+    };
+
+    let lw = inscatter_spectral_through_particles(
+        &[[0.0, 0.0, 0.0], [0.1, 0.0, 0.0], [0.2, 0.0, 0.0]],
+        water,
+        [-0.5, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+        2.0,
+        0.8,
+        1.0,
+        white,
+        64,
+    )
+    .unwrap();
+    let ls = inscatter_spectral_through_particles(
+        &[[0.0, 0.0, 0.0], [0.1, 0.0, 0.0], [0.2, 0.0, 0.0]],
+        soot,
+        [-0.5, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+        2.0,
+        0.8,
+        1.0,
+        white,
+        64,
+    )
+    .unwrap();
+
+    assert!(lw.luminance() > 0.0 && ls.luminance() > 0.0);
+    // 烟灰的散射弱得多（大量吸收）。
+    assert!(
+        ls.luminance() < lw.luminance(),
+        "soot beam {} should be dimmer than water {}",
+        ls.luminance(),
+        lw.luminance()
+    );
+}
