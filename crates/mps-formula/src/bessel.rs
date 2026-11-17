@@ -122,7 +122,7 @@ impl core::ops::Neg for Complex {
 }
 
 /// 米氏计算的阶数上限（防止病态参数下无限循环）。
-pub const MAX_MIE_ORDER: u32 = 200;
+pub const MAX_MIE_ORDER: u32 = 2000;
 
 /// 用 Miller 向下递推计算球贝塞尔函数 `j_n(x)`（`x > 0`，实数参数）。
 ///
@@ -144,8 +144,9 @@ pub fn spherical_bessel_j_series(x: f64, n: u32) -> Option<Vec<f64>> {
         return None;
     }
     let nmax = n as usize;
-    // 递推起点：比需要的阶高一些，保证收敛。
-    let start = nmax + 20 + (x as usize).min(200);
+    // 递推起点必须越过转折点 n = x：j_n(x) 在 n < x 时振荡，n > x 时指数衰减。
+    // Miller 算法只在衰减区起点有效，所以取 max(n + 20, ceil(x) + 30)。
+    let start = (nmax + 20).max((x.ceil() as usize) + 30);
 
     let mut j = vec![0.0f64; start + 2];
     // 任意起点（Miller）：j[start] = 0, j[start-1] = 1e-30（避免全零）。
@@ -371,4 +372,85 @@ pub fn mie_coefficient_b(m: Complex, x: f64, n: u32) -> Option<Complex> {
         return None;
     }
     Some(num / den)
+}
+
+/// 一次性算出 `1..=nmax` 全部阶的米氏系数 `a_n` / `b_n`。
+///
+/// ## 为什么需要批量版
+///
+/// [`mie_coefficient_a`] / [`mie_coefficient_b`] 每次调用都重新算
+/// `psi_n(x)` / `xi_n(x)` 的整个 Miller 递推 —— 那是 `O(start)` 的开销。
+/// 循环调用 `n = 1..=nmax` 就变成 `O(nmax²)`。
+///
+/// 本函数把三个级数（`psi`、`xi`、`D_n`）各算**一次**，然后只做 `O(nmax)`
+/// 的组装。总复杂度 `O(nmax)`。
+///
+/// 对 `x = 10`（`nmax = 21`）差别很小；对 `x = 1000`（`nmax ≈ 1040`）
+/// 是 **1000 倍**的差距 —— 这是放开 `x > 200` 上限的前提。
+///
+/// # Returns
+/// `Some((a, b))`，两个 `Vec` 的长度都是 `nmax + 1`，索引 `0` 元素未使用（填零）。
+pub fn mie_coefficients_series(
+    m: Complex,
+    x: f64,
+    nmax: u32,
+) -> Option<(Vec<Complex>, Vec<Complex>)> {
+    if !m.is_finite() || !x.is_finite() || x <= 0.0 || nmax == 0 || nmax > MAX_MIE_ORDER {
+        return None;
+    }
+    let mx = m * Complex::from_real(x);
+    if !mx.is_finite() || mx.norm_sqr() <= 0.0 {
+        return None;
+    }
+    // 三个级数各算一次。
+    let psi_x = riccati_bessel_psi(x, nmax)?;
+    let xi_x = riccati_bessel_xi(x, nmax)?;
+    let d = logarithmic_derivative_series(mx, nmax)?;
+
+    let n_use = nmax as usize;
+    let mut a = vec![Complex::ZERO; n_use + 1];
+    let mut b = vec![Complex::ZERO; n_use + 1];
+    for n in 1..=n_use {
+        let nx = Complex::from_real(n as f64 / x);
+        // a_n: D_n/m + n/x
+        let ta = d[n] / m + nx;
+        let num_a = ta * Complex::from_real(psi_x[n]) - Complex::from_real(psi_x[n - 1]);
+        let den_a = ta * xi_x[n] - xi_x[n - 1];
+        if den_a.norm_sqr() <= 0.0 {
+            return None;
+        }
+        a[n] = num_a / den_a;
+
+        // b_n: m·D_n + n/x
+        let tb = m * d[n] + nx;
+        let num_b = tb * Complex::from_real(psi_x[n]) - Complex::from_real(psi_x[n - 1]);
+        let den_b = tb * xi_x[n] - xi_x[n - 1];
+        if den_b.norm_sqr() <= 0.0 {
+            return None;
+        }
+        b[n] = num_b / den_b;
+    }
+    Some((a, b))
+}
+
+/// 批量版的 `(Q_ext, Q_sca, Q_abs)`。
+///
+/// 与逐个调用 [`mie_coefficient_a`] / [`mie_coefficient_b`] 等价，但复杂度是
+/// `O(nmax)` 而非 `O(nmax²)`。
+pub fn mie_efficiencies_series(m: Complex, x: f64) -> Option<(f64, f64, f64)> {
+    let nmax = mie_max_order(x)?;
+    let (a, b) = mie_coefficients_series(m, x, nmax)?;
+    let (mut sum_ext, mut sum_sca) = (0.0, 0.0);
+    for n in 1..=nmax as usize {
+        let w = (2 * n + 1) as f64;
+        sum_ext += w * (a[n].re + b[n].re);
+        sum_sca += w * (a[n].norm_sqr() + b[n].norm_sqr());
+    }
+    let factor = 2.0 / (x * x);
+    let q_ext = factor * sum_ext;
+    let q_sca = factor * sum_sca;
+    if !q_ext.is_finite() || !q_sca.is_finite() {
+        return None;
+    }
+    Some((q_ext.max(0.0), q_sca.max(0.0), (q_ext - q_sca).max(0.0)))
 }

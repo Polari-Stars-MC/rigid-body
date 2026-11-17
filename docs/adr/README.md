@@ -36,5 +36,8 @@
 | [0028](0028-mie-normalisation-fix.md) | 米氏系数归一化修复（`m²` 应为 `m`，1.52 倍偏差结案） | 接受 |
 | [0029](0029-logarithmic-derivative.md) | 对数导数递推替代复数幂级数（`x` 上界 50 → 200+） | 接受 |
 | [0030](0030-spectral-from-mie.md) | 由精确米氏算光谱参数（去掉最后一个幂律拟合） | 接受 |
+| [0031](0031-mie-order-and-batch.md) | 放开尺寸参数上限与批量米氏求解（`x` 上界 190 → 1900） | 接受 |
+| [0032](0032-cie-weighted-integration.md) | CIE 加权积分替代三离散波长（连续光谱 → RGB） | 接受 |
+| [0033](0033-per-step-exact-integration.md) | 每步解析积分替代中点法（修厚介质下溢归零） | 接受 |
 
 仓库根的 [DESIGN.md](../../DESIGN.md) 和 [OPTIMIZATION.md](../../OPTIMIZATION.md) 是被源码注释引用的章节索引，不是 ADR 的前身。它们的 `§` 编号继续留在原地。

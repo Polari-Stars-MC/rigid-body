@@ -850,3 +850,138 @@ fn absorption_scales_linearly_while_scattering_is_quartic() {
         "Q_sca must scale as x^4, ratio {sca_ratio}"
     );
 }
+/// **大尺寸参数**：`x` 到 1000 时消光效率仍收敛到 2（消光佯谬）。
+///
+/// 这条测试钉住 ADR-0031 的两件事：
+///
+/// 1. `MAX_MIE_ORDER` 从 200 放到 2000，`x ≤ ~1900` 可用
+/// 2. 批量求解把复杂度从 `O(nmax²)` 降到 `O(nmax)` —— 否则 `x = 1000` 要几秒
+#[test]
+fn extinction_paradox_holds_up_to_x_1000() {
+    let mut prev = f64::INFINITY;
+    for x in [200.0, 500.0, 1000.0] {
+        let (q_ext, q_sca, q_abs) = mie_efficiencies_complex(x, 1.33, 0.001).unwrap();
+        assert!(q_ext.is_finite() && q_ext > 0.0);
+        assert!(
+            (q_ext - 2.0).abs() < 0.1,
+            "Q_ext at x={x} = {q_ext}, expected ≈2"
+        );
+        assert!(q_sca >= 0.0 && q_abs >= 0.0);
+        assert!((q_sca + q_abs - q_ext).abs() < 1e-9);
+        // 收敛趋势：x 越大越接近 2。
+        assert!(q_ext < prev, "Q_ext must approach 2 from above at x={x}");
+        prev = q_ext;
+    }
+}
+
+/// 批量求解与逐个求解必须给出**相同**结果（同算法，只是缓存了级数）。
+#[test]
+fn series_solver_matches_single_order_calls() {
+    use mps_formula::bessel::mie_coefficients_series;
+    use mps_formula::bessel::{Complex, mie_coefficient_a, mie_coefficient_b};
+
+    for x in [0.5, 5.0, 30.0] {
+        let m = Complex::new(1.33, 0.01);
+        let nmax = mps_formula::bessel::mie_max_order(x).unwrap();
+        let (a, b) = mie_coefficients_series(m, x, nmax).unwrap();
+        for n in 1..=nmax.min(8) as usize {
+            let sa = mie_coefficient_a(m, x, n as u32).unwrap();
+            let sb = mie_coefficient_b(m, x, n as u32).unwrap();
+            assert!(
+                (a[n].re - sa.re).abs() < 1e-12 && (a[n].im - sa.im).abs() < 1e-12,
+                "a_{n} at x={x}: {:?} vs {:?}",
+                a[n],
+                sa
+            );
+            assert!(
+                (b[n].re - sb.re).abs() < 1e-12 && (b[n].im - sb.im).abs() < 1e-12,
+                "b_{n} at x={x}: {:?} vs {:?}",
+                b[n],
+                sb
+            );
+        }
+    }
+}
+
+/// 批量求解在大 `x` 时**必须快**：这是放开上限的实际前提。
+///
+/// 阈值取 50 ms（宽松）。`O(nmax²)` 的实现会需要数秒。
+#[test]
+fn series_solver_is_fast_at_large_size_parameter() {
+    let t0 = std::time::Instant::now();
+    let _ = mie_efficiencies_complex(1000.0, 1.33, 0.001).unwrap();
+    let dt = t0.elapsed();
+    assert!(
+        dt.as_millis() < 50,
+        "x=1000 took {dt:?}, batch solver should be sub-50ms"
+    );
+}
+// ── 每步解析积分（ADR-0033）────────────────────────────────────────────────
+
+/// 光学薄介质：`L → σ_sca·n·p·I·length`（解析式）。
+#[test]
+fn thin_medium_matches_the_analytic_formula() {
+    let (ss, se, n, len) = (1e-3, 2e-3, 1.0, 10.0);
+    let l = inscatter_along_ray(ss, se, n, 1.0, 1.0, len, 64).unwrap();
+    let expect = ss * n * len; // τ ≈ 0.02，几乎无衰减
+    assert!(
+        (l - expect).abs() / expect < 0.02,
+        "thin medium L = {l}, expected ≈{expect}"
+    );
+}
+
+/// 极厚介质必须**饱和到反照率**，不能归零。
+///
+/// 这是回归测试：旧的中点法在 `τ_step > 700` 时 `exp(−τ_step)` 下溢，
+/// `sqrt(0) = 0`，整条视线亮度被静默算成 0。
+#[test]
+fn extremely_thick_medium_saturates_at_albedo() {
+    // τ = σ_ext·n·L = 2e-3 · 1e13 · 10 = 2e11 —— 远超任何中点步长能表示的范围。
+    let (ss, se) = (1e-3, 2e-3);
+    let l = inscatter_along_ray(ss, se, 1e13, 1.0, 1.0, 10.0, 64).unwrap();
+    let albedo = ss / se; // = 0.5
+    assert!(
+        (l - albedo).abs() / albedo < 0.01,
+        "thick medium must saturate at albedo {albedo}, got {l}"
+    );
+    assert!(l > 0.0, "must never silently collapse to zero");
+}
+
+/// 亮度随光学厚度**单调不减**，且从薄区连续过渡到饱和。
+#[test]
+fn brightness_grows_monotonically_with_thickness() {
+    let (ss, se) = (1e-3, 2e-3);
+    let mut prev = -1.0;
+    for n in [1e0f64, 1e2, 1e4, 1e6, 1e8, 1e10, 1e12] {
+        let l = inscatter_along_ray(ss, se, n, 1.0, 1.0, 10.0, 256).unwrap();
+        assert!(
+            l >= prev - 1e-12,
+            "brightness must not decrease: n={n} gave {l}, previous {prev}"
+        );
+        prev = l;
+    }
+    // 最终饱和在反照率附近。
+    assert!((prev - 0.5).abs() < 0.02, "saturated value {prev}");
+}
+
+/// 纯吸收介质（`σ_sca = 0`）没有散射亮度。
+#[test]
+fn pure_absorber_has_no_scattered_light() {
+    let l = inscatter_along_ray(0.0, 1e-3, 1e10, 1.0, 1.0, 10.0, 64).unwrap();
+    assert_eq!(l, 0.0);
+}
+
+/// 单步解析积分对标量 `steps` 不敏感（同一物理，只是采样密度）。
+///
+/// 每步解析积分对**分段均匀**密度是精确的，所以 `steps` 足够时结果应收敛；
+/// 密度的空间变化才需要更多步。
+#[test]
+fn result_is_insensitive_to_step_count_for_uniform_media() {
+    let (ss, se, n) = (1e-3, 2e-3, 1e1);
+    let coarse = inscatter_along_ray(ss, se, n, 1.0, 1.0, 10.0, 8).unwrap();
+    let fine = inscatter_along_ray(ss, se, n, 1.0, 1.0, 10.0, 512).unwrap();
+    assert!(
+        (coarse - fine).abs() / fine < 1e-9,
+        "uniform medium should be step-count independent: {coarse} vs {fine}"
+    );
+}

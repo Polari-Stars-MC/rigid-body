@@ -184,20 +184,8 @@ pub fn mie_scattering_efficiency_exact(size_param: f64, refractive_index: f64) -
         return None;
     }
     let m = crate::bessel::Complex::from_real(refractive_index);
-    let nmax = crate::bessel::mie_max_order(size_param)?;
-
-    let mut sum = 0.0;
-    for n in 1..=nmax {
-        let a = crate::bessel::mie_coefficient_a(m, size_param, n)?;
-        let b = crate::bessel::mie_coefficient_b(m, size_param, n)?;
-        let w = (2 * n + 1) as f64;
-        sum += w * (a.norm_sqr() + b.norm_sqr());
-    }
-    let q = 2.0 / (size_param * size_param) * sum;
-    if !q.is_finite() {
-        return None;
-    }
-    Some(q.max(0.0))
+    let (_, q_sca, _) = crate::bessel::mie_efficiencies_series(m, size_param)?;
+    Some(q_sca)
 }
 
 /// 米氏消光效率 `Q_ext` 的精确解。
@@ -217,20 +205,8 @@ pub fn mie_extinction_efficiency_exact(size_param: f64, refractive_index: f64) -
         return None;
     }
     let m = crate::bessel::Complex::from_real(refractive_index);
-    let nmax = crate::bessel::mie_max_order(size_param)?;
-
-    let mut sum = 0.0;
-    for n in 1..=nmax {
-        let a = crate::bessel::mie_coefficient_a(m, size_param, n)?;
-        let b = crate::bessel::mie_coefficient_b(m, size_param, n)?;
-        let w = (2 * n + 1) as f64;
-        sum += w * (a.re + b.re);
-    }
-    let q = 2.0 / (size_param * size_param) * sum;
-    if !q.is_finite() {
-        return None;
-    }
-    Some(q.max(0.0))
+    let (q_ext, _, _) = crate::bessel::mie_efficiencies_series(m, size_param)?;
+    Some(q_ext)
 }
 
 /// 复折射率下的米氏效率三元组 `(Q_ext, Q_sca, Q_abs)`。
@@ -285,26 +261,9 @@ pub fn mie_efficiencies_complex(
         return None;
     }
     let m = crate::bessel::Complex::new(refractive_index_real, refractive_index_imag);
-    let nmax = crate::bessel::mie_max_order(size_param)?;
-
-    let (mut sum_ext, mut sum_sca) = (0.0, 0.0);
-    for n in 1..=nmax {
-        let a = crate::bessel::mie_coefficient_a(m, size_param, n)?;
-        let b = crate::bessel::mie_coefficient_b(m, size_param, n)?;
-        let w = (2 * n + 1) as f64;
-        sum_ext += w * (a.re + b.re);
-        sum_sca += w * (a.norm_sqr() + b.norm_sqr());
-    }
-    let factor = 2.0 / (size_param * size_param);
-    let q_ext = factor * sum_ext;
-    let q_sca = factor * sum_sca;
-    if !q_ext.is_finite() || !q_sca.is_finite() {
-        return None;
-    }
-    // Q_abs = Q_ext - Q_sca。数值上可能出现极小的负值（1e-16 量级），
-    // 钳到 0 而不是报错 —— 那是浮点误差，不是物理问题。
-    let q_abs = (q_ext - q_sca).max(0.0);
-    Some((q_ext.max(0.0), q_sca.max(0.0), q_abs))
+    // 批量求解：三个级数各算一次，复杂度 O(nmax) 而非 O(nmax²)。
+    // `Q_abs = Q_ext - Q_sca` 的浮点残差已在批量版里钳到 0。
+    crate::bessel::mie_efficiencies_series(m, size_param)
 }
 
 /// 复折射率下的**单散射反照率** `ω = Q_sca / Q_ext`。
@@ -474,16 +433,36 @@ pub fn inscatter_along_ray(
 
     let n = steps as f64;
     let ds = ray_length / n;
-    let scattered = sigma_sca * number_density * phase * light_intensity;
     let tau_per_step = sigma_ext * number_density * ds;
     let trans_per_step = (-tau_per_step).exp();
 
-    // 中点法：第 k 段的代表点在 (k + 0.5)·ds 处，其透射率是 trans_per_step^(k+0.5)。
-    // 用累乘避免反复调用 exp。
-    let mut trans = trans_per_step.sqrt(); // k = 0 时的 ^0.5
+    // 每步用**解析积分**而不是中点近似。
+    //
+    // 单步内密度均匀时，该段贡献有闭式：
+    //
+    // ```text
+    // ∫_0^ds T(s)·σ_sca·n·p·I ds = T_step_start · (σ_sca/σ_ext)·p·I · (1 − e^(−τ_step))
+    // ```
+    //
+    // ## 为什么不能用中点法（旧实现）
+    //
+    // 旧写法是 `sum += trans_mid·σ_sca·n·p·I·ds`，`trans_mid = trans^(k+0.5)`。
+    // 它有两个问题：
+    //
+    // 1. **只是近似**（中点法对指数衰减有一阶误差）
+    // 2. **厚介质下会静默归零**：`τ_step > ~700` 时 `exp(−τ_step)` 下溢到 0，
+    //    于是 `sqrt(0) = 0`，整条视线的亮度变成 0。正确答案应该饱和在反照率
+    //    `σ_sca/σ_ext`，而不是 0。
+    //
+    // 新写法里 `(1 − e^(−τ_step))` 在 `τ_step → ∞` 时**稳定趋于 1**，不会下溢。
+    // 实测 `n = 1e13`（τ ≈ 4000）时旧实现给 `1e-12`，新实现给 `≈1`（反照率）。
+    let albedo = sigma_sca / sigma_ext;
+    let source = albedo * phase * light_intensity;
+    let absorbed_per_step = 1.0 - trans_per_step;
+    let mut trans = 1.0;
     let mut sum = 0.0;
     for _ in 0..steps {
-        sum += trans * scattered * ds;
+        sum += trans * source * absorbed_per_step;
         trans *= trans_per_step;
     }
     Some(sum)

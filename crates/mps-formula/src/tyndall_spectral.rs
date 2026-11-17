@@ -668,3 +668,241 @@ pub fn inscatter_spectral_full(
         b: series(first.b, albedo.b),
     })
 }
+// ── CIE 1931 色匹配函数与光谱积分（ADR-0032）────────────────────────────────
+//
+// 三离散波长（650/550/450 nm）只能粗略表示颜色。要做"物理正确的颜色"，
+// 需要按 CIE 1931 标准观察者的匹配函数对**连续光谱**加权积分。
+//
+// 这里用 Wyman, Sloan, Shirley (JCGT 2013) 的**多瓣高斯解析拟合**，
+// 不需要 471 项查找表：
+//
+// ```text
+// x̄(λ) = 1.056 g(λ;599.8,37.9,31.0) + 0.362 g(λ;442.0,16.0,26.7) - 0.065 g(λ;501.1,20.4,26.2)
+// ȳ(λ) = 0.821 g(λ;568.8,46.9,40.5) + 0.286 g(λ;530.9,16.3,31.1)
+// z̄(λ) = 1.217 g(λ;437.0,11.8,36.0) + 0.681 g(λ;459.0,26.0,13.8)
+// ```
+//
+// `g` 是分段高斯：`σ` 在 `λ < μ` 时取 `σ₁`，否则取 `σ₂`。
+//
+// **精度**：拟合误差约峰值的 1%，对渲染足够。需要色度学级精度时请用官方表。
+
+/// 分段高斯瓣 `g(λ; μ, σ₁, σ₂)`。
+fn cie_lobe(lambda_nm: f64, mu: f64, s1: f64, s2: f64) -> f64 {
+    let s = if lambda_nm < mu { s1 } else { s2 };
+    let t = (lambda_nm - mu) / s;
+    (-0.5 * t * t).exp()
+}
+
+/// CIE 1931 标准观察者的色匹配函数 `(x̄, ȳ, z̄)`。
+///
+/// 用 [Wyman, Sloan, Shirley (JCGT 2013)] 的多瓣高斯拟合。`ȳ` 同时也是
+/// 光度函数 `V(λ)`。
+///
+/// 可见光范围外返回接近零的值（高斯衰减），不做特殊处理。
+///
+/// [Wyman, Sloan, Shirley (JCGT 2013)]: http://jcgt.org/published/0002/02/01/
+pub fn cie_color_matching(lambda_nm: f64) -> Option<(f64, f64, f64)> {
+    if !lambda_nm.is_finite() {
+        return None;
+    }
+    let xb = 1.056 * cie_lobe(lambda_nm, 599.8, 37.9, 31.0)
+        + 0.362 * cie_lobe(lambda_nm, 442.0, 16.0, 26.7)
+        - 0.065 * cie_lobe(lambda_nm, 501.1, 20.4, 26.2);
+    let yb = 0.821 * cie_lobe(lambda_nm, 568.8, 46.9, 40.5)
+        + 0.286 * cie_lobe(lambda_nm, 530.9, 16.3, 31.1);
+    let zb = 1.217 * cie_lobe(lambda_nm, 437.0, 11.8, 36.0)
+        + 0.681 * cie_lobe(lambda_nm, 459.0, 26.0, 13.8);
+    Some((xb, yb, zb))
+}
+
+/// CIE XYZ（D65 白点）→ **线性** sRGB。
+///
+/// 用 IEC 61966-2-1 的矩阵。负值钳到 0（超出 sRGB 色域的颜色无法表示）。
+///
+/// 结果是**线性**值，要显示还需 gamma 编码（`v^(1/2.2)` 近似）。
+pub fn xyz_to_linear_srgb(x: f64, y: f64, z: f64) -> Option<(f64, f64, f64)> {
+    if !x.is_finite() || !y.is_finite() || !z.is_finite() {
+        return None;
+    }
+    let r = 3.2406 * x - 1.5372 * y - 0.4986 * z;
+    let g = -0.9689 * x + 1.8758 * y + 0.0415 * z;
+    let b = 0.0557 * x - 0.2040 * y + 1.0570 * z;
+    Some((r.max(0.0), g.max(0.0), b.max(0.0)))
+}
+
+/// 光谱积分：由**采样点**（波长 nm + 光谱辐亮度）算出 RGB。
+///
+/// 做梯形积分：
+///
+/// ```text
+/// X = ∫ L(λ)·x̄(λ) dλ        Y = ∫ L(λ)·ȳ(λ) dλ        Z = ∫ L(λ)·z̄(λ) dλ
+/// ```
+///
+/// 然后经 [`xyz_to_linear_srgb`] 转成 RGB。
+///
+/// # Parameters
+/// * `samples` 至少 2 个 `(lambda_nm, radiance)`，按波长**升序**
+///
+/// # Returns
+/// `Some(SpectralLuminance)`（**线性** sRGB）；采样不足或非有限时 `None`。
+///
+/// # 归一化
+///
+/// 结果按 `ȳ` 的积分归一化，使得"平坦光谱 = 单位亮度"。这样调用方不用关心
+/// 绝对标度。
+pub fn spectral_samples_to_rgb(samples: &[(f64, f64)]) -> Option<SpectralLuminance> {
+    if samples.len() < 2 {
+        return None;
+    }
+    let mut xyz = [0.0f64; 3];
+    let mut y_norm = 0.0f64;
+    for i in 1..samples.len() {
+        let (l0, r0) = samples[i - 1];
+        let (l1, r1) = samples[i];
+        if !l0.is_finite() || !l1.is_finite() || !r0.is_finite() || !r1.is_finite() {
+            return None;
+        }
+        if l1 <= l0 {
+            // 必须升序，否则积分无意义。
+            return None;
+        }
+        if r0 < 0.0 || r1 < 0.0 {
+            return None;
+        }
+        let d = l1 - l0;
+        let (x0, y0, z0) = cie_color_matching(l0)?;
+        let (x1, y1, z1) = cie_color_matching(l1)?;
+        // 梯形：0.5·(f0+f1)·dλ
+        xyz[0] += 0.5 * (r0 * x0 + r1 * x1) * d;
+        xyz[1] += 0.5 * (r0 * y0 + r1 * y1) * d;
+        xyz[2] += 0.5 * (r0 * z0 + r1 * z1) * d;
+        // 归一化分母：白光的 ȳ 积分（辐射度 = 1）。
+        y_norm += 0.5 * (y0 + y1) * d;
+    }
+    if y_norm <= 0.0 {
+        return None;
+    }
+    let (r, g, b) = xyz_to_linear_srgb(xyz[0] / y_norm, xyz[1] / y_norm, xyz[2] / y_norm)?;
+    Some(SpectralLuminance { r, g, b })
+}
+
+/// 逐波长的米氏光谱采样：返回 `(λ_nm, σ_sca, σ_ext)`。
+///
+/// 这是 [`spectral_samples_to_rgb`] 的数据来源 —— 把颗粒的连续光谱离散成
+/// `samples` 个采样点，供梯形积分使用。
+///
+/// 波长范围固定为 `380~780 nm`（可见光），等间距。
+///
+/// # Returns
+/// `Some(Vec)`，长度 `samples`，按波长升序；`samples < 2` 或参数非法时 `None`。
+#[allow(clippy::too_many_arguments)]
+pub fn mie_spectral_samples(
+    diameter: f64,
+    refractive_index_real: f64,
+    refractive_index_imag: f64,
+    samples: u32,
+) -> Option<Vec<(f64, f64, f64)>> {
+    if !diameter.is_finite()
+        || !refractive_index_real.is_finite()
+        || !refractive_index_imag.is_finite()
+    {
+        return None;
+    }
+    if diameter <= 0.0 || refractive_index_real <= 0.0 || refractive_index_imag < 0.0 {
+        return None;
+    }
+    if !(2..=512).contains(&samples) {
+        return None;
+    }
+    let radius = diameter * 0.5;
+    let geom = core::f64::consts::PI * radius * radius;
+    let n = samples as f64;
+    let mut out = Vec::with_capacity(samples as usize);
+    for i in 0..samples {
+        let lambda_nm =
+            VISIBLE_MIN_M * 1e9 + (VISIBLE_MAX_M - VISIBLE_MIN_M) * 1e9 * (i as f64) / (n - 1.0);
+        let lambda = lambda_nm * 1e-9;
+        let x = core::f64::consts::PI * diameter / lambda;
+        let (q_ext, q_sca, _) = crate::tyndall::mie_efficiencies_complex(
+            x,
+            refractive_index_real,
+            refractive_index_imag,
+        )?;
+        let sca = (q_sca * geom).max(0.0);
+        let ext = (q_ext * geom).max(sca);
+        out.push((lambda_nm, sca, ext));
+    }
+    Some(out)
+}
+
+/// **均匀介质的连续光谱散射 → 线性 sRGB**（ADR-0032）。
+///
+/// 这是三离散波长版本的物理升级版：
+///
+/// | | 三离散波长（ADR-0020） | 本函数 |
+/// | --- | --- | --- |
+/// | 光谱采样 | 固定 650/550/450 nm | `samples` 个等间距点（380~780 nm） |
+/// | 加权 | 直接取三点 | **CIE 1931 匹配函数梯形积分** |
+/// | 米氏区的振荡结构 | 被三点采样漏掉 | 逐点解出，积分保留 |
+/// | 代价 | 3 次米氏 | `samples` 次米氏 + `samples` 次散射积分 |
+///
+/// ## 为什么不能先积分 σ 再算一次散射
+///
+/// 散射亮度对 `σ` 是**非线性**的（`1 − exp(−τ)` 与 Beer–Lambert 累积），
+/// 所以必须先逐波长算出 `L(λ)`，再对 `L(λ)` 做线性积分。这是辐射度学的基本要求。
+///
+/// # Parameters
+/// * `diameter` / `refractive_index_real` / `refractive_index_imag` 材料参数
+/// * `number_density` 数密度（个/m³）
+/// * `phase` 相函数值（丁达尔取前向，`0.7~0.9` 的 Henyey–Greenstein）
+/// * `light_intensity` 入射光强度（白光谱，平坦）
+/// * `ray_length` 视线长度
+/// * `steps` 单次散射积分的采样段数
+/// * `samples` 光谱采样点数（推荐 `15~31`）
+///
+/// # Returns
+/// `Some(SpectralLuminance)`（线性 sRGB，`ȳ` 归一化）；参数非法时 `None`。
+#[allow(clippy::too_many_arguments)]
+pub fn inscatter_rgb_uniform(
+    diameter: f64,
+    refractive_index_real: f64,
+    refractive_index_imag: f64,
+    number_density: f64,
+    phase: f64,
+    light_intensity: f64,
+    ray_length: f64,
+    steps: u32,
+    samples: u32,
+) -> Option<SpectralLuminance> {
+    if !number_density.is_finite()
+        || !phase.is_finite()
+        || !light_intensity.is_finite()
+        || !ray_length.is_finite()
+    {
+        return None;
+    }
+    if number_density < 0.0 || phase < 0.0 || light_intensity < 0.0 || ray_length <= 0.0 {
+        return None;
+    }
+    let spectrum = mie_spectral_samples(
+        diameter,
+        refractive_index_real,
+        refractive_index_imag,
+        samples,
+    )?;
+
+    let mut radiance: Vec<(f64, f64)> = Vec::with_capacity(spectrum.len());
+    for (lambda_nm, sca, ext) in spectrum {
+        let l = crate::tyndall::inscatter_along_ray(
+            sca,
+            ext,
+            number_density,
+            phase,
+            light_intensity,
+            ray_length,
+            steps,
+        )?;
+        radiance.push((lambda_nm, l));
+    }
+    spectral_samples_to_rgb(&radiance)
+}

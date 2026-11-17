@@ -4,9 +4,10 @@
 //! 这与日落同源，也是分通道版本相对标量版本的唯一视觉价值。
 
 use mps_formula::tyndall_spectral::{
-    BLUE_NM, GREEN_NM, RED_NM, SpectralLuminance, SpectralOptics, inscatter_spectral,
-    inscatter_spectral_full, inscatter_spectral_through_particles, spectral_albedo,
-    spectral_transmittance, wavelength_to_rgb,
+    BLUE_NM, GREEN_NM, RED_NM, SpectralLuminance, SpectralOptics, cie_color_matching,
+    inscatter_rgb_uniform, inscatter_spectral, inscatter_spectral_full,
+    inscatter_spectral_through_particles, mie_spectral_samples, spectral_albedo,
+    spectral_samples_to_rgb, spectral_transmittance, wavelength_to_rgb, xyz_to_linear_srgb,
 };
 
 const EPS: f64 = 1e-12;
@@ -896,4 +897,189 @@ fn water_and_soot_beams_differ_as_expected() {
         ls.luminance(),
         lw.luminance()
     );
+}
+// ── CIE 加权积分（ADR-0032）───────────────────────────────────────────────
+
+/// 色匹配函数在已知峰值处必须对上 CIE 1931 表。
+///
+/// 三个参照值（取自 CIE 1931 2° 标准观察者表）：
+///
+/// | λ (nm) | 表值 | 说明 |
+/// | ---: | ---: | --- |
+/// | 600 | `x̄ = 1.0622` | `x̄` 峰值附近 |
+/// | 555 | `ȳ = 1.0000` | `ȳ` 的峰值（同时是光度函数 `V(λ)` 峰值） |
+/// | 445 | `z̄ = 1.7826` | `z̄` 的峰值 |
+///
+/// 解析拟合的误差约 1% 峰值，所以用 3% 容差。
+#[test]
+fn cie_color_matching_matches_known_peaks() {
+    let (x, _, _) = cie_color_matching(600.0).unwrap();
+    assert!((x - 1.0622).abs() < 0.03, "x̄(600) = {x}");
+
+    let (_, y, _) = cie_color_matching(555.0).unwrap();
+    assert!((y - 1.0).abs() < 0.02, "ȳ(555) = {y}");
+
+    let (_, _, z) = cie_color_matching(445.0).unwrap();
+    assert!((z - 1.7826).abs() < 0.05, "z̄(445) = {z}");
+}
+
+/// 可见光外应迅速衰减到接近零。
+#[test]
+fn cie_color_matching_decays_outside_the_visible_range() {
+    for nm in [320.0, 820.0] {
+        let (x, y, z) = cie_color_matching(nm).unwrap();
+        assert!(
+            x.abs() < 0.01 && y < 0.01 && z < 0.01,
+            "at {nm} nm: ({x}, {y}, {z}) should be near zero"
+        );
+    }
+    assert!(cie_color_matching(f64::NAN).is_none());
+}
+
+/// D65 白点的 XYZ 必须映射到 `(1,1,1)` 线性 sRGB。
+#[test]
+fn xyz_to_linear_srgb_maps_d65_white_to_unity() {
+    let (r, g, b) = xyz_to_linear_srgb(0.95047, 1.0, 1.08883).unwrap();
+    assert!((r - 1.0).abs() < 0.01, "r = {r}");
+    assert!((g - 1.0).abs() < 0.01, "g = {g}");
+    assert!((b - 1.0).abs() < 0.01, "b = {b}");
+    // 钳位是**逐通道**的：负的 X 只把 r 钳到 0，g/b 仍按矩阵算。
+    // （`g = −0.9689·X`，X 为负时 g 为正，所以不是全零。）
+    let (r2, g2, b2) = xyz_to_linear_srgb(-1.0, 0.0, 0.0).unwrap();
+    assert_eq!(r2, 0.0, "negative X must clamp r");
+    assert!((g2 - 0.9689).abs() < 1e-9, "g = {g2}");
+    assert_eq!(b2, 0.0, "negative X must clamp b");
+    // 所有输出都必须非负。
+    for (x, y, z) in [(-1.0, 0.0, 0.0), (0.0, -1.0, 0.0), (0.0, 0.0, -1.0)] {
+        let (r, g, b) = xyz_to_linear_srgb(x, y, z).unwrap();
+        assert!(r >= 0.0 && g >= 0.0 && b >= 0.0);
+    }
+    assert!(xyz_to_linear_srgb(f64::NAN, 0.0, 0.0).is_none());
+}
+
+/// 平坦光谱（等能白）的亮度必须归一化到 1。
+///
+/// 这钉住 `spectral_samples_to_rgb` 的归一化约定：调用方不用管绝对标度。
+/// 等能白的 sRGB 略偏暖（因为等能白 ≠ D65），所以三个通道不严格相等。
+#[test]
+fn flat_spectrum_is_normalised_to_unit_luminance() {
+    let samples: Vec<(f64, f64)> = (0..31)
+        .map(|i| (380.0 + 400.0 * i as f64 / 30.0, 1.0))
+        .collect();
+    let rgb = spectral_samples_to_rgb(&samples).unwrap();
+    assert!(
+        (rgb.luminance() - 1.0).abs() < 0.05,
+        "luminance = {}",
+        rgb.luminance()
+    );
+    assert!(rgb.r > 0.0 && rgb.g > 0.0 && rgb.b > 0.0);
+    // 三通道接近但不相等（等能白偏暖）。
+    let mx = rgb.r.max(rgb.g).max(rgb.b);
+    let mn = rgb.r.min(rgb.g).min(rgb.b);
+    assert!(mx / mn < 1.5, "channels too far apart: {:?}", rgb);
+}
+
+/// 窄蓝带的 RGB 必须以蓝为主；窄红带以红为主。
+#[test]
+fn narrow_bands_produce_the_expected_dominant_channel() {
+    let band = |lo: f64, hi: f64| -> Vec<(f64, f64)> {
+        (0..5)
+            .map(|i| (lo + (hi - lo) * i as f64 / 4.0, 1.0))
+            .collect()
+    };
+
+    let blue = spectral_samples_to_rgb(&band(440.0, 480.0)).unwrap();
+    assert!(blue.b > blue.r && blue.b > blue.g, "blue band: {:?}", blue);
+
+    let red = spectral_samples_to_rgb(&band(620.0, 660.0)).unwrap();
+    assert!(red.r > red.g && red.r > red.b, "red band: {:?}", red);
+
+    let green = spectral_samples_to_rgb(&band(520.0, 560.0)).unwrap();
+    assert!(
+        green.g > green.r && green.g > green.b,
+        "green band: {:?}",
+        green
+    );
+}
+
+#[test]
+fn spectral_samples_to_rgb_rejects_invalid() {
+    // 采样不足。
+    assert!(spectral_samples_to_rgb(&[]).is_none());
+    assert!(spectral_samples_to_rgb(&[(550.0, 1.0)]).is_none());
+    // 波长降序。
+    assert!(spectral_samples_to_rgb(&[(600.0, 1.0), (500.0, 1.0)]).is_none());
+    // 重复波长。
+    assert!(spectral_samples_to_rgb(&[(550.0, 1.0), (550.0, 1.0)]).is_none());
+    // 负辐亮度。
+    assert!(spectral_samples_to_rgb(&[(400.0, -1.0), (500.0, 1.0)]).is_none());
+    // 非有限。
+    assert!(spectral_samples_to_rgb(&[(400.0, f64::NAN), (500.0, 1.0)]).is_none());
+}
+
+/// 光谱采样必须覆盖 380~780 nm 且升序。
+#[test]
+fn mie_spectral_samples_covers_the_visible_range() {
+    let s = mie_spectral_samples(1e-6, 1.33, 0.0, 15).unwrap();
+    assert_eq!(s.len(), 15);
+    assert!((s[0].0 - 380.0).abs() < 1e-6, "first = {}", s[0].0);
+    assert!((s[14].0 - 780.0).abs() < 1e-6, "last = {}", s[14].0);
+    for w in s.windows(2) {
+        assert!(w[1].0 > w[0].0, "wavelengths must ascend");
+    }
+    // 每个通道的 ext >= sca，且都非负。
+    for (nm, sca, ext) in &s {
+        assert!(*sca >= 0.0 && *ext >= *sca, "bad channel at {nm} nm");
+    }
+}
+
+#[test]
+fn mie_spectral_samples_rejects_invalid() {
+    assert!(mie_spectral_samples(0.0, 1.33, 0.0, 15).is_none());
+    assert!(mie_spectral_samples(1e-6, 0.0, 0.0, 15).is_none());
+    assert!(mie_spectral_samples(1e-6, 1.33, -0.1, 15).is_none());
+    assert!(
+        mie_spectral_samples(1e-6, 1.33, 0.0, 1).is_none(),
+        "need >= 2 samples"
+    );
+    assert!(
+        mie_spectral_samples(1e-6, 1.33, 0.0, 1000).is_none(),
+        "too many"
+    );
+}
+
+/// 端到端：小颗粒的均匀烟雾，CIE 积分后光柱必须**偏蓝**。
+///
+/// 光学薄时 `L ∝ σ_sca ∝ λ⁻⁴`，所以蓝端显著更强。
+#[test]
+fn optically_thin_fine_smoke_is_blue() {
+    let rgb = inscatter_rgb_uniform(10e-9, 1.33, 0.0, 1e18, 1.0, 1.0, 10.0, 64, 15).unwrap();
+    assert!(rgb.luminance() > 0.0, "the beam must scatter something");
+    assert!(
+        rgb.b > rgb.r,
+        "fine particles must give a blue beam: {:?}",
+        rgb
+    );
+}
+
+/// 端到端：大颗粒（几何光学区）的光柱必须**接近中性**。
+#[test]
+fn large_particles_give_a_neutral_beam() {
+    let rgb = inscatter_rgb_uniform(5e-6, 1.33, 0.0, 1e13, 1.0, 1.0, 10.0, 64, 15).unwrap();
+    assert!(rgb.luminance() > 0.0);
+    let mx = rgb.r.max(rgb.g).max(rgb.b);
+    let mn = rgb.r.min(rgb.g).min(rgb.b);
+    assert!(
+        mx / mn < 1.6,
+        "large particles should be near-neutral: {:?}",
+        rgb
+    );
+}
+
+#[test]
+fn inscatter_rgb_uniform_rejects_invalid() {
+    assert!(inscatter_rgb_uniform(0.0, 1.33, 0.0, 1e18, 1.0, 1.0, 10.0, 64, 15).is_none());
+    assert!(inscatter_rgb_uniform(1e-6, 1.33, 0.0, -1.0, 1.0, 1.0, 10.0, 64, 15).is_none());
+    assert!(inscatter_rgb_uniform(1e-6, 1.33, 0.0, 1e18, 1.0, 1.0, 0.0, 64, 15).is_none());
+    assert!(inscatter_rgb_uniform(1e-6, 1.33, 0.0, 1e18, 1.0, 1.0, 10.0, 0, 15).is_none());
 }
