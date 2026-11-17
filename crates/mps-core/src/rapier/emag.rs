@@ -609,3 +609,46 @@ pub extern "C" fn tyndall_inscatter_multiple(
 pub extern "C" fn tyndall_max_scatter_orders() -> u32 {
     ffi_guard(0, || mps_formula::tyndall::MAX_SCATTER_ORDERS)
 }
+/// 米氏散射效率的**精确解**（Riccati–Bessel 级数，ADR-0025/0026）。
+///
+/// 比 `tyndall_mie_scattering_efficiency`（三段渐近式）准确，代价是
+/// `O(n_max)` 次复数运算。`x > 1` 时已验证；`x < 0.3` 的瑞利极限有约
+/// 1.52 倍偏差（见 ADR-0025），需要定量精度时请用
+/// `tyndall_mie_scattering_efficiency_best`。
+#[unsafe(no_mangle)]
+pub extern "C" fn tyndall_mie_scattering_efficiency_exact(
+    size_param: f64,
+    refractive_index: f64,
+    out: *mut f64,
+) -> Bool {
+    ffi_scalar(out, || {
+        mps_formula::tyndall::mie_scattering_efficiency_exact(size_param, refractive_index)
+    })
+}
+
+/// 米氏消光效率的精确解（满足光学定理 `Q_ext == Q_sca`，无吸收时）。
+#[unsafe(no_mangle)]
+pub extern "C" fn tyndall_mie_extinction_efficiency_exact(
+    size_param: f64,
+    refractive_index: f64,
+    out: *mut f64,
+) -> Bool {
+    ffi_scalar(out, || {
+        mps_formula::tyndall::mie_extinction_efficiency_exact(size_param, refractive_index)
+    })
+}
+
+/// 按尺寸参数自动选择米氏算法（`x < 0.3` 用渐近式，否则用精确解）。
+///
+/// **这是推荐入口**：它规避了精确解在瑞利极限的偏差，也避免了宿主自己
+/// 判断该用哪个。
+#[unsafe(no_mangle)]
+pub extern "C" fn tyndall_mie_scattering_efficiency_best(
+    size_param: f64,
+    refractive_index: f64,
+    out: *mut f64,
+) -> Bool {
+    ffi_scalar(out, || {
+        mps_formula::tyndall::mie_scattering_efficiency_best(size_param, refractive_index)
+    })
+}

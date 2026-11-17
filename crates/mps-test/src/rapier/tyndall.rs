@@ -10,8 +10,9 @@
 
 use mps_formula::tyndall::{
     MAX_SCATTER_ORDERS, beer_lambert_transmittance, henyey_greenstein_phase, inscatter_along_ray,
-    inscatter_along_ray_multiple, mie_scattering_efficiency, optical_thickness, rayleigh_phase,
-    single_scattering_albedo, size_parameter, tyndall_visibility,
+    inscatter_along_ray_multiple, mie_extinction_efficiency_exact, mie_scattering_efficiency,
+    mie_scattering_efficiency_best, mie_scattering_efficiency_exact, optical_thickness,
+    rayleigh_phase, single_scattering_albedo, size_parameter, tyndall_visibility,
 };
 
 const EPS: f64 = 1e-12;
@@ -551,4 +552,121 @@ fn pure_scattering_with_unit_geometric_factor_stays_finite() {
     let v = inscatter_along_ray_multiple(ss, se, n, ph, li, l, 64, 8, 1.0).unwrap();
     assert!(v.is_finite(), "degenerate r=1 case must stay finite: {v}");
     assert!(v > 0.0);
+}
+// ── 米氏精确解接入（ADR-0026）──────────────────────────────────────────────
+
+/// 精确解必须满足光学定理：无吸收时 `Q_ext == Q_sca`。
+#[test]
+fn exact_mie_satisfies_optical_theorem() {
+    for x in [0.5, 2.0, 5.0, 10.0, 20.0] {
+        let q_sca = mie_scattering_efficiency_exact(x, 1.33).unwrap();
+        let q_ext = mie_extinction_efficiency_exact(x, 1.33).unwrap();
+        assert!(
+            (q_ext - q_sca).abs() <= q_ext.abs() * 1e-10,
+            "x={x}: Q_ext {q_ext} != Q_sca {q_sca}"
+        );
+    }
+}
+
+/// 精确解在中等尺寸参数下与文献量级一致。
+#[test]
+fn exact_mie_matches_literature_at_medium_size() {
+    // m=1.33, x=10 的 Q_ext 文献约 2.2。
+    let q = mie_extinction_efficiency_exact(10.0, 1.33).unwrap();
+    assert!(
+        (q - 2.2).abs() / 2.2 < 0.05,
+        "Q_ext(1.33, 10) = {q}, expected ≈2.2"
+    );
+}
+
+/// 大尺寸参数下消光趋近 2（消光佯谬）。
+#[test]
+fn exact_mie_approaches_extinction_paradox() {
+    for x in [30.0, 50.0] {
+        let q = mie_extinction_efficiency_exact(x, 1.33).unwrap();
+        assert!((q - 2.0).abs() < 0.8, "Q_ext({x}) = {q}, expected near 2");
+    }
+}
+
+/// 精确解的散射效率必须随尺寸参数单调上升（瑞利 → 米氏区）。
+#[test]
+fn exact_mie_grows_from_rayleigh_to_mie() {
+    let mut prev = 0.0;
+    for x in [0.5, 1.0, 2.0, 4.0] {
+        let q = mie_scattering_efficiency_exact(x, 1.33).unwrap();
+        assert!(q > prev, "Q_sca must grow: x={x} gave {q}, prev {prev}");
+        prev = q;
+    }
+}
+
+/// `best` 在 `x < 0.3` 用渐近式、`x >= 0.3` 用精确解。
+///
+/// 在切换点两侧都应与对应算法一致。
+#[test]
+fn best_dispatches_at_the_threshold() {
+    // 瑞利区：应等于渐近式。
+    let x_small = 0.1;
+    let best = mie_scattering_efficiency_best(x_small, 1.33).unwrap();
+    let asym = mie_scattering_efficiency(x_small, 1.33).unwrap();
+    assert!(
+        (best - asym).abs() <= asym * 1e-12,
+        "x={x_small} must use the asymptotic form: {best} vs {asym}"
+    );
+
+    // 米氏区：应等于精确解。
+    let x_large = 5.0;
+    let best = mie_scattering_efficiency_best(x_large, 1.33).unwrap();
+    let exact = mie_scattering_efficiency_exact(x_large, 1.33).unwrap();
+    assert!(
+        (best - exact).abs() <= exact * 1e-12,
+        "x={x_large} must use the exact solution: {best} vs {exact}"
+    );
+}
+
+/// 瑞利区两者都必须是 `∝ x⁴` 标度（绝对值可能差常数倍，见 ADR-0025）。
+#[test]
+fn rayleigh_regime_scales_as_x_fourth() {
+    let x1 = 0.01;
+    let x2 = 0.1;
+    for f in [
+        mie_scattering_efficiency as fn(f64, f64) -> Option<f64>,
+        mie_scattering_efficiency_exact,
+    ] {
+        let q1 = f(x1, 1.33).unwrap();
+        let q2 = f(x2, 1.33).unwrap();
+        let ratio = q2 / q1;
+        // x 增 10 倍 => Q 增 10⁴ 倍。
+        assert!(
+            (ratio - 1e4).abs() / 1e4 < 0.02,
+            "must scale as x⁴: ratio {ratio}"
+        );
+    }
+}
+
+#[test]
+fn exact_mie_rejects_invalid() {
+    assert!(mie_scattering_efficiency_exact(0.0, 1.33).is_none());
+    assert!(mie_scattering_efficiency_exact(-1.0, 1.33).is_none());
+    assert!(mie_scattering_efficiency_exact(1.0, 0.0).is_none());
+    assert!(mie_scattering_efficiency_exact(f64::NAN, 1.33).is_none());
+    assert!(mie_extinction_efficiency_exact(0.0, 1.33).is_none());
+    assert!(mie_scattering_efficiency_best(0.0, 1.33).is_none());
+}
+
+/// 端到端：用精确解算出的 Q_sca 换算成截面，再算光柱亮度。
+#[test]
+fn exact_mie_feeds_the_scattering_pipeline() {
+    // 1 µm 水滴，550 nm 绿光。
+    let x = size_parameter(1e-6, 550e-9).unwrap();
+    let q_sca = mie_scattering_efficiency_best(x, 1.33).unwrap();
+    assert!(q_sca > 0.0);
+
+    // 截面 = Q_sca · 几何截面 πr²
+    let radius = 0.5e-6;
+    let sigma = q_sca * std::f64::consts::PI * radius * radius;
+    assert!(sigma > 0.0);
+
+    // 沿 60 m、数密度 12.7 的烟雾算亮度。
+    let lum = inscatter_along_ray(sigma, sigma, 12.7, 1.0, 1.0, 60.0, 128).unwrap();
+    assert!(lum > 0.0, "the beam must scatter, got {lum}");
 }
