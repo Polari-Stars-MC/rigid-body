@@ -11463,6 +11463,54 @@ struct Bool tyndall_spectral_optics_from_mie(double diameter,
                                              double *out_ext_g,
                                              double *out_ext_b);
 
+/**
+ * CIE 1931 色匹配函数 `(x̄, ȳ, z̄)`（ADR-0032）。
+ *
+ * 用 Wyman–Sloan–Shirley 解析拟合，误差约峰值 1%。`ȳ` 同时是光度函数 `V(λ)`。
+ * 三个输出**全部成功才写**。
+ *
+ * # Safety
+ * 三个输出指针必须可写。
+ */
+struct Bool tyndall_cie_color_matching(double wavelength_nm,
+                                       double *out_x,
+                                       double *out_y,
+                                       double *out_z);
+
+/**
+ * **连续光谱的均匀介质散射 → 线性 sRGB**（ADR-0032）。
+ *
+ * 这是三离散波长版本的物理升级版：逐波长解米氏方程，再用 CIE 1931 匹配函数
+ * 梯形积分。米氏区的振荡结构会被正确积分进去。
+ *
+ * 输出是**线性** sRGB，显示端还需 gamma 编码（`v^(1/2.2)` 近似）。
+ *
+ * # Parameters
+ * * `diameter` 颗粒直径（m）
+ * * `refractive_index_real` / `refractive_index_imag` 复折射率（`κ = 0` 为透明）
+ * * `number_density` 数密度（个/m³）
+ * * `phase` 相函数值（丁达尔取前向 0.7~0.9 的 Henyey–Greenstein）
+ * * `light_intensity` 入射光强度
+ * * `ray_length` 视线长度（m）
+ * * `steps` 单次散射积分的采样段数
+ * * `samples` 光谱采样点数（推荐 15~31）
+ *
+ * # Safety
+ * `out_r` / `out_g` / `out_b` 必须可写。
+ */
+struct Bool tyndall_inscatter_rgb_uniform(double diameter,
+                                          double refractive_index_real,
+                                          double refractive_index_imag,
+                                          double number_density,
+                                          double phase,
+                                          double light_intensity,
+                                          double ray_length,
+                                          uint32_t steps,
+                                          uint32_t samples,
+                                          double *out_r,
+                                          double *out_g,
+                                          double *out_b);
+
 struct Bool material_mechanics_hookes_law_uniaxial(double stress,
                                                    double youngs_modulus,
                                                    double *out);

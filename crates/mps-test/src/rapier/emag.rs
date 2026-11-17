@@ -88,4 +88,86 @@ mod tests {
         // |Gamma| >= 1 -> None
         assert_eq!(electromagnetism_vswr(1.5, &mut out), Bool::FALSE);
     }
+    // ── CIE 加权积分（ADR-0032）────────────────────────────────────────────
+
+    /// 色匹配函数的三输出契约：成功时全部写入，失败时一个都不动。
+    #[test]
+    fn cie_color_matching_writes_three_outputs() {
+        let (mut x, mut y, mut z) = (0.0f64, 0.0f64, 0.0f64);
+        assert_eq!(
+            tyndall_cie_color_matching(555.0, &mut x, &mut y, &mut z),
+            Bool::TRUE
+        );
+        assert!((y - 1.0).abs() < 0.02, "ȳ(555) = {y}");
+        assert!(x > 0.0 && z > 0.0);
+
+        // 非有限波长必须失败且不写。
+        let (mut x2, mut y2, mut z2) = (-1.0f64, -1.0f64, -1.0f64);
+        assert_eq!(
+            tyndall_cie_color_matching(f64::NAN, &mut x2, &mut y2, &mut z2),
+            Bool::FALSE
+        );
+        assert_eq!((x2, y2, z2), (-1.0, -1.0, -1.0), "失败时不得写入");
+    }
+
+    #[test]
+    fn cie_color_matching_rejects_null_outputs() {
+        let mut v = 0.0f64;
+        assert_eq!(
+            tyndall_cie_color_matching(550.0, ptr::null_mut(), &mut v, &mut v),
+            Bool::FALSE
+        );
+    }
+
+    /// 端到端 ABI：小颗粒烟雾的光柱必须是蓝主导的线性 sRGB。
+    #[test]
+    fn inscatter_rgb_uniform_end_to_end() {
+        let (mut r, mut g, mut b) = (0.0f64, 0.0f64, 0.0f64);
+        let ok = tyndall_inscatter_rgb_uniform(
+            10e-9, // 10 nm 水滴 → 瑞利区
+            1.33, 0.0, 1e18, // 数密度
+            1.0,  // phase
+            1.0,  // light
+            10.0, // ray_length
+            64,   // steps
+            15,   // samples
+            &mut r, &mut g, &mut b,
+        );
+        assert_eq!(ok, Bool::TRUE);
+        assert!(r >= 0.0 && g >= 0.0 && b >= 0.0);
+        assert!(r + g + b > 0.0, "光柱必须有亮度");
+        assert!(b > r, "细颗粒必须偏蓝：r={r} b={b}");
+
+        // 非法参数必须失败且不写。
+        let (mut r2, mut g2, mut b2) = (-1.0f64, -1.0f64, -1.0f64);
+        assert_eq!(
+            tyndall_inscatter_rgb_uniform(
+                0.0, 1.33, 0.0, 1e18, 1.0, 1.0, 10.0, 64, 15, &mut r2, &mut g2, &mut b2
+            ),
+            Bool::FALSE
+        );
+        assert_eq!((r2, g2, b2), (-1.0, -1.0, -1.0), "失败时不得写入");
+    }
+
+    #[test]
+    fn inscatter_rgb_uniform_rejects_null_outputs() {
+        let mut v = 0.0f64;
+        assert_eq!(
+            tyndall_inscatter_rgb_uniform(
+                1e-6,
+                1.33,
+                0.0,
+                1e13,
+                1.0,
+                1.0,
+                10.0,
+                64,
+                15,
+                ptr::null_mut(),
+                &mut v,
+                &mut v
+            ),
+            Bool::FALSE
+        );
+    }
 }

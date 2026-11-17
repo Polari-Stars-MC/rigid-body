@@ -167,6 +167,54 @@ struct Bool tyndall_spectral_optics_from_mie(
 | 手动调参 | 需要（`n` 取 1~1.5 做丁达尔） | **不需要** |
 
 旧入口保留，用于"我只想要一个可调的白色光柱"这种简单场景。
+## 最省事的一步到位：连续光谱 → RGB
+
+上面的流程要宿主自己管六个 `sigma` 参数。如果只要"一团烟雾在光照下的颜色"，
+用这一个入口：
+
+```c
+struct Bool tyndall_inscatter_rgb_uniform(
+    double diameter,                // 颗粒直径（m）
+    double refractive_index_real,   // n
+    double refractive_index_imag,   // kappa（0 = 透明）
+    double number_density,          // 个/m³
+    double phase,                   // 相函数值
+    double light_intensity,         // 入射光强度
+    double ray_length,              // 视线长度（m）
+    uint32_t steps,                 // 散射积分段数
+    uint32_t samples,               // 光谱采样点数（推荐 15~31）
+    double *out_r, *out_g, *out_b); // **线性** sRGB
+```
+
+它在内部做三件事：
+
+1. 在 380~780 nm 上取 `samples` 个采样点
+2. **逐波长**解米氏方程并算散射亮度（不能先积分 `σ` —— 散射对 `σ` 是非线性的）
+3. 用 CIE 1931 匹配函数梯形积分 → XYZ → 线性 sRGB
+
+**输出是线性值**，显示前还要 gamma 编码（`v^(1/2.2)` 近似）。
+
+### 与三离散波长版本的区别
+
+| | `tyndall_spectral_full_from_world` | `tyndall_inscatter_rgb_uniform` |
+| --- | --- | --- |
+| 介质 | 粒子云（SPH/颗粒） | 均匀 |
+| 光谱 | 3 个离散波长（650/550/450 nm） | `samples` 点 + CIE 积分 |
+| 米氏区振荡 | 可能被跳过 | 正确积分 |
+| 需要宿主调参 | 6 个 `sigma` | **0 个**（只有材料参数） |
+
+要"粒子云 + CIE 积分"的组合，当前需要宿主自己循环波长 —— 没有单入口。
+
+### 单独的色匹配函数
+
+想自己做光谱积分时，可以只要匹配函数：
+
+```c
+struct Bool tyndall_cie_color_matching(
+    double wavelength_nm, double *out_x, double *out_y, double *out_z);
+```
+
+用 Wyman–Sloan–Shirley 解析拟合，误差约峰值 1%。`ȳ` 同时是光度函数 `V(λ)`。
 ## 相函数怎么取
 
 `phase` 是散射角方向的相函数值。丁达尔效应是**前向散射**，所以取正前方：

@@ -786,3 +786,118 @@ pub extern "C" fn tyndall_spectral_optics_from_mie(
         },
     )
 }
+/// CIE 1931 色匹配函数 `(x̄, ȳ, z̄)`（ADR-0032）。
+///
+/// 用 Wyman–Sloan–Shirley 解析拟合，误差约峰值 1%。`ȳ` 同时是光度函数 `V(λ)`。
+/// 三个输出**全部成功才写**。
+///
+/// # Safety
+/// 三个输出指针必须可写。
+#[unsafe(no_mangle)]
+pub extern "C" fn tyndall_cie_color_matching(
+    wavelength_nm: f64,
+    out_x: *mut f64,
+    out_y: *mut f64,
+    out_z: *mut f64,
+) -> Bool {
+    if out_x.is_null() || out_y.is_null() || out_z.is_null() {
+        set_error(ERR_NULL_POINTER, "tyndall_cie_color_matching: out is null");
+        return Bool::FALSE;
+    }
+    ffi_guard(
+        Bool::FALSE,
+        || match mps_formula::tyndall_spectral::cie_color_matching(wavelength_nm) {
+            Some((x, y, z)) => {
+                unsafe {
+                    *out_x = x;
+                    *out_y = y;
+                    *out_z = z;
+                }
+                clear_error();
+                Bool::TRUE
+            }
+            None => {
+                set_error(
+                    ERR_INVALID_ARGUMENT,
+                    "tyndall_cie_color_matching: non-finite wavelength",
+                );
+                Bool::FALSE
+            }
+        },
+    )
+}
+
+/// **连续光谱的均匀介质散射 → 线性 sRGB**（ADR-0032）。
+///
+/// 这是三离散波长版本的物理升级版：逐波长解米氏方程，再用 CIE 1931 匹配函数
+/// 梯形积分。米氏区的振荡结构会被正确积分进去。
+///
+/// 输出是**线性** sRGB，显示端还需 gamma 编码（`v^(1/2.2)` 近似）。
+///
+/// # Parameters
+/// * `diameter` 颗粒直径（m）
+/// * `refractive_index_real` / `refractive_index_imag` 复折射率（`κ = 0` 为透明）
+/// * `number_density` 数密度（个/m³）
+/// * `phase` 相函数值（丁达尔取前向 0.7~0.9 的 Henyey–Greenstein）
+/// * `light_intensity` 入射光强度
+/// * `ray_length` 视线长度（m）
+/// * `steps` 单次散射积分的采样段数
+/// * `samples` 光谱采样点数（推荐 15~31）
+///
+/// # Safety
+/// `out_r` / `out_g` / `out_b` 必须可写。
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub extern "C" fn tyndall_inscatter_rgb_uniform(
+    diameter: f64,
+    refractive_index_real: f64,
+    refractive_index_imag: f64,
+    number_density: f64,
+    phase: f64,
+    light_intensity: f64,
+    ray_length: f64,
+    steps: u32,
+    samples: u32,
+    out_r: *mut f64,
+    out_g: *mut f64,
+    out_b: *mut f64,
+) -> Bool {
+    if out_r.is_null() || out_g.is_null() || out_b.is_null() {
+        set_error(
+            ERR_NULL_POINTER,
+            "tyndall_inscatter_rgb_uniform: out is null",
+        );
+        return Bool::FALSE;
+    }
+    ffi_guard(
+        Bool::FALSE,
+        || match mps_formula::tyndall_spectral::inscatter_rgb_uniform(
+            diameter,
+            refractive_index_real,
+            refractive_index_imag,
+            number_density,
+            phase,
+            light_intensity,
+            ray_length,
+            steps,
+            samples,
+        ) {
+            Some(v) => {
+                unsafe {
+                    *out_r = v.r;
+                    *out_g = v.g;
+                    *out_b = v.b;
+                }
+                clear_error();
+                Bool::TRUE
+            }
+            None => {
+                set_error(
+                    ERR_INVALID_ARGUMENT,
+                    "tyndall_inscatter_rgb_uniform: invalid arguments",
+                );
+                Bool::FALSE
+            }
+        },
+    )
+}
