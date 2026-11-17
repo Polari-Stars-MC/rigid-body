@@ -11416,6 +11416,30 @@ struct Bool tyndall_mie_scattering_efficiency_best(double size_param,
                                                    double refractive_index,
                                                    double *out);
 
+/**
+ * 复折射率下的米氏效率三元组 `(Q_ext, Q_sca, Q_abs)`（ADR-0027）。
+ *
+ * `refractive_index_imag` 是吸收系数 `κ`：0 = 透明颗粒，>0 = 吸光颗粒。
+ * 三个输出**全部成功才写**。
+ */
+struct Bool tyndall_mie_efficiencies_complex(double size_param,
+                                             double refractive_index_real,
+                                             double refractive_index_imag,
+                                             double *out_ext,
+                                             double *out_sca,
+                                             double *out_abs);
+
+/**
+ * 复折射率下的单散射反照率 `ω = Q_sca / Q_ext`（ADR-0027）。
+ *
+ * 直接对应 [ADR-0020](../adr/0020-spectral-tyndall.md) 里 `ω` 的精确版：
+ * `1` = 纯散射，`→ 0` = 强吸收。
+ */
+struct Bool tyndall_single_scattering_albedo_complex(double size_param,
+                                                     double refractive_index_real,
+                                                     double refractive_index_imag,
+                                                     double *out);
+
 struct Bool material_mechanics_hookes_law_uniaxial(double stress,
                                                    double youngs_modulus,
                                                    double *out);

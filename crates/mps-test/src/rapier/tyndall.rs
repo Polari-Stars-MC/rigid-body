@@ -10,9 +10,10 @@
 
 use mps_formula::tyndall::{
     MAX_SCATTER_ORDERS, beer_lambert_transmittance, henyey_greenstein_phase, inscatter_along_ray,
-    inscatter_along_ray_multiple, mie_extinction_efficiency_exact, mie_scattering_efficiency,
-    mie_scattering_efficiency_best, mie_scattering_efficiency_exact, optical_thickness,
-    rayleigh_phase, single_scattering_albedo, size_parameter, tyndall_visibility,
+    inscatter_along_ray_multiple, mie_efficiencies_complex, mie_extinction_efficiency_exact,
+    mie_scattering_efficiency, mie_scattering_efficiency_best, mie_scattering_efficiency_exact,
+    optical_thickness, rayleigh_phase, single_scattering_albedo, single_scattering_albedo_complex,
+    size_parameter, tyndall_visibility,
 };
 
 const EPS: f64 = 1e-12;
@@ -669,4 +670,130 @@ fn exact_mie_feeds_the_scattering_pipeline() {
     // 沿 60 m、数密度 12.7 的烟雾算亮度。
     let lum = inscatter_along_ray(sigma, sigma, 12.7, 1.0, 1.0, 60.0, 128).unwrap();
     assert!(lum > 0.0, "the beam must scatter, got {lum}");
+}
+// ── 复折射率与吸收（ADR-0027）──────────────────────────────────────────────
+
+/// `κ = 0`（透明颗粒）时 `Q_abs` 必须为 0，且满足光学定理。
+#[test]
+fn zero_imaginary_part_means_no_absorption() {
+    for x in [1.0, 5.0, 10.0] {
+        let (q_ext, q_sca, q_abs) = mie_efficiencies_complex(x, 1.33, 0.0).unwrap();
+        assert_eq!(q_abs, 0.0, "x={x}: transparent particles absorb nothing");
+        assert!(
+            (q_ext - q_sca).abs() <= q_ext * 1e-10,
+            "x={x}: optical theorem must hold, {q_ext} vs {q_sca}"
+        );
+    }
+}
+
+/// `Q_abs` 随 `κ` 单调增长 —— 吸收越强，转化为热的能量越多。
+#[test]
+fn absorption_grows_with_imaginary_part() {
+    let x = 5.0;
+    let mut prev = -1.0;
+    for kappa in [0.0, 0.001, 0.01, 0.1, 0.5] {
+        let (_, _, q_abs) = mie_efficiencies_complex(x, 1.33, kappa).unwrap();
+        assert!(
+            q_abs > prev,
+            "Q_abs must grow with kappa: kappa={kappa} gave {q_abs}, prev {prev}"
+        );
+        prev = q_abs;
+    }
+}
+
+/// `Q_sca` 随 `κ` 增大而**下降** —— 吸收抢走了本该散射的能量。
+///
+/// 这是反直觉但正确的：吸收和散射竞争同一份入射能量。
+#[test]
+fn scattering_decreases_with_absorption() {
+    let x = 5.0;
+    let (_, sca_clear, _) = mie_efficiencies_complex(x, 1.33, 0.0).unwrap();
+    let (_, sca_absorbing, _) = mie_efficiencies_complex(x, 1.33, 0.1).unwrap();
+    assert!(
+        sca_absorbing < sca_clear,
+        "absorption must reduce scattering: {sca_absorbing} vs {sca_clear}"
+    );
+}
+
+/// 三条恒成立的不等式。
+#[test]
+fn efficiency_inequalities_hold() {
+    for (x, kappa) in [(1.0, 0.01), (5.0, 0.1), (10.0, 0.5)] {
+        let (q_ext, q_sca, q_abs) = mie_efficiencies_complex(x, 1.33, kappa).unwrap();
+        assert!(q_abs >= 0.0, "Q_abs must be non-negative");
+        assert!(q_ext >= q_sca, "Q_ext >= Q_sca at x={x}, k={kappa}");
+        assert!(
+            (q_ext - q_sca - q_abs).abs() < 1e-12,
+            "Q_abs must equal Q_ext - Q_sca"
+        );
+        assert!(q_sca <= q_ext * 1.0000001);
+    }
+}
+
+/// 单散射反照率：透明时 = 1，强吸收时 → 0。
+#[test]
+fn albedo_reflects_absorption_strength() {
+    let x = 5.0;
+    let clear = single_scattering_albedo_complex(x, 1.33, 0.0).unwrap();
+    assert!(
+        (clear - 1.0).abs() < 1e-10,
+        "transparent albedo = 1, got {clear}"
+    );
+
+    let weak = single_scattering_albedo_complex(x, 1.33, 0.01).unwrap();
+    let strong = single_scattering_albedo_complex(x, 1.33, 0.5).unwrap();
+
+    assert!(weak < clear, "absorption lowers albedo: {weak} vs {clear}");
+    assert!(
+        strong < weak,
+        "stronger absorption lowers it further: {strong} vs {weak}"
+    );
+    assert!((0.0..=1.0).contains(&strong));
+}
+
+/// 复折射率版本与实折射率版本在 `κ = 0` 时必须一致。
+#[test]
+fn complex_matches_real_when_kappa_is_zero() {
+    for x in [1.0, 5.0, 10.0] {
+        let (q_ext, q_sca, _) = mie_efficiencies_complex(x, 1.33, 0.0).unwrap();
+        let sca_exact = mie_scattering_efficiency_exact(x, 1.33).unwrap();
+        let ext_exact = mie_extinction_efficiency_exact(x, 1.33).unwrap();
+        assert!((q_sca - sca_exact).abs() <= sca_exact * 1e-12);
+        assert!((q_ext - ext_exact).abs() <= ext_exact * 1e-12);
+    }
+}
+
+#[test]
+fn complex_rejects_invalid() {
+    assert!(mie_efficiencies_complex(0.0, 1.33, 0.01).is_none());
+    assert!(mie_efficiencies_complex(1.0, 0.0, 0.01).is_none());
+    // 虚部必须非负。
+    assert!(mie_efficiencies_complex(1.0, 1.33, -0.01).is_none());
+    assert!(mie_efficiencies_complex(f64::NAN, 1.33, 0.01).is_none());
+    assert!(single_scattering_albedo_complex(1.0, 1.33, -0.1).is_none());
+}
+
+/// 端到端：烟灰（强吸收）的光柱应比水滴（透明）暗得多。
+#[test]
+fn soot_beam_is_dimmer_than_water_beam() {
+    let x = size_parameter(1e-6, 550e-9).unwrap();
+    let radius = 0.5e-6;
+    let geom = std::f64::consts::PI * radius * radius;
+
+    let water = single_scattering_albedo_complex(x, 1.33, 0.0).unwrap();
+    let soot = single_scattering_albedo_complex(x, 1.33, 0.5).unwrap();
+    assert!(
+        water > soot,
+        "water albedo {water} should exceed soot {soot}"
+    );
+
+    // 用各自的反照率调亮度，验证排序。
+    let (_, sca_w, _) = mie_efficiencies_complex(x, 1.33, 0.0).unwrap();
+    let (_, sca_s, _) = mie_efficiencies_complex(x, 1.33, 0.5).unwrap();
+    let l_w = inscatter_along_ray(sca_w * geom, sca_w * geom, 12.7, 1.0, 1.0, 60.0, 128).unwrap();
+    let l_s = inscatter_along_ray(sca_s * geom, sca_s * geom, 12.7, 1.0, 1.0, 60.0, 128).unwrap();
+    assert!(
+        l_w > l_s,
+        "water beam {l_w} should be brighter than soot {l_s}"
+    );
 }

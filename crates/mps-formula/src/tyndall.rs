@@ -234,6 +234,104 @@ pub fn mie_extinction_efficiency_exact(size_param: f64, refractive_index: f64) -
     Some(q.max(0.0))
 }
 
+/// 复折射率下的米氏效率三元组 `(Q_ext, Q_sca, Q_abs)`。
+///
+/// ## 复折射率的意义
+///
+/// `m = n + i·κ`：
+///
+/// * `n`（实部）—— 折射，决定散射的强度
+/// * `κ`（虚部）—— **吸收**，决定光被转化成热的比例
+///
+/// `κ = 0` 是无吸收的透明颗粒（水滴、玻璃）；`κ > 0` 是有色/吸光颗粒
+/// （烟灰、矿物粉尘、金属氧化物）。
+///
+/// ## 三条物理约束（都有测试）
+///
+/// ```text
+/// Q_ext == Q_sca        当 κ = 0（光学定理）
+/// Q_abs == 0            当 κ = 0
+/// Q_abs >= 0            恒成立
+/// Q_ext >= Q_sca        恒成立（Q_abs = Q_ext - Q_sca）
+/// ```
+///
+/// `Q_sca` 会随 `κ` 增大而**下降**——吸收抢走了本该散射的能量。这与
+/// [ADR-0020](0020-spectral-tyndall.md) 里"偏红必须有吸收"是同一件事：
+/// 吸收让某些通道的散射光变少。
+///
+/// ## 与 `mie_scattering_efficiency_exact` 的关系
+///
+/// 那个函数只返回 `Q_sca`（`κ` 固定为 0）。本函数同时返回三者，
+/// 让宿主能算出"多少光被散射出来、多少被吸收"。
+///
+/// # Parameters
+/// * `size_param` 尺寸参数 `x = πd/λ`
+/// * `refractive_index_real` 实部 `n`（通常 1.3~1.6）
+/// * `refractive_index_imag` 虚部 `κ`（`>= 0`；0 = 无吸收）
+///
+/// # Returns
+/// `Some((Q_ext, Q_sca, Q_abs))`；参数非法或级数不收敛时 `None`。
+pub fn mie_efficiencies_complex(
+    size_param: f64,
+    refractive_index_real: f64,
+    refractive_index_imag: f64,
+) -> Option<(f64, f64, f64)> {
+    if !size_param.is_finite()
+        || !refractive_index_real.is_finite()
+        || !refractive_index_imag.is_finite()
+    {
+        return None;
+    }
+    if size_param <= 0.0 || refractive_index_real <= 0.0 || refractive_index_imag < 0.0 {
+        return None;
+    }
+    let m = crate::bessel::Complex::new(refractive_index_real, refractive_index_imag);
+    let nmax = crate::bessel::mie_max_order(size_param)?;
+
+    let (mut sum_ext, mut sum_sca) = (0.0, 0.0);
+    for n in 1..=nmax {
+        let a = crate::bessel::mie_coefficient_a(m, size_param, n)?;
+        let b = crate::bessel::mie_coefficient_b(m, size_param, n)?;
+        let w = (2 * n + 1) as f64;
+        sum_ext += w * (a.re + b.re);
+        sum_sca += w * (a.norm_sqr() + b.norm_sqr());
+    }
+    let factor = 2.0 / (size_param * size_param);
+    let q_ext = factor * sum_ext;
+    let q_sca = factor * sum_sca;
+    if !q_ext.is_finite() || !q_sca.is_finite() {
+        return None;
+    }
+    // Q_abs = Q_ext - Q_sca。数值上可能出现极小的负值（1e-16 量级），
+    // 钳到 0 而不是报错 —— 那是浮点误差，不是物理问题。
+    let q_abs = (q_ext - q_sca).max(0.0);
+    Some((q_ext.max(0.0), q_sca.max(0.0), q_abs))
+}
+
+/// 复折射率下的**单散射反照率** `ω = Q_sca / Q_ext`。
+///
+/// 这是 [ADR-0020](0020-spectral-tyndall.md) 里 `ω` 的精确版：
+///
+/// | `ω` | 含义 |
+/// | --- | --- |
+/// | `1` | 纯散射（水滴、玻璃）—— 光柱最亮 |
+/// | `0.5` | 一半吸收 |
+/// | `→ 0` | 强吸收（烟灰、墨汁）—— 光柱极暗 |
+///
+/// # Returns
+/// `Some(ω)`；`Q_ext == 0` 时返回 `None`（无消光则反照率无定义）。
+pub fn single_scattering_albedo_complex(
+    size_param: f64,
+    refractive_index_real: f64,
+    refractive_index_imag: f64,
+) -> Option<f64> {
+    let (q_ext, q_sca, _) =
+        mie_efficiencies_complex(size_param, refractive_index_real, refractive_index_imag)?;
+    if q_ext <= 0.0 {
+        return None;
+    }
+    Some((q_sca / q_ext).clamp(0.0, 1.0))
+}
 /// 按尺寸参数自动选择米氏算法。
 ///
 /// | `x` | 用哪个 | 理由 |

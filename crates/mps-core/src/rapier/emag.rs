@@ -652,3 +652,69 @@ pub extern "C" fn tyndall_mie_scattering_efficiency_best(
         mps_formula::tyndall::mie_scattering_efficiency_best(size_param, refractive_index)
     })
 }
+/// 复折射率下的米氏效率三元组 `(Q_ext, Q_sca, Q_abs)`（ADR-0027）。
+///
+/// `refractive_index_imag` 是吸收系数 `κ`：0 = 透明颗粒，>0 = 吸光颗粒。
+/// 三个输出**全部成功才写**。
+#[unsafe(no_mangle)]
+pub extern "C" fn tyndall_mie_efficiencies_complex(
+    size_param: f64,
+    refractive_index_real: f64,
+    refractive_index_imag: f64,
+    out_ext: *mut f64,
+    out_sca: *mut f64,
+    out_abs: *mut f64,
+) -> Bool {
+    if out_ext.is_null() || out_sca.is_null() || out_abs.is_null() {
+        set_error(
+            ERR_NULL_POINTER,
+            "tyndall_mie_efficiencies_complex: out is null",
+        );
+        return Bool::FALSE;
+    }
+    ffi_guard(
+        Bool::FALSE,
+        || match mps_formula::tyndall::mie_efficiencies_complex(
+            size_param,
+            refractive_index_real,
+            refractive_index_imag,
+        ) {
+            Some((q_ext, q_sca, q_abs)) => {
+                unsafe {
+                    *out_ext = q_ext;
+                    *out_sca = q_sca;
+                    *out_abs = q_abs;
+                }
+                clear_error();
+                Bool::TRUE
+            }
+            None => {
+                set_error(
+                    ERR_INVALID_ARGUMENT,
+                    "tyndall_mie_efficiencies_complex: invalid arguments",
+                );
+                Bool::FALSE
+            }
+        },
+    )
+}
+
+/// 复折射率下的单散射反照率 `ω = Q_sca / Q_ext`（ADR-0027）。
+///
+/// 直接对应 [ADR-0020](../adr/0020-spectral-tyndall.md) 里 `ω` 的精确版：
+/// `1` = 纯散射，`→ 0` = 强吸收。
+#[unsafe(no_mangle)]
+pub extern "C" fn tyndall_single_scattering_albedo_complex(
+    size_param: f64,
+    refractive_index_real: f64,
+    refractive_index_imag: f64,
+    out: *mut f64,
+) -> Bool {
+    ffi_scalar(out, || {
+        mps_formula::tyndall::single_scattering_albedo_complex(
+            size_param,
+            refractive_index_real,
+            refractive_index_imag,
+        )
+    })
+}
