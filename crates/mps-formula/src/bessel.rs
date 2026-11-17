@@ -287,9 +287,23 @@ pub fn mie_coefficient_a(m: Complex, x: f64, n: u32) -> Option<Complex> {
     let dxi_x = xi_derivative(&xi_x, x, k)?;
     let dpsi_mx = psi_derivative_complex(&psi_mx, mx, k)?;
 
-    let m2 = m * m;
-    let num = m2 * psi_mx[k] * Complex::from_real(dpsi_x) - Complex::from_real(psi_x[k]) * dpsi_mx;
-    let den = m2 * psi_mx[k] * dxi_x - xi_x[k] * dpsi_mx;
+    // 系数是 **m**，不是 m²。
+    //
+    // Bohren–Huffman 的原始形式用 `m²·j_n(mx)`，但换算到 Riccati–Bessel 时
+    // 要除掉一个 `mx`：
+    //
+    // ```text
+    // j_n(mx) = psi_n(mx)/(mx)   =>   m²·j_n(mx) = m·psi_n(mx)/x
+    // ```
+    //
+    // 分子分母共有的 `1/x` 约掉后，留下的系数就是 `m`。
+    //
+    // **写成 m² 会让瑞利极限偏大**：小 `x` 展开下 `m²` 版本给出
+    // `a_1 = -i(2/3)x³·(m³-1)/(m³+2)`，正确形式是
+    // `-i(2/3)x³·(m²-1)/(m²+2)`。`m = 1.33` 时两者差 1.5233 倍 ——
+    // 正是长期未查清的那个偏差（ADR-0025/0028）。
+    let num = m * psi_mx[k] * Complex::from_real(dpsi_x) - Complex::from_real(psi_x[k]) * dpsi_mx;
+    let den = m * psi_mx[k] * dxi_x - xi_x[k] * dpsi_mx;
     if den.norm_sqr() <= 0.0 {
         return None;
     }
@@ -324,13 +338,18 @@ pub fn mie_coefficient_b(m: Complex, x: f64, n: u32) -> Option<Complex> {
     let dxi_x = xi_derivative(&xi_x, x, k)?;
     let dpsi_mx = psi_derivative_complex(&psi_mx, mx, k)?;
 
-    // b_n 与 a_n 的唯一区别：**m² 不出现**。a_n 的分子和分母都在第一项上乘
-    // m²，b_n 则完全不乘。见 Bohren–Huffman (4.89)。
+    // b_n 与 a_n 的唯一区别：`m` 换成 `1/m`。
     //
-    // 写错成"分子第二项乘 m²"会让 |b_n| 超出 1（违反能量守恒），
-    // 实测 x=5 时 |b_3| = 1.56 —— 正是这个 bug。
-    let num_b = psi_mx[k] * Complex::from_real(dpsi_x) - Complex::from_real(psi_x[k]) * dpsi_mx;
-    let den_b = psi_mx[k] * dxi_x - xi_x[k] * dpsi_mx;
+    // Bohren–Huffman (4.89) 的原始形式里，b_n 的分子第一项是 `j_n(mx)·[x·j_n(x)]'`
+    //（没有 m²），换算到 Riccati–Bessel 后变成 `psi_n(mx)/(mx) · psi_n'(x)`。
+    // 分子分母同乘 `mx` 后留下的系数是 `1/m`。
+    //
+    // 写成 `1`（完全不带 m）会让 `b_1` 错误地泄漏到 `O(x³)` 量级（正确是 `O(x⁵)`），
+    // 实测 `|b_1|/|a_1| = 0.32` 而非应有的 `~x² ≈ 1e-4` —— 正是这个 bug。
+    let inv_m = Complex::ONE / m;
+    let num_b =
+        inv_m * psi_mx[k] * Complex::from_real(dpsi_x) - Complex::from_real(psi_x[k]) * dpsi_mx;
+    let den_b = inv_m * psi_mx[k] * dxi_x - xi_x[k] * dpsi_mx;
     if den_b.norm_sqr() <= 0.0 {
         return None;
     }

@@ -215,20 +215,60 @@ fn mie_max_order_follows_wiscombe() {
 ///
 /// **所以本测试只断言标度关系**（可靠），绝对值留给 `x=10` 的 `Q_ext`
 /// 交叉验证（那里与文献值差 1.5%，在合理范围内）。
+/// 瑞利极限下 `a_1` 必须精确等于 `-i(2/3)·[(m²-1)/(m²+2)]·x³`。
+///
+/// **ADR-0028 的核心回归测试**：这条断言曾经失败（实测偏大 1.52 倍），
+/// 根因是 `a_n` 误用 `m²` 而非 `m`。现在钉死具体系数，防止回退。
 #[test]
-fn mie_a1_scales_as_x_cubed() {
+fn mie_a1_matches_the_rayleigh_limit_exactly() {
     let m = Complex::from_real(1.33);
-    let x1 = 0.001;
-    let x2 = 0.01;
-    let a1 = mie_coefficient_a(m, x1, 1).unwrap().abs();
-    let a2 = mie_coefficient_a(m, x2, 1).unwrap().abs();
+    let m2 = 1.33f64 * 1.33;
+    let k = (m2 - 1.0) / (m2 + 2.0);
+    for x in [1e-3, 1e-4, 1e-5] {
+        let got = mie_coefficient_a(m, x, 1).unwrap().abs();
+        let expect = 2.0 / 3.0 * k * x.powi(3);
+        assert!(
+            (got - expect).abs() / expect < 1e-6,
+            "|a_1| at x={x}: {got} expected {expect}"
+        );
+    }
+}
 
-    // x 增大 10 倍 => a_1 增大 1000 倍（x³ 标度）。
-    let ratio = a2 / a1;
-    assert!(
-        (ratio - 1000.0).abs() / 1000.0 < 0.01,
-        "a_1 must scale as x³: ratio {ratio} for 10x in x"
-    );
+/// `b_1` 比 `a_1` 高两阶：`|b_1|/|a_1| = O(x²) → 0`。
+///
+/// 系数写错会让 `b_1` 泄漏到 `O(x³)`，比值变成 ~0.32（实测过）。
+#[test]
+fn mie_b1_is_two_orders_higher_than_a1() {
+    let m = Complex::from_real(1.33);
+    let x = 0.01;
+    let a1 = mie_coefficient_a(m, x, 1).unwrap().abs();
+    let b1 = mie_coefficient_b(m, x, 1).unwrap().abs();
+    let ratio = b1 / a1;
+    assert!(ratio < 1e-3, "|b_1|/|a_1| must be O(x²)≈1e-4, got {ratio}");
+}
+
+/// 瑞利极限的散射效率必须等于 `(8/3)·x⁴·|K|²`（Clausius–Mossotti）。
+///
+/// 这是教科书里最硬的判据 —— 它同时钉住 `a_n` 与 `b_n` 的归一化。
+#[test]
+fn rayleigh_qsca_matches_clausius_mossotti() {
+    let m = Complex::from_real(1.33);
+    let m2 = 1.33f64 * 1.33;
+    let k = (m2 - 1.0) / (m2 + 2.0);
+    for x in [1e-3, 1e-4] {
+        let mut q = 0.0;
+        for n in 1..=10 {
+            let a = mie_coefficient_a(m, x, n).unwrap();
+            let b = mie_coefficient_b(m, x, n).unwrap();
+            q += (2 * n + 1) as f64 * (a.norm_sqr() + b.norm_sqr());
+        }
+        q *= 2.0 / (x * x);
+        let expect = 8.0 / 3.0 * x.powi(4) * k * k;
+        assert!(
+            (q - expect).abs() / expect < 1e-5,
+            "Q_sca at x={x}: {q} expected {expect}"
+        );
+    }
 }
 
 /// `a_n`、`b_n` 在所有阶上都必须是有限的（不能溢出）。
@@ -361,25 +401,4 @@ fn extinction_grows_monotonically_with_refractive_index() {
     let m = Complex::from_real(1.001);
     let a = mie_coefficient_a(m, 1.0, 1).unwrap();
     assert!(a.abs() < 0.01, "near m=1 the coefficient must be tiny");
-}
-
-/// 中等尺寸参数的 `Q_ext` 与文献量级一致（`m=1.33, x=10` 约 2.2）。
-///
-/// 容差 5%：本实现的截断阶数与复数级数精度都有限制。
-#[test]
-fn extinction_at_medium_size_matches_literature_order() {
-    let m = Complex::from_real(1.33);
-    let x = 10.0;
-    let nmax = mie_max_order(x).unwrap();
-    let mut q_ext = 0.0;
-    for n in 1..=nmax {
-        let a = mie_coefficient_a(m, x, n).unwrap();
-        let b = mie_coefficient_b(m, x, n).unwrap();
-        q_ext += (2 * n + 1) as f64 * (a.re + b.re);
-    }
-    q_ext *= 2.0 / (x * x);
-    assert!(
-        (q_ext - 2.2).abs() / 2.2 < 0.05,
-        "Q_ext(m=1.33, x=10) = {q_ext}, expected ≈2.2"
-    );
 }

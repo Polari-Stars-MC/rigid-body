@@ -33,5 +33,6 @@
 | [0025](0025-riccati-bessel-mie.md) | Riccati–Bessel 与米氏精确解（含未查清的 1.52 倍差异） | 接受 |
 | [0026](0026-exact-mie-integration.md) | 米氏精确解接入（分区策略：x<0.3 用渐近式，否则精确解） | 接受 |
 | [0027](0027-complex-refractive-index.md) | 复折射率与吸收（Q_ext/Q_sca/Q_abs 三元组） | 接受 |
+| [0028](0028-mie-normalisation-fix.md) | 米氏系数归一化修复（`m²` 应为 `m`，1.52 倍偏差结案） | 接受 |
 
 仓库根的 [DESIGN.md](../../DESIGN.md) 和 [OPTIMIZATION.md](../../OPTIMIZATION.md) 是被源码注释引用的章节索引，不是 ADR 的前身。它们的 `§` 编号继续留在原地。
