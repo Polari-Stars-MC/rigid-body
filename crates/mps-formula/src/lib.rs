@@ -8,6 +8,7 @@
 
 pub mod acoustics;
 pub mod astrophysics;
+pub mod bessel;
 pub mod biomechanics;
 pub mod celestial_data;
 pub mod chaos;

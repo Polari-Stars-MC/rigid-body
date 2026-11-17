@@ -34,6 +34,7 @@ pub mod rapier {
     pub mod astrophysics;
     pub mod balloon;
     pub mod batch;
+    pub mod bessel;
     pub mod biomechanics;
     pub mod body_spatial_index;
     pub mod bounds;
