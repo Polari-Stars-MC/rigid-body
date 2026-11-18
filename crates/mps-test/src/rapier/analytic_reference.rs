@@ -517,4 +517,358 @@ mod tests {
         let beta_b = plasma_beta(n, t, b * 2.0).unwrap();
         assert!(rel(beta_b, beta / 4.0) < 1e-12, "β 应对 B² 反比");
     }
+
+    // ── 退化情形：光子动量（ROADMAP 历史缺陷 #3）─────────────────────────────
+
+    /// 构造一个全零的粒子报告，用于接收输出。
+    fn zero_particle() -> mps_formula::ffi::RelativisticParticle {
+        mps_formula::ffi::RelativisticParticle {
+            lorentz_factor: 0.0,
+            total_energy: 0.0,
+            kinetic_energy: 0.0,
+            momentum_magnitude: 0.0,
+            momentum: mps_formula::ffi::Vec3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            rapidity: 0.0,
+        }
+    }
+
+    /// **轴对齐光子**（历史缺陷的原始触发条件）。
+    ///
+    /// `relativity.rs` 里的注释写得很清楚：
+    ///
+    /// > Earlier this multiplied the direction by `INFINITY`, so any axis-aligned
+    /// > photon got `momentum = (inf, NaN, NaN)` (`0 * inf == NaN`) while the
+    /// > function returned success.
+    ///
+    /// 所以这条测试直接钉住那个输入：`m = 0`、`v = (c, 0, 0)`。修好后
+    /// `momentum` 必须是**单位方向** `(1, 0, 0)`，三个分量都不得是 `NaN`/`inf`。
+    ///
+    /// 三个坐标轴各测一次 —— `0 * inf == NaN` 只在**零分量**上发作，所以只测
+    /// 对角线会漏掉（对角线三个分量都非零）。
+    #[test]
+    fn axis_aligned_photon_momentum_is_a_unit_vector_not_nan() {
+        let cases = [
+            (
+                mps_formula::ffi::Vec3 {
+                    x: C,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                [1.0, 0.0, 0.0],
+            ),
+            (
+                mps_formula::ffi::Vec3 {
+                    x: 0.0,
+                    y: C,
+                    z: 0.0,
+                },
+                [0.0, 1.0, 0.0],
+            ),
+            (
+                mps_formula::ffi::Vec3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: C,
+                },
+                [0.0, 0.0, 1.0],
+            ),
+        ];
+        for (velocity, expect) in cases {
+            let mut out = zero_particle();
+            let ok = mps_formula::relativity::rel_particle_properties(0.0, velocity, &mut out);
+            assert_eq!(ok, mps_formula::ffi::Bool::TRUE);
+
+            let m = out.momentum;
+            assert!(
+                m.x.is_finite() && m.y.is_finite() && m.z.is_finite(),
+                "光子动量出现非有限分量：({}, {}, {})",
+                m.x,
+                m.y,
+                m.z
+            );
+            assert!(
+                (m.x - expect[0]).abs() < 1e-12
+                    && (m.y - expect[1]).abs() < 1e-12
+                    && (m.z - expect[2]).abs() < 1e-12,
+                "光子动量方向应为 {expect:?}，实际 ({}, {}, {})",
+                m.x,
+                m.y,
+                m.z
+            );
+            // 单位向量：长度必须为 1（不是 INFINITY）。
+            let len = (m.x * m.x + m.y * m.y + m.z * m.z).sqrt();
+            assert!((len - 1.0).abs() < 1e-12, "动量方向向量长度 = {len}");
+        }
+    }
+
+    /// 斜向光子：动量必须是**归一化方向**，长度 1。
+    #[test]
+    fn diagonal_photon_momentum_is_normalised() {
+        let s = 1.0 / 3.0f64.sqrt();
+        let velocity = mps_formula::ffi::Vec3 {
+            x: C * s,
+            y: C * s,
+            z: C * s,
+        };
+        let mut out = zero_particle();
+        assert_eq!(
+            mps_formula::relativity::rel_particle_properties(0.0, velocity, &mut out),
+            mps_formula::ffi::Bool::TRUE
+        );
+        let m = out.momentum;
+        for (name, got, want) in [("x", m.x, s), ("y", m.y, s), ("z", m.z, s)] {
+            assert!(
+                (got - want).abs() < 1e-12,
+                "动量 {name} = {got}，应为 {want}"
+            );
+        }
+    }
+
+    /// `momentum_magnitude` 对光子是 `INFINITY`（**文档化的约定**，不是 bug）。
+    ///
+    /// 这条断言把「文档说的」与「代码做的」钉在一起 —— 如果将来有人把它改成
+    /// 有限值，测试会提醒他同时改文档。
+    ///
+    /// 顺带记录一个**设计张力**：物理上光子的动量是有限的（`p = E/c`），
+    /// 这里的 `INFINITY` 是 `γmv` 在 `γ→∞, m→0` 下的不定型产物。函数选择用
+    /// `INFINITY` 表示「没有静止系」，方向另用单位向量给出。这是可辩护的取舍，
+    /// 但与 ADR-0034「返回 TRUE 就要给有限值」的约定不一致 —— 记在这里。
+    #[test]
+    fn photon_momentum_magnitude_is_documented_as_infinite() {
+        let velocity = mps_formula::ffi::Vec3 {
+            x: C,
+            y: 0.0,
+            z: 0.0,
+        };
+        let mut out = zero_particle();
+        assert_eq!(
+            mps_formula::relativity::rel_particle_properties(0.0, velocity, &mut out),
+            mps_formula::ffi::Bool::TRUE
+        );
+        assert!(out.momentum_magnitude.is_infinite());
+        assert!(out.lorentz_factor.is_infinite());
+    }
+
+    /// 有质量粒子：`p = γmv`，且方向与速度同向。
+    #[test]
+    fn massive_particle_momentum_follows_gamma_mv() {
+        let velocity = mps_formula::ffi::Vec3 {
+            x: BETA * C,
+            y: 0.0,
+            z: 0.0,
+        };
+        let mut out = zero_particle();
+        assert_eq!(
+            mps_formula::relativity::rel_particle_properties(1.0, velocity, &mut out),
+            mps_formula::ffi::Bool::TRUE
+        );
+        assert!(
+            rel(out.lorentz_factor, GAMMA) < 1e-12,
+            "γ = {}",
+            out.lorentz_factor
+        );
+        assert!(
+            rel(out.momentum_magnitude, GAMMA * BETA * C) < 1e-12,
+            "|p| = {}",
+            out.momentum_magnitude
+        );
+        assert!(rel(out.momentum.x, GAMMA * BETA * C) < 1e-12);
+        assert!(out.momentum.y.abs() < 1e-12 && out.momentum.z.abs() < 1e-12);
+        // 总能量与动能：E = γmc², K = (γ−1)mc²。
+        assert!(rel(out.total_energy, GAMMA * C * C) < 1e-12);
+        assert!(rel(out.kinetic_energy, (GAMMA - 1.0) * C * C) < 1e-12);
+    }
+
+    /// 无质量但速度低于 `c` 是**非法输入**，必须拒绝而不是返回无意义值。
+    #[test]
+    fn massless_below_c_is_rejected() {
+        let velocity = mps_formula::ffi::Vec3 {
+            x: 0.5 * C,
+            y: 0.0,
+            z: 0.0,
+        };
+        let mut out = zero_particle();
+        assert_eq!(
+            mps_formula::relativity::rel_particle_properties(0.0, velocity, &mut out),
+            mps_formula::ffi::Bool::FALSE
+        );
+        // 负质量同样非法。
+        let mut out2 = zero_particle();
+        assert_eq!(
+            mps_formula::relativity::rel_particle_properties(
+                -1.0,
+                mps_formula::ffi::Vec3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0
+                },
+                &mut out2
+            ),
+            mps_formula::ffi::Bool::FALSE
+        );
+    }
+
+    // ── SPH 力账（ROADMAP 历史缺陷 #1）───────────────────────────────────────
+
+    fn sph_p(pos: [f64; 3], density: f64, pressure: f64) -> mps_core::rapier::ffi::SphParticle {
+        mps_core::rapier::ffi::SphParticle {
+            position: mps_core::rapier::ffi::Vec3 {
+                x: pos[0],
+                y: pos[1],
+                z: pos[2],
+            },
+            velocity: mps_core::rapier::ffi::Vec3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            mass: 1.0,
+            density,
+            pressure,
+        }
+    }
+
+    fn zero_report() -> mps_core::rapier::ffi::SphForceReport {
+        let z = || mps_core::rapier::ffi::Vec3 {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        };
+        mps_core::rapier::ffi::SphForceReport {
+            density: 0.0,
+            pressure: 0.0,
+            pressure_force: z(),
+            viscosity_force: z(),
+            surface_tension_force: z(),
+            total_force: z(),
+        }
+    }
+
+    /// 对称双粒子：**牛顿第三定律** —— 两个粒子受到的压力必须等大反向。
+    ///
+    /// 这条抓 ROADMAP 点名的「SPH 自贡献重复计算」以及一切非对称的邻居遍历：
+    /// 如果某个粒子把自己算进邻居、或者邻居循环少走了一个方向，等大反向就破。
+    ///
+    /// 关闭粘性与表面张力，只留压力项 —— 压力才是对心的。
+    #[test]
+    fn sph_pair_forces_are_equal_and_opposite() {
+        let h = 1.2;
+        let d = 1.0;
+        let particles = [
+            sph_p([-d * 0.5, 0.0, 0.0], 1000.0, 500.0),
+            sph_p([d * 0.5, 0.0, 0.0], 1000.0, 500.0),
+        ];
+        let eval = |target: mps_core::rapier::ffi::SphParticle| {
+            let mut out = zero_report();
+            let ok = mps_core::rapier::fluid::fluid_sph_estimate_forces(
+                target,
+                particles.as_ptr(),
+                particles.len() as u32,
+                h,
+                2000.0, // gas_constant
+                1000.0, // rest_density
+                0.0,    // viscosity
+                0.0,    // surface_tension
+                &mut out,
+            );
+            assert_eq!(ok, mps_core::rapier::ffi::Bool::TRUE);
+            out.total_force
+        };
+
+        let fa = eval(particles[0]);
+        let fb = eval(particles[1]);
+
+        // 力必须显著（否则等大反向是平凡的真）。
+        let mag = (fa.x * fa.x + fa.y * fa.y + fa.z * fa.z).sqrt();
+        assert!(mag > 1e-6, "压力必须非零，否则第三定律断言是平凡的：{mag}");
+
+        // 等大反向。
+        let scale = mag.max(1e-30);
+        assert!(
+            ((fa.x + fb.x) / scale).abs() < 1e-9,
+            "x 方向不满足第三定律：{:.6} + {:.6}",
+            fa.x,
+            fb.x
+        );
+        assert!(((fa.y + fb.y) / scale).abs() < 1e-9, "y 方向不满足第三定律");
+        assert!(((fa.z + fb.z) / scale).abs() < 1e-9, "z 方向不满足第三定律");
+
+        // 排斥：A 在 -x，B 在 +x，所以 A 应被推向 -x，B 被推向 +x。
+        assert!(fa.x < 0.0, "A 应被推向 -x，实际 {:.6}", fa.x);
+        assert!(fb.x > 0.0, "B 应被推向 +x，实际 {:.6}", fb.x);
+    }
+
+    /// 孤立粒子（没有任何邻居）受到的总力必须**精确为零**。
+    ///
+    /// 这是「自贡献」最直接的检验：如果粒子把自己算成邻居，且核梯度在 `r = 0`
+    /// 处没有正确取零，就会得到一个虚假的自力 —— 那会让整团流体自发加速。
+    #[test]
+    fn isolated_particle_feels_no_force() {
+        let particles = [sph_p([0.0, 0.0, 0.0], 1000.0, 500.0)];
+        let mut out = zero_report();
+        assert_eq!(
+            mps_core::rapier::fluid::fluid_sph_estimate_forces(
+                particles[0],
+                particles.as_ptr(),
+                1,
+                1.2,
+                2000.0,
+                1000.0,
+                0.0,
+                0.0,
+                &mut out,
+            ),
+            mps_core::rapier::ffi::Bool::TRUE
+        );
+        let f = out.total_force;
+        assert_eq!(f.x, 0.0, "孤立粒子不得受 x 方向自力");
+        assert_eq!(f.y, 0.0, "孤立粒子不得受 y 方向自力");
+        assert_eq!(f.z, 0.0, "孤立粒子不得受 z 方向自力");
+    }
+
+    /// 对称晶格中心粒子受到的总力必须为零（净力抵消）。
+    ///
+    /// 6 个面心邻居关于中心对称，压力项逐对抵消。这条不依赖任何系数取值 ——
+    /// 只要邻居遍历是**对称且完整**的，净力必然为零。
+    #[test]
+    fn symmetric_lattice_centre_feels_no_net_force() {
+        let d = 1.0;
+        let h = 1.2;
+        let mut particles = vec![sph_p([0.0, 0.0, 0.0], 1000.0, 500.0)];
+        for axis in 0..3 {
+            for sign in [-1.0, 1.0] {
+                let mut p = [0.0, 0.0, 0.0];
+                p[axis] = sign * d;
+                particles.push(sph_p(p, 1000.0, 500.0));
+            }
+        }
+        let mut out = zero_report();
+        assert_eq!(
+            mps_core::rapier::fluid::fluid_sph_estimate_forces(
+                particles[0],
+                particles.as_ptr(),
+                particles.len() as u32,
+                h,
+                2000.0,
+                1000.0,
+                0.0,
+                0.0,
+                &mut out,
+            ),
+            mps_core::rapier::ffi::Bool::TRUE
+        );
+        let f = out.total_force;
+        let scale = out.pressure.abs().max(1.0);
+        assert!(
+            f.x.abs() < 1e-9 * scale && f.y.abs() < 1e-9 * scale && f.z.abs() < 1e-9 * scale,
+            "对称晶格中心净力应为零，实际 ({:.3e}, {:.3e}, {:.3e})",
+            f.x,
+            f.y,
+            f.z
+        );
+    }
 }
