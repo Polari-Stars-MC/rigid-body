@@ -4,10 +4,10 @@
 //! 这与日落同源，也是分通道版本相对标量版本的唯一视觉价值。
 
 use mps_formula::tyndall_spectral::{
-    BLUE_NM, GREEN_NM, RED_NM, SpectralLuminance, SpectralOptics, cie_color_matching,
-    inscatter_rgb_uniform, inscatter_spectral, inscatter_spectral_full,
-    inscatter_spectral_through_particles, mie_spectral_samples, spectral_albedo,
-    spectral_samples_to_rgb, spectral_transmittance, wavelength_to_rgb, xyz_to_linear_srgb,
+    BLUE_NM, RED_NM, SpectralLuminance, SpectralOptics, cie_color_matching, inscatter_rgb_uniform,
+    inscatter_spectral, inscatter_spectral_full, inscatter_spectral_through_particles,
+    mie_spectral_samples, spectral_albedo, spectral_samples_to_rgb, spectral_transmittance,
+    wavelength_to_rgb, xyz_to_linear_srgb,
 };
 
 const EPS: f64 = 1e-12;

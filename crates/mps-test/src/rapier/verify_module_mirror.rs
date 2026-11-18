@@ -159,6 +159,8 @@ mod tests {
             // 零引用 C ABI 的有限性扫描（ROADMAP「还开着」第 6 条）。
             // 跨 15 个模块、86 个入口的表驱动测试，无单一生产侧对应模块。
             "ffi_finiteness",
+            // 守恒律断言（动量/角动量/机械能），纯 C ABI 面，无生产侧对应模块。
+            "conservation_laws",
         ]
         .into_iter()
         .map(String::from)

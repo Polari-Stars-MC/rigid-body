@@ -46,6 +46,7 @@ pub mod rapier {
     pub mod collider;
     pub mod collision_mode;
     pub mod compat;
+    pub mod conservation_laws;
     pub mod contact_mechanics;
     pub mod continuum;
     pub mod control_theory;
