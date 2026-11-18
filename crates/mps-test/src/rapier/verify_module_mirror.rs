@@ -156,6 +156,9 @@ mod tests {
             // 真实物理验证系列：摩擦/恢复系数能量学、颗粒休止角
             "friction_restitution_energy",
             "granular_repose",
+            // 零引用 C ABI 的有限性扫描（ROADMAP「还开着」第 6 条）。
+            // 跨 15 个模块、86 个入口的表驱动测试，无单一生产侧对应模块。
+            "ffi_finiteness",
         ]
         .into_iter()
         .map(String::from)

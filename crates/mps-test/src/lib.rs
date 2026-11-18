@@ -64,6 +64,7 @@ pub mod rapier {
     pub mod error;
     pub mod events;
     pub mod ffi;
+    pub mod ffi_finiteness;
     pub mod fluid;
     pub mod fluid_sph;
     pub mod force_queue;

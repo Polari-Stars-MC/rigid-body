@@ -14,8 +14,8 @@
 | `mps-core` C ABI 入口总数 | 1002 |
 | 其中出现在生成头文件 `rigid_body.h` 里 | 1002 |
 | 其中被 `mps-jni` 的 `jni!` 体引用 | 613 |
-| 其中被 `mps-test` 引用 | 753 |
-| 既无 JNI 绑定也无测试引用 | 143 |
+| 其中被 `mps-test` 引用 | 839 |
+| 既无 JNI 绑定也无测试引用 | 57 |
 
 ## 模块表
 
@@ -25,11 +25,11 @@
 
 | 模块 | 前缀 | 入口 | 门控 | 可合并组 | 导览页 | 镜像测试 | JNI | 测试 |
 | --- | --- | ---: | ---: | --- | --- | --- | ---: | ---: |
-| `acoustics_ffi` | `acoustics_*` | 12 | — | dedicated 12 | [acoustics_ffi.md](mps-core/acoustics_ffi.md) | [acoustics_ffi.rs](../crates/mps-test/src/rapier/acoustics_ffi.rs) | 0 | 5 |
+| `acoustics_ffi` | `acoustics_*` | 12 | — | dedicated 12 | [acoustics_ffi.md](mps-core/acoustics_ffi.md) | [acoustics_ffi.rs](../crates/mps-test/src/rapier/acoustics_ffi.rs) | 0 | 11 |
 | `aerodynamics` | `aero_*` | 5 | — | dedicated 5 | [aerodynamics.md](mps-core/aerodynamics.md) | [aerodynamics.rs](../crates/mps-test/src/rapier/aerodynamics.rs) | 1 | 2 |
 | `anvilkit` | — | 22 | — | set_param 2 / topology 1 / dedicated 19 | [anvilkit.md](mps-core/anvilkit.md) | [anvilkit.rs](../crates/mps-test/src/rapier/anvilkit.rs) | 13 | 8 |
 | `articulation` | `articulation_body_*` | 4 | — | set_param 1 / read_param 1 / dedicated 2 | [articulation.md](mps-core/articulation.md) | [articulation.rs](../crates/mps-test/src/rapier/articulation.rs) | 4 | 4 |
-| `astrocalc` | `astrophysics_*` | 26 | — | dedicated 26 | [astrocalc.md](mps-core/astrocalc.md) | [astrocalc.rs](../crates/mps-test/src/rapier/astrocalc.rs) | 0 | 8 |
+| `astrocalc` | `astrophysics_*` | 26 | — | dedicated 26 | [astrocalc.md](mps-core/astrocalc.md) | [astrocalc.rs](../crates/mps-test/src/rapier/astrocalc.rs) | 0 | 26 |
 | `balloon` | — | 1 | — | dedicated 1 | [balloon.md](mps-core/balloon.md) | [balloon.rs](../crates/mps-test/src/rapier/balloon.rs) | 1 | 1 |
 | `batch` | — | 5 | — | topology 1 / dedicated 4 | [batch.md](mps-core/batch.md) | [batch.rs](../crates/mps-test/src/rapier/batch.rs) | 0 | 5 |
 | `bounds` | — | 30 | — | read_param 12 / dedicated 18 | [bounds.md](mps-core/bounds.md) | [bounds.rs](../crates/mps-test/src/rapier/bounds.rs) | 30 | 13 |
@@ -44,7 +44,7 @@
 | `debug_recording` | `debug_recording_*` | 7 | — | dedicated 7 | [debug_recording.md](mps-core/debug_recording.md) | [debug_recording.rs](../crates/mps-test/src/rapier/debug_recording.rs) | 7 | 7 |
 | `disasters` | `disaster_*` | 9 | — | clear_param 1 / topology 4 / dedicated 4 | [disasters.md](mps-core/disasters.md) | [disasters.rs](../crates/mps-test/src/rapier/disasters.rs) | 9 | 9 |
 | `dop` | `collider_builder_create_*` | 2 | — | dedicated 2 | [dop.md](mps-core/dop.md) | [dop.rs](../crates/mps-test/src/rapier/dop.rs) | 2 | 0 |
-| `emag` | — | 44 | — | dedicated 44 | [emag.md](mps-core/emag.md) | [emag.rs](../crates/mps-test/src/rapier/emag.rs) | 0 | 18 |
+| `emag` | — | 44 | — | dedicated 44 | [emag.md](mps-core/emag.md) | [emag.rs](../crates/mps-test/src/rapier/emag.rs) | 0 | 36 |
 | `error` | — | 4 | — | clear_param 1 / dedicated 3 | [error.md](mps-core/error.md) | [error.rs](../crates/mps-test/src/rapier/error.rs) | 2 | 4 |
 | `events` | `world_*` | 66 | — | set_param 25 / clear_param 15 / read_param 11 / dedicated 15 | [events.md](mps-core/events.md) | [events.rs](../crates/mps-test/src/rapier/events.rs) | 42 | 58 |
 | `ffi/force_queue` | — | 1 | — | dedicated 1 | [ffi-force-queue.md](mps-core/ffi-force-queue.md) | [ffi.rs](../crates/mps-test/src/rapier/ffi.rs) | 1 | 1 |
@@ -59,12 +59,12 @@
 | `minecraft` | — | 1 | — | dedicated 1 | — | [minecraft.rs](../crates/mps-test/src/rapier/minecraft.rs) | 1 | 0 |
 | `molecular` | `molecular_*` | 8 | — | dedicated 8 | [molecular.md](mps-core/molecular.md) | [molecular.rs](../crates/mps-test/src/rapier/molecular.rs) | 5 | 5 |
 | `neural` | — | 6 | — | read_param 3 / dedicated 3 | [neural.md](mps-core/neural.md) | [neural.rs](../crates/mps-test/src/rapier/neural.rs) | 6 | 3 |
-| `nucphys` | `nuclear_*` | 18 | — | dedicated 18 | [nucphys.md](mps-core/nucphys.md) | [nucphys.rs](../crates/mps-test/src/rapier/nucphys.rs) | 0 | 8 |
+| `nucphys` | `nuclear_*` | 18 | — | dedicated 18 | [nucphys.md](mps-core/nucphys.md) | [nucphys.rs](../crates/mps-test/src/rapier/nucphys.rs) | 0 | 18 |
 | `parallel` | `parallel_*` | 2 | — | set_param 1 / read_param 1 | [parallel.md](mps-core/parallel.md) | [parallel.rs](../crates/mps-test/src/rapier/parallel.rs) | 0 | 2 |
 | `plasma_ffi` | `plasma_*` | 5 | — | dedicated 5 | [plasma_ffi.md](mps-core/plasma_ffi.md) | [plasma_ffi.rs](../crates/mps-test/src/rapier/plasma_ffi.rs) | 0 | 5 |
-| `qphys` | `quantum_*` | 27 | — | dedicated 27 | [qphys.md](mps-core/qphys.md) | [qphys.rs](../crates/mps-test/src/rapier/qphys.rs) | 0 | 6 |
+| `qphys` | `quantum_*` | 27 | — | dedicated 27 | [qphys.md](mps-core/qphys.md) | [qphys.rs](../crates/mps-test/src/rapier/qphys.rs) | 0 | 19 |
 | `query` | `query_*` | 24 | — | read_param 8 / dedicated 16 | [query.md](mps-core/query.md) | [query.rs](../crates/mps-test/src/rapier/query.rs) | 24 | 18 |
-| `rel` | `relativity_*` | 29 | — | dedicated 29 | [rel.md](mps-core/rel.md) | [rel.rs](../crates/mps-test/src/rapier/rel.rs) | 0 | 7 |
+| `rel` | `relativity_*` | 29 | — | dedicated 29 | [rel.md](mps-core/rel.md) | [rel.rs](../crates/mps-test/src/rapier/rel.rs) | 0 | 28 |
 | `rigid_body` | — | 72 | 4 | set_param 28 / read_param 11 / topology 12 / dedicated 21 | [rigid_body.md](mps-core/rigid_body.md) | [rigid_body.rs](../crates/mps-test/src/rapier/rigid_body.rs) | 51 | 68 |
 | `rope` | — | 1 | — | dedicated 1 | [rope.md](mps-core/rope.md) | [rope.rs](../crates/mps-test/src/rapier/rope.rs) | 1 | 1 |
 | `rope_knot` | `rope_knot_*` | 5 | — | set_param 1 / topology 1 / dedicated 3 | [rope_knot.md](mps-core/rope_knot.md) | [rope_knot.rs](../crates/mps-test/src/rapier/rope_knot.rs) | 5 | 5 |
@@ -124,15 +124,13 @@ cbindgen 不按 feature 过滤，所以这些符号出现在 `rigid_body.h` 里�
 
 | 模块 | 数量 |
 | --- | ---: |
-| `acoustics_ffi` | 7 |
+| `acoustics_ffi` | 1 |
 | `aerodynamics` | 3 |
 | `anvilkit` | 4 |
-| `astrocalc` | 18 |
-| `emag` | 26 |
+| `emag` | 8 |
 | `joints` | 13 |
-| `nucphys` | 10 |
-| `qphys` | 21 |
-| `rel` | 22 |
+| `qphys` | 8 |
+| `rel` | 1 |
 | `rigid_body` | 2 |
 | `terrain_gravity` | 6 |
 | `trajectory` | 1 |

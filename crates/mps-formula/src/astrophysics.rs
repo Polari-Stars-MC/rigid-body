@@ -798,7 +798,13 @@ pub fn mass_luminosity_relation(mass_solar: f64, exponent: f64) -> Option<f64> {
     if !mass_solar.is_finite() || mass_solar <= 0.0 || !exponent.is_finite() || exponent <= 0.0 {
         return None;
     }
-    Some(mass_solar.powf(exponent))
+    // `powf` 在大质量/大指数下会溢出到 `inf`。数学上「L → ∞」没错，但 ABI 契约
+    // 是「返回 TRUE 就意味着拿到了可用数字」，所以溢出必须拒绝。
+    let luminosity = mass_solar.powf(exponent);
+    if !luminosity.is_finite() {
+        return None;
+    }
+    Some(luminosity)
 }
 
 /// Eddington luminosity: L_Edd = 4*pi*G*M*c / kappa (W)
@@ -903,7 +909,17 @@ pub fn blackbody_spectral_radiance(wavelength: f64, temperature: f64) -> Option<
     if exponent > 700.0 {
         return Some(0.0);
     }
-    Some(2.0 * h * c * c / wavelength.powi(5) / (exponent.exp() - 1.0))
+    // `exp(x) - 1` 在 `x` 极小时完全相消：`x < 1e-16` 时 `exp(x)` 精确等于 1.0，
+    // 分母变成 0，结果 `inf`。必须用 `exp_m1`（= exp(x) - 1 的无相消实现）。
+    let denom = exponent.exp_m1();
+    if denom <= 0.0 {
+        return None;
+    }
+    let radiance = 2.0 * h * c * c / wavelength.powi(5) / denom;
+    if !radiance.is_finite() {
+        return None;
+    }
+    Some(radiance)
 }
 
 /// Wien's displacement law: lambda_max * T = b, where b = 2.898e-3 m·K
