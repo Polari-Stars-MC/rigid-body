@@ -161,6 +161,8 @@ mod tests {
             "ffi_finiteness",
             // 守恒律断言（动量/角动量/机械能），纯 C ABI 面，无生产侧对应模块。
             "conservation_laws",
+            // 解析解对照（热力学/相对论），跨两个 formula 模块，无单一生产侧对应模块。
+            "analytic_reference",
         ]
         .into_iter()
         .map(String::from)

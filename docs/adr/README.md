@@ -41,5 +41,6 @@
 | [0033](0033-per-step-exact-integration.md) | 每步解析积分替代中点法（修厚介质下溢归零） | 接受 |
 | [0034](0034-ffi-finiteness-sweep.md) | 零引用 C ABI 的有限性扫描（86 个入口，找出 2 个真 bug） | 接受 |
 | [0035](0035-conservation-laws.md) | 守恒律断言（动量/角动量/机械能 + SPH 密度解析对照） | 接受 |
+| [0036](0036-analytic-reference.md) | 解析解对照（热力学/相对论/等离子体，27 项恒等式优先） | 接受 |
 
 仓库根的 [DESIGN.md](../../DESIGN.md) 和 [OPTIMIZATION.md](../../OPTIMIZATION.md) 是被源码注释引用的章节索引，不是 ADR 的前身。它们的 `§` 编号继续留在原地。

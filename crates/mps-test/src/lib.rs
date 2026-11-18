@@ -28,6 +28,7 @@ pub mod rapier {
     pub mod acoustics;
     pub mod acoustics_ffi;
     pub mod aerodynamics;
+    pub mod analytic_reference;
     pub mod anvilkit;
     pub mod articulation;
     pub mod astrocalc;
