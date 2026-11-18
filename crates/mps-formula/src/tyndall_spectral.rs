@@ -906,3 +906,95 @@ pub fn inscatter_rgb_uniform(
     }
     spectral_samples_to_rgb(&radiance)
 }
+
+/// **粒子云 + 连续光谱 + CIE 积分 → 线性 sRGB**（ADR-0039）。
+///
+/// 这是丁达尔链条上最后一个补上的组合。此前能力是**二选一**：
+///
+/// | 入口 | 粒子驱动 | 连续光谱 |
+/// | --- | :---: | :---: |
+/// | `inscatter_spectral_full` | ✅ | ❌（三离散波长） |
+/// | `inscatter_rgb_uniform` | ❌（均匀介质） | ✅ |
+///
+/// 本函数两者兼有：粒子云的密度场 **+** 逐波长精确米氏 **+** CIE 加权积分。
+///
+/// ## 计算顺序（不可交换）
+///
+/// ```text
+/// for each λ:  x = πd/λ  →  米氏  →  σ_sca(λ), σ_ext(λ)
+///              粒子云沿视线积分  →  L(λ)          ← 非线性，必须先算
+/// 然后:        CIE 梯形积分 L(λ)  →  XYZ  →  线性 sRGB   ← 线性，可以后算
+/// ```
+///
+/// **不能先对 `σ` 积分再算一次散射** —— 散射亮度对 `σ` 是非线性的
+/// （`1 − exp(−τ)` 与 Beer–Lambert 累积），顺序反了会得到错误的量级。
+/// 这是辐射度学的基本要求（[ADR-0032](0032-cie-weighted-integration.md) 也强调过）。
+///
+/// ## 加速
+///
+/// 粒子位置与波长无关，所以均匀网格在**每个波长**重建是浪费。当前实现每个波长
+/// 各建一次（`inscatter_through_particles_accelerated` 内部处理）：`samples` 次
+/// 建网格。对 `samples = 15`、`N = 10⁶` 是 15 次 `O(N)` 建格 —— 相比每波长
+/// `O(steps·N)` 的纳米级开销可以接受，但不是最优。
+///
+/// # Parameters
+/// * `positions` 粒子位置
+/// * `diameter` / `refractive_index_*` 颗粒材料参数
+/// * `particle_mass` 单颗粒质量（kg）
+/// * `origin` / `direction`（**必须已归一化**）/ `length` 视线
+/// * `smoothing_radius` 核半径（须与 SPH 求解器一致）
+/// * `phase` 相函数值
+/// * `light_intensity` 入射光强度（白光谱）
+/// * `steps` 单个波长的散射积分段数
+/// * `samples` 光谱采样点数（推荐 `15~31`）
+///
+/// # Returns
+/// `Some(SpectralLuminance)`（**线性** sRGB，`ȳ` 归一化）；参数非法时 `None`。
+#[allow(clippy::too_many_arguments)]
+pub fn inscatter_rgb_from_particles(
+    positions: &[[f64; 3]],
+    diameter: f64,
+    refractive_index_real: f64,
+    refractive_index_imag: f64,
+    particle_mass: f64,
+    origin: [f64; 3],
+    direction: [f64; 3],
+    length: f64,
+    smoothing_radius: f64,
+    phase: f64,
+    light_intensity: f64,
+    steps: u32,
+    samples: u32,
+) -> Option<SpectralLuminance> {
+    if !particle_mass.is_finite() || particle_mass <= 0.0 {
+        return None;
+    }
+    let spectrum = mie_spectral_samples(
+        diameter,
+        refractive_index_real,
+        refractive_index_imag,
+        samples,
+    )?;
+
+    let mut radiance: Vec<(f64, f64)> = Vec::with_capacity(spectrum.len());
+    for (lambda_nm, sca, ext) in spectrum {
+        let optics = crate::tyndall_particles::ParticleOptics {
+            sigma_sca: sca,
+            sigma_ext: ext,
+            mass: particle_mass,
+        };
+        let l = crate::tyndall_particles::inscatter_through_particles_accelerated(
+            positions,
+            optics,
+            origin,
+            direction,
+            length,
+            smoothing_radius,
+            phase,
+            light_intensity,
+            steps,
+        )?;
+        radiance.push((lambda_nm, l));
+    }
+    spectral_samples_to_rgb(&radiance)
+}

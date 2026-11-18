@@ -782,3 +782,89 @@ pub extern "C" fn tyndall_spectral_full_from_world(
         }
     })
 }
+/// **粒子云 + 连续光谱 + CIE 积分 → 线性 sRGB**（ADR-0039）。
+///
+/// 这是丁达尔链条上最后一个组合入口。此前宿主只能二选一：
+///
+/// * `tyndall_spectral_full_from_world` —— 粒子驱动，但只有三离散波长
+/// * `tyndall_inscatter_rgb_uniform` —— CIE 积分，但只支持均匀介质
+///
+/// 本函数两者兼有。颗粒质量从世界里读取，不用宿主提供。
+///
+/// 输出是**线性** sRGB，显示端还需 gamma 编码。
+///
+/// # Safety
+/// `world` 必须有效；三个 `out_*` 必须可写。
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub extern "C" fn tyndall_rgb_from_world(
+    world: *const WorldHandle,
+    source: u32,
+    id: u32,
+    diameter: f64,
+    refractive_index_real: f64,
+    refractive_index_imag: f64,
+    origin: Vec3,
+    direction: Vec3,
+    length: f64,
+    smoothing_radius: f64,
+    phase: f64,
+    light_intensity: f64,
+    steps: u32,
+    samples: u32,
+    out_r: *mut f64,
+    out_g: *mut f64,
+    out_b: *mut f64,
+) -> Bool {
+    ffi_guard(Bool::FALSE, || {
+        if out_r.is_null() || out_g.is_null() || out_b.is_null() {
+            set_error(ERR_NULL_POINTER, "tyndall_rgb_from_world: out is null");
+            return Bool::FALSE;
+        }
+        let world = match unsafe { require_world(world, "tyndall_rgb_from_world") } {
+            Ok(w) => w,
+            Err(e) => return e,
+        };
+        if let Err(e) = require_finite_ray(origin, direction, "tyndall_rgb_from_world") {
+            return e;
+        }
+        let positions = match collect_positions(world, source, id) {
+            Ok(p) => p,
+            Err(e) => return e,
+        };
+        let mass = particle_mass(world, source, id);
+
+        match mps_formula::tyndall_spectral::inscatter_rgb_from_particles(
+            &positions,
+            diameter,
+            refractive_index_real,
+            refractive_index_imag,
+            mass,
+            [origin.x, origin.y, origin.z],
+            [direction.x, direction.y, direction.z],
+            length,
+            smoothing_radius,
+            phase,
+            light_intensity,
+            steps,
+            samples,
+        ) {
+            Some(v) => {
+                unsafe {
+                    *out_r = v.r;
+                    *out_g = v.g;
+                    *out_b = v.b;
+                }
+                clear_error();
+                Bool::TRUE
+            }
+            None => {
+                set_error(
+                    ERR_INVALID_ARGUMENT,
+                    "tyndall_rgb_from_world: invalid arguments",
+                );
+                Bool::FALSE
+            }
+        }
+    })
+}

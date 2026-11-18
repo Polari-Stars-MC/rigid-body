@@ -203,8 +203,20 @@ struct Bool tyndall_inscatter_rgb_uniform(
 | 米氏区振荡 | 可能被跳过 | 正确积分 |
 | 需要宿主调参 | 6 个 `sigma` | **0 个**（只有材料参数） |
 
-要"粒子云 + CIE 积分"的组合，当前需要宿主自己循环波长 —— 没有单入口。
+**粒子云 + CIE 积分**用 `tyndall_rgb_from_world`（ADR-0039）—— 两者兼有：
 
+```c
+struct Bool tyndall_rgb_from_world(
+    const struct WorldHandle *world, uint32_t source, uint32_t id,
+    double diameter, double refractive_index_real, double refractive_index_imag,
+    struct Vec3 origin, struct Vec3 direction,   // direction 必须已归一化
+    double length, double smoothing_radius,
+    double phase, double light_intensity,
+    uint32_t steps, uint32_t samples,
+    double *out_r, double *out_g, double *out_b);
+```
+
+颗粒质量从世界里读，不用宿主提供。输出是**线性** sRGB。
 ### 单独的色匹配函数
 
 想自己做光谱积分时，可以只要匹配函数：

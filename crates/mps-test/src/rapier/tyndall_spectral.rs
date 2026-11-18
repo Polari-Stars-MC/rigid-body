@@ -4,10 +4,11 @@
 //! 这与日落同源，也是分通道版本相对标量版本的唯一视觉价值。
 
 use mps_formula::tyndall_spectral::{
-    BLUE_NM, RED_NM, SpectralLuminance, SpectralOptics, cie_color_matching, inscatter_rgb_uniform,
-    inscatter_spectral, inscatter_spectral_full, inscatter_spectral_through_particles,
-    mie_spectral_samples, spectral_albedo, spectral_samples_to_rgb, spectral_transmittance,
-    wavelength_to_rgb, xyz_to_linear_srgb,
+    BLUE_NM, RED_NM, SpectralLuminance, SpectralOptics, cie_color_matching,
+    inscatter_rgb_from_particles, inscatter_rgb_uniform, inscatter_spectral,
+    inscatter_spectral_full, inscatter_spectral_through_particles, mie_spectral_samples,
+    spectral_albedo, spectral_samples_to_rgb, spectral_transmittance, wavelength_to_rgb,
+    xyz_to_linear_srgb,
 };
 
 const EPS: f64 = 1e-12;
@@ -1082,4 +1083,180 @@ fn inscatter_rgb_uniform_rejects_invalid() {
     assert!(inscatter_rgb_uniform(1e-6, 1.33, 0.0, -1.0, 1.0, 1.0, 10.0, 64, 15).is_none());
     assert!(inscatter_rgb_uniform(1e-6, 1.33, 0.0, 1e18, 1.0, 1.0, 0.0, 64, 15).is_none());
     assert!(inscatter_rgb_uniform(1e-6, 1.33, 0.0, 1e18, 1.0, 1.0, 10.0, 0, 15).is_none());
+}
+// ── 粒子云 + CIE（ADR-0039）──────────────────────────────────────────────
+
+/// 沿 X 轴排一列粒子（间距 `0.02`），返回位置数组。
+fn cloud(count: usize, spacing: f64) -> Vec<[f64; 3]> {
+    (0..count).map(|i| [i as f64 * spacing, 0.0, 0.0]).collect()
+}
+
+/// 细颗粒（瑞利区）的粒子云，CIE 积分后必须**偏蓝**。
+#[test]
+fn particle_cie_rgb_fine_particles_are_blue() {
+    let positions = cloud(200, 0.02);
+    let rgb = inscatter_rgb_from_particles(
+        &positions,
+        10e-9, // 10 nm 水滴 → x ≈ 0.06
+        1.33,
+        0.0,
+        1e-21, // 单颗粒质量
+        [-0.5, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+        6.0,
+        0.5,
+        1.0,
+        1.0,
+        64,
+        15,
+    )
+    .unwrap();
+    assert!(rgb.luminance() > 0.0, "光柱必须有亮度：{rgb:?}");
+    assert!(rgb.b > rgb.r, "细颗粒必须偏蓝：{rgb:?}");
+}
+
+/// 大颗粒（几何光学区）的粒子云必须**接近中性**。
+#[test]
+fn particle_cie_rgb_large_particles_are_neutral() {
+    let positions = cloud(200, 0.02);
+    let rgb = inscatter_rgb_from_particles(
+        &positions,
+        5e-6, // 5 µm → x ≈ 28
+        1.33,
+        0.0,
+        1e-10,
+        [-0.5, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+        6.0,
+        0.5,
+        1.0,
+        1.0,
+        64,
+        15,
+    )
+    .unwrap();
+    assert!(rgb.luminance() > 0.0);
+    let mx = rgb.r.max(rgb.g).max(rgb.b);
+    let mn = rgb.r.min(rgb.g).min(rgb.b);
+    assert!(mx / mn.max(1e-30) < 1.8, "大颗粒应接近中性：{rgb:?}");
+}
+
+/// 空粒子云 → 无散射 → 全黑。
+#[test]
+fn particle_cie_rgb_is_black_without_particles() {
+    let rgb = inscatter_rgb_from_particles(
+        &[],
+        1e-6,
+        1.33,
+        0.0,
+        1e-15,
+        [-0.5, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+        6.0,
+        0.5,
+        1.0,
+        1.0,
+        64,
+        15,
+    )
+    .unwrap();
+    assert_eq!(rgb, SpectralLuminance::ZERO);
+}
+
+/// 吸收性颗粒（烟灰）的光柱必须比透明颗粒**暗**。
+#[test]
+fn particle_cie_rgb_soot_is_dimmer_than_water() {
+    let positions = cloud(200, 0.02);
+    let args = (
+        1e-6,
+        1e-15,
+        [-0.5, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+        6.0,
+        0.5,
+        1.0,
+        1.0,
+        64,
+        15,
+    );
+    let water = inscatter_rgb_from_particles(
+        &positions, args.0, 1.5, 0.0, args.1, args.2, args.3, args.4, args.5, args.6, args.7,
+        args.8, args.9,
+    )
+    .unwrap();
+    let soot = inscatter_rgb_from_particles(
+        &positions, args.0, 1.5, 0.5, args.1, args.2, args.3, args.4, args.5, args.6, args.7,
+        args.8, args.9,
+    )
+    .unwrap();
+    assert!(
+        soot.luminance() < water.luminance(),
+        "烟灰必须比透明颗粒暗：{} vs {}",
+        soot.luminance(),
+        water.luminance()
+    );
+}
+
+#[test]
+fn particle_cie_rgb_rejects_invalid() {
+    let positions = cloud(50, 0.02);
+    let base = (
+        1e-6,
+        1.33,
+        0.0,
+        1e-15,
+        [-0.5, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+        6.0,
+        0.5,
+        1.0,
+        1.0,
+    );
+    // 质量非正。
+    let bad = (
+        base.0, base.1, base.2, 0.0, base.4, base.5, base.6, base.7, base.8, base.9,
+    );
+    assert!(
+        inscatter_rgb_from_particles(
+            &positions, bad.0, bad.1, bad.2, bad.3, bad.4, bad.5, bad.6, bad.7, bad.8, bad.9, 64,
+            15
+        )
+        .is_none()
+    );
+    // 未归一化方向。
+    let bad_dir = (
+        base.0,
+        base.1,
+        base.2,
+        base.3,
+        base.4,
+        [2.0, 0.0, 0.0],
+        base.6,
+        base.7,
+        base.8,
+        base.9,
+    );
+    assert!(
+        inscatter_rgb_from_particles(
+            &positions, bad_dir.0, bad_dir.1, bad_dir.2, bad_dir.3, bad_dir.4, bad_dir.5,
+            bad_dir.6, bad_dir.7, bad_dir.8, bad_dir.9, 64, 15
+        )
+        .is_none()
+    );
+    // 直径非正。
+    assert!(
+        inscatter_rgb_from_particles(
+            &positions, 0.0, base.1, base.2, base.3, base.4, base.5, base.6, base.7, base.8,
+            base.9, 64, 15
+        )
+        .is_none()
+    );
+    // 采样点不足。
+    assert!(
+        inscatter_rgb_from_particles(
+            &positions, base.0, base.1, base.2, base.3, base.4, base.5, base.6, base.7, base.8,
+            base.9, 64, 1
+        )
+        .is_none()
+    );
 }

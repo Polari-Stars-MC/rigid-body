@@ -44,5 +44,6 @@
 | [0036](0036-analytic-reference.md) | 解析解对照（热力学/相对论/等离子体，27 项恒等式优先） | 接受 |
 | [0037](0037-historical-defect-regressions.md) | 历史缺陷的回归防线（光子动量 5 项 + SPH 力账 3 项，轮胎诚实记为未覆盖） | 接受 |
 | [0038](0038-tire-force-invariants.md) | 轮胎力的量纲与物理不变量（μ 线性 1e-9 + 库仑上限 + 饱和；历史缺陷 #2 补齐） | 接受 |
+| [0039](0039-particle-cie-rgb.md) | 粒子云 + CIE 积分（补上链条最后一个能力缺口） | 接受 |
 
 仓库根的 [DESIGN.md](../../DESIGN.md) 和 [OPTIMIZATION.md](../../OPTIMIZATION.md) 是被源码注释引用的章节索引，不是 ADR 的前身。它们的 `§` 编号继续留在原地。

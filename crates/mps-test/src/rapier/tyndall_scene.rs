@@ -15,7 +15,7 @@ use mps_core::rapier::fluid_sph::{fluid_add_particle, fluid_create};
 use mps_core::rapier::tyndall_scene::{
     TYNDALL_SOURCE_FLUID, TYNDALL_SOURCE_GRANULAR, tyndall_bounds_from_world,
     tyndall_collect_particles, tyndall_density_from_world, tyndall_inscatter_from_world,
-    tyndall_source_abi_version, tyndall_spectral_from_world,
+    tyndall_rgb_from_world, tyndall_source_abi_version, tyndall_spectral_from_world,
 };
 use mps_core::rapier::world::{world_create, world_destroy};
 
@@ -309,6 +309,153 @@ fn spectral_from_world_rejects_bad_input() {
         Bool::FALSE
     );
     assert_eq!((r, g, b), (-1.0, -1.0, -1.0), "failed call must not write");
+
+    world_destroy(world);
+}
+/// `tyndall_rgb_from_world` 的三输出契约：成功时全部写入，失败时一个都不动。
+///
+/// 按本文件的约定，这里只覆盖**入口契约**；粒子云 + CIE 的物理正确性在
+/// `crate::rapier::tyndall_spectral` 里测过。
+#[test]
+fn rgb_from_world_writes_three_outputs() {
+    let world = make_world();
+    let id = make_smoke(world, 40);
+
+    let (mut r, mut g, mut b) = (-1.0f64, -1.0f64, -1.0f64);
+    let ok = tyndall_rgb_from_world(
+        world,
+        TYNDALL_SOURCE_FLUID,
+        id,
+        1e-6, // 直径
+        1.33, // n
+        0.0,  // kappa（透明）
+        Vec3 {
+            x: -0.5,
+            y: 0.0,
+            z: 0.0,
+        },
+        Vec3 {
+            x: 1.0,
+            y: 0.0,
+            z: 0.0,
+        },
+        6.0, // 视线长度
+        0.8, // 核半径
+        1.0, // phase
+        1.0, // 入射光
+        32,  // steps
+        9,   // samples
+        &mut r,
+        &mut g,
+        &mut b,
+    );
+    assert_eq!(ok, Bool::TRUE, "rgb 入口应成功");
+    assert!(
+        r >= 0.0 && g >= 0.0 && b >= 0.0,
+        "三个输出都必须非负：({r}, {g}, {b})"
+    );
+    assert!(
+        r.is_finite() && g.is_finite() && b.is_finite(),
+        "三个输出都必须有限"
+    );
+
+    world_destroy(world);
+}
+
+#[test]
+fn rgb_from_world_rejects_invalid_without_writing() {
+    let world = make_world();
+    let id = make_smoke(world, 10);
+
+    // null 输出。
+    let (mut g, mut b) = (0.0f64, 0.0f64);
+    assert_eq!(
+        tyndall_rgb_from_world(
+            world,
+            TYNDALL_SOURCE_FLUID,
+            id,
+            1e-6,
+            1.33,
+            0.0,
+            Vec3::default(),
+            Vec3 {
+                x: 1.0,
+                y: 0.0,
+                z: 0.0
+            },
+            6.0,
+            0.8,
+            1.0,
+            1.0,
+            32,
+            9,
+            std::ptr::null_mut(),
+            &mut g,
+            &mut b,
+        ),
+        Bool::FALSE
+    );
+    assert_eq!(last_error_code(), ERR_NULL_POINTER);
+
+    // 未归一化方向：失败且不写。
+    let (mut r, mut g2, mut b2) = (-1.0f64, -1.0f64, -1.0f64);
+    assert_eq!(
+        tyndall_rgb_from_world(
+            world,
+            TYNDALL_SOURCE_FLUID,
+            id,
+            1e-6,
+            1.33,
+            0.0,
+            Vec3::default(),
+            Vec3 {
+                x: 3.0,
+                y: 0.0,
+                z: 0.0
+            },
+            6.0,
+            0.8,
+            1.0,
+            1.0,
+            32,
+            9,
+            &mut r,
+            &mut g2,
+            &mut b2,
+        ),
+        Bool::FALSE
+    );
+    assert_eq!((r, g2, b2), (-1.0, -1.0, -1.0), "失败时不得写入");
+
+    // 未知来源。
+    let (mut r3, mut g3, mut b3) = (0.0f64, 0.0f64, 0.0f64);
+    assert_eq!(
+        tyndall_rgb_from_world(
+            world,
+            99,
+            id,
+            1e-6,
+            1.33,
+            0.0,
+            Vec3::default(),
+            Vec3 {
+                x: 1.0,
+                y: 0.0,
+                z: 0.0
+            },
+            6.0,
+            0.8,
+            1.0,
+            1.0,
+            32,
+            9,
+            &mut r3,
+            &mut g3,
+            &mut b3,
+        ),
+        Bool::FALSE
+    );
+    assert_eq!(last_error_code(), ERR_INVALID_ARGUMENT);
 
     world_destroy(world);
 }

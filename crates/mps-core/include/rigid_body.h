@@ -12186,6 +12186,39 @@ struct Bool tyndall_spectral_full_from_world(const struct WorldHandle *world,
                                              double *out_b);
 
 /**
+ * **粒子云 + 连续光谱 + CIE 积分 → 线性 sRGB**（ADR-0039）。
+ *
+ * 这是丁达尔链条上最后一个组合入口。此前宿主只能二选一：
+ *
+ * * `tyndall_spectral_full_from_world` —— 粒子驱动，但只有三离散波长
+ * * `tyndall_inscatter_rgb_uniform` —— CIE 积分，但只支持均匀介质
+ *
+ * 本函数两者兼有。颗粒质量从世界里读取，不用宿主提供。
+ *
+ * 输出是**线性** sRGB，显示端还需 gamma 编码。
+ *
+ * # Safety
+ * `world` 必须有效；三个 `out_*` 必须可写。
+ */
+struct Bool tyndall_rgb_from_world(const struct WorldHandle *world,
+                                   uint32_t source,
+                                   uint32_t id,
+                                   double diameter,
+                                   double refractive_index_real,
+                                   double refractive_index_imag,
+                                   struct Vec3 origin,
+                                   struct Vec3 direction,
+                                   double length,
+                                   double smoothing_radius,
+                                   double phase,
+                                   double light_intensity,
+                                   uint32_t steps,
+                                   uint32_t samples,
+                                   double *out_r,
+                                   double *out_g,
+                                   double *out_b);
+
+/**
  * # Safety
  *
  * `voxels` must point to at least `size_x * size_y * size_z` readable bytes
