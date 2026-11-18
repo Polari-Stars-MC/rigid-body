@@ -8,9 +8,29 @@ fixture（`crates/mps-test/java/`）是逐条可运行的参考实现——**先
 
 - `EXPECTED_ABI_VERSION` 必须 **2**（`bdc54d2` 起）。加载时
   `abiVersion()` ≠ 2 拒绝启动并给出升级提示。
-- 库名不变：`System.load(.../mps_rigid_body.dll)`（Windows）/
-  `libmps_rigid_body.so`（Linux）。类名 FQN 的 `_1` 转义只影响
-  `Java_org_polaris2023_mps_*` 符号生成，Java 侧无需感知。
+- **动态库文件名是 `mps`**，不是 `mps_rigid_body`：
+
+  | 平台 | 产物 |
+  | --- | --- |
+  | Windows | `mps.dll` |
+  | Linux | `libmps.so` |
+  | macOS | `libmps.dylib` |
+
+  依据：`crates/mps-jni/Cargo.toml` 的 `[lib] name = "mps"`；构建产物实测
+  也是 `mps.dll`。所以加载语句是：
+
+  ```java
+  System.load(.../mps.dll);          // Windows
+  System.load(.../libmps.so);        // Linux
+  ```
+
+  `mps_rigid_body` 只出现在两处：**Java 包名**
+  （`org.polaris2023.mps_rigid_body.ffi`）和 JNI 符号名
+  （`Java_org_polaris2023_mps_rigid_body_*`）。类名 FQN 的 `_1` 转义只影响
+  符号生成，Java 侧无需感知。
+
+  2026-11-16 修正：本节此前写的是 `mps_rigid_body.dll`，与产物不符 ——
+  照抄会导致 `UnsatisfiedLinkError`。
 
 ## 1. Floating origin（cosmos 世界）
 
