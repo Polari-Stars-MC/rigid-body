@@ -285,6 +285,8 @@ mod tests {
             "cross_world",
             "drag_terminal_velocity",
             "hohmann_transfer_validation",
+            // C ABI 参数落地契约（ADR-0040）：gravity_scale / lock / 阻尼 / step_n。
+            "abi_contract",
         ]
         .into_iter()
         .collect();

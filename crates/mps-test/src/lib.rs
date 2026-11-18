@@ -2,6 +2,7 @@
 // Each module mirrors a rapier submodule from mps-core
 
 pub mod cosmos {
+    pub mod abi_contract;
     pub mod arena;
     pub mod bodies;
     pub mod celestial_rotation;
