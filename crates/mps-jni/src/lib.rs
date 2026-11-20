@@ -1012,6 +1012,11 @@ jni!(void jointBuilderSetMotorVelocity(long builder, int axis, double target_vel
 jni!(void jointBuilderSetMotorPosition(long builder, int axis, double target_pos, double stiffness, double damping) { jo::joint_builder_set_motor_position(m::<JBH>(builder), joint_axis(axis), target_pos, stiffness, damping); });
 jni!(long worldInsertImpulseJoint(long world, long body1, long body2, long builder, int wake_up) { handle_or_fail(jo::world_insert_impulse_joint(m::<WH>(world), body1 as RRaw, body2 as RRaw, m::<JBH>(builder), jb(wake_up)) as u64) });
 jni!(boolean worldRemoveImpulseJoint(long world, long handle, int wake_up) { jo::world_remove_impulse_joint(m::<WH>(world), handle as JRaw, jb(wake_up)).0 as jbyte });
+// impulse joint 的力/力矩伺服（C ABI `world_joint_set_motor`）。multibody 那套另有
+// `worldMultibodyJointSetMotor`；两边签名不同，不能互相替代——Java 侧分别声明。
+jni!(boolean worldJointSetMotor(long world, long handle, int axis, double target, double stiffness, double damping, double max_force) {
+    jo::world_joint_set_motor(m::<WH>(world), handle as JRaw, axis as u32, target, stiffness, damping, max_force).0 as jbyte
+});
 
 // ---- multibody joint（解运动方程那套）----
 jni!(long worldInsertMultibodyJoint(long world, long body1, long body2, long builder, int wake_up) {
@@ -2264,6 +2269,17 @@ jni_space!(void cosmosWorldRadioRemoveReflector(long world, long body) {
         world as isize as *mut CosmosWorld,
         body as u64,
     );
+});
+
+// 注销单个收发器节点。`nodeId` 是数值 id（不是位型编码）——与
+// `cosmosWorldRadioSubmitNodes` 里 `id` 槽的写法一致。
+// C ABI 是 `void`，Java 侧声明为 `boolean`，这里恒返回 1 表示"已处理"。
+jni_space!(boolean cosmosWorldRadioRemoveNode(long world, long nodeId) {
+    mps_cosmos::ffi::cosmos_world_radio_unregister_node(
+        world as isize as *mut CosmosWorld,
+        nodeId as f64,
+    );
+    1
 });
 
 // 批量提交收发器节点：`values` 指向 `count * 18` 个 f64（native 直接内存）。
